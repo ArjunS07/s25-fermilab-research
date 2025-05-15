@@ -23,6 +23,7 @@
 \usepackage{etoolbox}
 \usepackage{animate}
 \usepackage{multimedia}
+\usepackage{media9}
 
 
 \newcommand{\bx}{\mathbf{x}}
@@ -52,12 +53,66 @@
   \titlepage
 \end{frame}
 
-\begin{frame}[plain]{Contents}
+\begin{frame}[plain]
   \tableofcontents
 \end{frame}
 
 \section{Particle physics simulations}
-\begin{frame}{}
+\begin{frame}{Collisions}
+  \centering
+  High energy protons \pause $\xrightarrow[]{\text{collisions}}$ Non-isolatable elementary particles \pause $\xrightarrow[]{\text{radiate}}$ Parton shower \pause $\xrightarrow[\text{hadronization}]{\text{cooling}}$Jet
+
+  \vspace{1.5cm}
+
+  \pause Initial particles $\rightarrow$ Jet constituents
+\end{frame}
+
+\begin{frame}{Simulation-based inference}
+  \begin{columns}
+    \begin{column}{0.5\textwidth}
+      \begin{itemize}
+        \item Input: $z_0$, $\beta$
+        \pause
+        \item Latent states: $z_i \sim p_i (z_i | \beta, z_{<i})$
+        \pause
+        \item Output: $o \sim p(o | \beta, z)$
+      \end{itemize}
+    \end{column}
+    \pause
+    \begin{column}{0.5\textwidth}
+      \begin{align*}
+        p(\beta | o) &= \frac{p(o|\beta)p(\beta)}{\int p(\beta') p(o | \beta') \, d\beta'}
+        p(o | \beta) &= \int  p(x, \beta | \theta) dz
+      \end{align*}
+    \end{column}
+  \end{columns}
+  
+  \end{frame}
+
+\begin{frame}{Limitations}
+  \begin{itemize}
+    \item Fit simplified phenomenological models to parton shower, hadronization
+    \pause
+    \item Slow: ~10 s / jet
+    \pause
+    \item \textcolor{teal}{One-shot generation: 3-5 OoM speedup!}
+  \end{itemize}
+\end{frame}
+
+
+\begin{frame}{Representing jets}
+
+  \begin{figure}
+    \centering
+    \includegraphics[width=0.5\textwidth]{figs/point-cloud-Gouskos-2018.png}
+  \end{figure}
+  \begin{center}
+    \tiny{Gouskos and Qu 2018}
+  \end{center}
+
+  \pause
+  \centering
+  Particle clouds + feature vectors
   
 \end{frame}
 
@@ -66,10 +121,14 @@
 
 Given: $\bx_1, \bx_2, \dots \bx_N$ from $p_\text{data}(\bx)$
 \vspace{0.25cm}
+\pause
 
 Learn $f_\theta$ s.t.
+\begin{eqnarray*}
+    p_{\theta}(\bx) &= \frac{e^{f_\theta(\bx)}}{Z_\theta}
+\end{eqnarray*}
+\pause
 \begin{align*}
-    p_{\theta}(\bx) &= \frac{e^{f_\theta(\bx)}}{Z_\theta}\\
     \textcolor{red}{Z_\theta} &= \textcolor{red}{\int e^{f_\theta(\bx)} \,d\bx}
 \end{align*}
 
@@ -81,11 +140,13 @@ Learn $f_\theta$ s.t.
       \[
     p_{\theta}(\bx) = \frac{e^{f_\theta(\bx)}}{Z_\theta}
     \]
+    \pause
     \begin{align*}
       \nbx \log \pt (\bx) &= \nbx f_\theta(\bx) - \nbx \log Z_\theta\\
                           &= \nbx f_\theta(\bx) = s_\theta(\bx)
     \end{align*}
     \end{column}
+    \pause
     \begin{column}{0.5\textwidth}
       \begin{figure}
       \centering
@@ -94,6 +155,27 @@ Learn $f_\theta$ s.t.
     \end{column}
   \end{columns}
 \end{frame}
+
+\begin{frame}{Sampling}
+  \begin{columns}
+    \begin{column}{0.5\textwidth}
+      \begin{align*}
+        \bx_{t+1} &= \bx_{t} + \alpha \cdot s_\theta(\bx_t) \\
+        x_0 &\sim \pi_{\text{init}}\\
+        t &= 0, 1, \dots T \to \infty
+      \end{align*}
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \centering
+      \begin{figure}
+        \centering
+        \includegraphics[width=\textwidth]{figs/gen/gaussian_mixture_score_init.png}
+      \end{figure}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+
 
 \begin{frame}{Sampling with Langevin dynamics}
   \begin{columns}
@@ -116,14 +198,19 @@ Learn $f_\theta$ s.t.
 \end{frame}
 
 \begin{frame}{Training objective for score}
+  \pause
 \begin{align*}
       \mathcal{L}_\text{ESM} (\theta) &= \frac{1}{2}\mathbb{E}_{p_\text{data}(\bx)} \left[ || \textcolor{red}{\nbx \log p_\text{data}(\bx)} - s_\theta(\bx) ||_2^2\right]\\
+      \pause
       \iff \mathcal{L}_\text{ISM}(\theta) &= \frac{1}{2}\mathbb{E}_{p_\text{data}(\bx)} \left[ s_\theta(\bx)^2\right] + \mathbb{E}_{p_\text{data}(\bx)}\left[\nbx s_\theta(\bx) \right]\\
+      \pause
       \approx & \frac{1}{N} \sum\limits_{i=1}^{N}  \left[\frac{1}{2} s_\theta(\bx_i)^2 + \nabla_{\bx_i} s_\theta(\bx_i)  \right]
   \end{align*}
 \end{frame}
 
+
 \begin{frame}{Drawbacks}
+  \pause
   \begin{columns}
     \begin{column}{0.4\textwidth}
       \centering
@@ -148,11 +235,13 @@ Learn $f_\theta$ s.t.
         \includegraphics[height=0.32\textheight]{figs/gen/score_field_training_final}
       \end{figure}
     \end{column}
+    \pause
     \begin{column}{0.6\textwidth}
       \centering
       \begin{align*}
         &\frac{1}{2}\mathbb{E}_{p_\text{data}(\bx)} \left[ s_\theta(\bx)^2\right] + \mathbb{E}_{p_\text{data}(\bx)}\left[\nbx s_\theta(\bx) \right]
       \end{align*}
+      \pause
       
       \rule{0.8\textwidth}{0.4pt}
       
@@ -234,7 +323,9 @@ Learn $f_\theta$ s.t.
   \begin{align*}
     \btx_0 &\sim \pi_\text{init}\\
   \end{align*}
+  \pause
   From $i = 1, 2, \dots L$ with $\frac{\sigma_1}{\sigma_2} = \cdots = \frac{\sigma_{L-1}}{\sigma_L} > 1$
+  \pause
   \begin{align*}
     \alpha_i &= \gamma \frac{\sigma_i^2}{\sigma_L^2}\\
     \btx_t &= \btx_{t-1} + \alpha_i s_\theta(\btx_{t-1}, \sigma_i) + \epsilon \alpha_i \mathbf{z}_t\\
@@ -246,6 +337,7 @@ Learn $f_\theta$ s.t.
   \begin{align*}
    p(\bx | \by) &= \frac{p(\by | \bx) p(\bx)}{\textcolor{red}{p(\by)}}
   \end{align*}
+  \pause
   \begin{align*}
     \nbx \log p(\bx | \by) &= \nbx \log p(\by | \bx) + \nbx \log p(\bx) - \nbx \log p(\by)\\
                            &= \nbx \log p(\bx) + \nbx \log p(\by | \bx) \\
@@ -263,88 +355,126 @@ Learn $f_\theta$ s.t.
 \end{frame}
 
 \section{Equivariant learning}
-\begin{frame}{Definitions}
-  
+\begin{frame}{}
+  \begin{itemize}
+    \item Equivariant: $f(g(I)) = g'(f(I))$, $g \in G, g' \in G'$
+    \pause
+    \item Same-equivariant: $f(g(I)) = g(f(I))$
+    \pause
+    \item Invariant: $f(g(I)) = f(I)$
+  \end{itemize}
+
+  \pause
+
+  \vspace{0.5cm}
+  \begin{itemize}
+    \item Images: translation, rotation, reflection
+    \item Graphs, sets: permutation
+  \end{itemize}
+
+  \pause
+
+  \vspace{1.5cm}
+  \centering
+  \textbf{Inductive biases}
+\end{frame}
+
+\begin{frame}{In ML}
+  \begin{enumerate}
+    \item Data augmentation
+    \pause
+    \item Model architecture
+  \end{enumerate}
 \end{frame}
 
 \begin{frame}{Equivariant diffusion models}
-  
+    \begin{figure}
+    \centering
+    \includegraphics[height=0.75\textheight]{figs/equivariant-rotation-pcloud-molecule-Hoogeboom2022}
+  \end{figure}
+  \centering  
+  \small{Hoogeboom et al. 2022}
 \end{frame}
 
-
-\begin{frame}{Lorentz equivariance}
-  
-\end{frame}
-
-\begin{frame}{Lorentz-equivariant learning}
-
+\begin{frame}{Lorentz equivariance in diffusion?}  
+  \pause
+  \begin{align*}
+    \text{eg.} \begin{pmatrix}
+      \gamma & -\gamma \beta & 0 & 0\\
+      -\gamma \beta & \gamma & 0 & 0\\
+      0 & 0 & 1 & 0\\
+      0 & 0 & 0 & 1
+    \end{pmatrix}
+  \end{align*}
+  \centering
+  (relative velocity $\beta = \frac{v}{c}$, boost factor $\gamma = \frac{1}{(1-\beta^2)^2}$)
 \end{frame}
 
 \section{Appendices}
 
-\begin{frame}{Artificial neuron}
+% \begin{frame}{Artificial neuron}
 
-\begin{columns}
-  \begin{column}{0.75\textwidth}
-    \centering
-    \begin{tikzpicture}[
-      scale=0.8, transform shape,
-      node distance=1.2cm and 1.8cm,
-      input/.style={circle, draw, minimum size=0.6cm},
-      sum/.style={circle, draw, minimum size=0.6cm, font=\large},
-      nonlin/.style={circle, draw, minimum size=0.8cm},
-      output/.style={circle, draw, minimum size=0.6cm}
-    ]
+% \begin{columns}
+%   \begin{column}{0.75\textwidth}
+%     \centering
+%     \begin{tikzpicture}[
+%       scale=0.8, transform shape,
+%       node distance=1.2cm and 1.8cm,
+%       input/.style={circle, draw, minimum size=0.6cm},
+%       sum/.style={circle, draw, minimum size=0.6cm, font=\large},
+%       nonlin/.style={circle, draw, minimum size=0.8cm},
+%       output/.style={circle, draw, minimum size=0.6cm}
+%     ]
 
-    % Input nodes
-    \node[input] (c) {$1$};
-    \node[input, below=of c] (x1) {$x_1$};
-    \node[input, below=of x1] (x2) {$x_2$};
-    \node[input, below=of x2] (xn) {$x_n$};
+%     % Input nodes
+%     \node[input] (c) {$1$};
+%     \node[input, below=of c] (x1) {$x_1$};
+%     \node[input, below=of x1] (x2) {$x_2$};
+%     \node[input, below=of x2] (xn) {$x_n$};
 
-    % Summation node
-    \node[sum, right=2.5cm of x1] (sum) {$\Sigma$};
+%     % Summation node
+%     \node[sum, right=2.5cm of x1] (sum) {$\Sigma$};
 
-    % Nonlinearity node
-    \node[nonlin, right=2.2cm of sum] (nonlin) {};
+%     % Nonlinearity node
+%     \node[nonlin, right=2.2cm of sum] (nonlin) {};
 
-    % Draw sigmoid inside nonlinearity node
-    \begin{scope}
-      \clip (nonlin) circle(0.25cm); % Clip to circle around nonlin node
-      \begin{scope}[shift={(nonlin.center)}] % Shift plot so (0,0) is at center of nonlin
-        \draw[domain=-2:2, variable=\x, samples=100, thick]
-          plot ({\x*0.2}, {0.35/(1 + exp(-3*\x)) - 0.175});
-      \end{scope}
-    \end{scope}
+%     % Draw sigmoid inside nonlinearity node
+%     \begin{scope}
+%       \clip (nonlin) circle(0.25cm); % Clip to circle around nonlin node
+%       \begin{scope}[shift={(nonlin.center)}] % Shift plot so (0,0) is at center of nonlin
+%         \draw[domain=-2:2, variable=\x, samples=100, thick]
+%           plot ({\x*0.2}, {0.35/(1 + exp(-3*\x)) - 0.175});
+%       \end{scope}
+%     \end{scope}
 
-    % Output node
-    \node[output, right=2.2cm of nonlin] (out) {$y_{\text{pred}}$};
+%     % Output node
+%     \node[output, right=2.2cm of nonlin] (out) {$y_{\text{pred}}$};
 
-    % Arrows from inputs to sum node
-    \draw[->] (c) -- node[above] {\scriptsize \textcolor{teal}{$w_0$}} (sum);
-    \draw[->] (x1) -- node[above] {\scriptsize \textcolor{teal}{$w_1$}} (sum);
-    \draw[->] (x2) -- node[above] {\scriptsize \textcolor{teal}{$w_2$}} (sum);
-    \draw[->] (xn) -- node[above] {\scriptsize \textcolor{teal}{$w_n$}} node[pos=0.0, below, xshift=2cm] {\scriptsize \textcolor{teal}{Learnable weights}} (sum);
+%     % Arrows from inputs to sum node
+%     \draw[->] (c) -- node[above] {\scriptsize \textcolor{teal}{$w_0$}} (sum);
+%     \draw[->] (x1) -- node[above] {\scriptsize \textcolor{teal}{$w_1$}} (sum);
+%     \draw[->] (x2) -- node[above] {\scriptsize \textcolor{teal}{$w_2$}} (sum);
+%     \draw[->] (xn) -- node[above] {\scriptsize \textcolor{teal}{$w_n$}} node[pos=0.0, below, xshift=2cm] {\scriptsize \textcolor{teal}{Learnable weights}} (sum);
 
-    % Arrows between processing stages
-    \draw[->] (sum) -- (nonlin);
-    \draw[->] (nonlin) -- (out);
+%     % Arrows between processing stages
+%     \draw[->] (sum) -- (nonlin);
+%     \draw[->] (nonlin) -- (out);
 
-    % Label below nonlinearity
-    \node[below=0.2cm of xn] {\scriptsize Inputs};
-    \node[below=0.2cm of nonlin] {\scriptsize Nonlinear function $g$};
-    \node[below=0.2cm of out] {\scriptsize Output};
+%     % Label below nonlinearity
+%     \node[below=0.2cm of xn] {\scriptsize Inputs};
+%     \node[below=0.2cm of nonlin] {\scriptsize Nonlinear function $g$};
+%     \node[below=0.2cm of out] {\scriptsize Output};
 
-  \end{tikzpicture}
+%   \end{tikzpicture}
 
-  \end{column}
-  \begin{column}{0.25\textwidth}
-    \[
-    y_\text{pred} = g(w_0 + \mathbf{w}^T \cdot \mathbf{x})
-    \]
-  \end{column}
-\end{columns}
-\end{frame}
+%   \end{column}
+%   \begin{column}{0.25\textwidth}
+%     \[
+%     y_\text{pred} = g(w_0 + \mathbf{w}^T \cdot \mathbf{x})
+%     \]
+%   \end{column}
+% \end{columns}
+% \end{frame}
 
 
 \begin{frame}{Derivation of divergence objective for score}
