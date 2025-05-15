@@ -67,8 +67,15 @@
   \pause Initial particles $\rightarrow$ Jet constituents
 \end{frame}
 
-\begin{frame}{Simulation-based inference}
-  \begin{columns}
+\begin{frame}{Simulation-based hypothesis testing}
+    \begin{columns}
+   \pause
+    \begin{column}{0.5\textwidth}
+      \begin{align*}
+        p(\beta | o) = \frac{p(o|\beta)p(\beta)}{\int p(\beta') p(o | \beta') \, d\beta'}\\
+      \end{align*}
+    \end{column}
+    \pause
     \begin{column}{0.5\textwidth}
       \begin{itemize}
         \item Input: $z_0$, $\beta$
@@ -77,20 +84,19 @@
         \pause
         \item Output: $o \sim p(o | \beta, z)$
       \end{itemize}
-    \end{column}
-    \pause
-    \begin{column}{0.5\textwidth}
+      \pause
       \begin{align*}
-        p(\beta | o) &= \frac{p(o|\beta)p(\beta)}{\int p(\beta') p(o | \beta') \, d\beta'}
-        p(o | \beta) &= \int  p(x, \beta | \theta) dz
+          p(o | \beta) &= \int  p(x, \beta | \theta) dz
       \end{align*}
     \end{column}
+   
   \end{columns}
   
   \end{frame}
 
 \begin{frame}{Limitations}
   \begin{itemize}
+    \pause
     \item Fit simplified phenomenological models to parton shower, hadronization
     \pause
     \item Slow: ~10 s / jet
@@ -101,6 +107,8 @@
 
 
 \begin{frame}{Representing jets}
+
+  \pause
 
   \begin{figure}
     \centering
@@ -117,7 +125,9 @@
 \end{frame}
 
 \section{Diffusion Models}
-\begin{frame}{Generative modeling from PDFs}
+\begin{frame}{Generative modeling}
+
+\pause
 
 Given: $\bx_1, \bx_2, \dots \bx_N$ from $p_\text{data}(\bx)$
 \vspace{0.25cm}
@@ -200,31 +210,31 @@ Learn $f_\theta$ s.t.
 \begin{frame}{Training objective for score}
   \pause
 \begin{align*}
-      \mathcal{L}_\text{ESM} (\theta) &= \frac{1}{2}\mathbb{E}_{p_\text{data}(\bx)} \left[ || \textcolor{red}{\nbx \log p_\text{data}(\bx)} - s_\theta(\bx) ||_2^2\right]\\
-      \pause
-      \iff \mathcal{L}_\text{ISM}(\theta) &= \frac{1}{2}\mathbb{E}_{p_\text{data}(\bx)} \left[ s_\theta(\bx)^2\right] + \mathbb{E}_{p_\text{data}(\bx)}\left[\nbx s_\theta(\bx) \right]\\
-      \pause
+      \mathcal{L}_\text{ESM} (\theta) &= \frac{1}{2}\mathbb{E}_{p_\text{data}(\bx)} \left[ || \textcolor{red}{\nbx \log p_\text{data}(\bx)} - s_\theta(\bx) ||_2^2\right]
+  \end{align*}
+  \pause
+  \begin{align*}
+      \iff \mathcal{L}_\text{ISM}(\theta) &= \frac{1}{2}\mathbb{E}_{p_\text{data}(\bx)} \left[ s_\theta(\bx)^2\right] + \mathbb{E}_{p_\text{data}(\bx)}\left[\nbx s_\theta(\bx) \right]
+  \end{align*}
+  \pause
+  \begin{align*}
       \approx & \frac{1}{N} \sum\limits_{i=1}^{N}  \left[\frac{1}{2} s_\theta(\bx_i)^2 + \nabla_{\bx_i} s_\theta(\bx_i)  \right]
   \end{align*}
 \end{frame}
 
+\begin{frame}{Training}
+  \begin{figure}
+    \includegraphics[height=0.8\textheight]{figs/gen/gaussian_mixture_training_data}
+  \end{figure}
+\end{frame}
 
 \begin{frame}{Drawbacks}
-  \pause
-  \begin{columns}
-    \begin{column}{0.4\textwidth}
-      \centering
-      Field in low-density regions
-    \end{column}
-    \begin{column}{0.6\textwidth}
-      \centering
-      Scaling
-    \end{column}
-  \end{columns}
+  \pause 
 
   \begin{columns}
     \begin{column}{0.4\textwidth}
       \centering
+        Field in low-density regions
       \begin{figure}
         \centering
         \includegraphics[height=0.32\textheight]{figs/gen/score_field_training_0.png}
@@ -237,6 +247,9 @@ Learn $f_\theta$ s.t.
     \end{column}
     \pause
     \begin{column}{0.6\textwidth}
+      \centering
+      Scaling
+      \pause
       \centering
       \begin{align*}
         &\frac{1}{2}\mathbb{E}_{p_\text{data}(\bx)} \left[ s_\theta(\bx)^2\right] + \mathbb{E}_{p_\text{data}(\bx)}\left[\nbx s_\theta(\bx) \right]
@@ -259,10 +272,10 @@ Learn $f_\theta$ s.t.
 
 
 \begin{frame}{Noise perturbation}
-
+\pause
 \begin{align*}
   \btx &= \bx + z\\
-  z &\sim \mathcal{N}(0, 1)\\
+  z &\sim \mathcal{N}(0, \sigma^2 I)\\
     \qs(\btx | \bx) &= \mathcal{N}(\bx, \sigma^2 I)
   \end{align*}
 \end{frame}
@@ -352,6 +365,12 @@ Learn $f_\theta$ s.t.
                                      &= \gamma \nbx \log p(\bx | \by) + (\gamma - 1)  \nbx \log p(\bx)\\
                                      &\textcolor{teal}{\approx \gamma s_\theta(\bx, \by) - (\gamma - 1) s_\theta(\bx, \phi)}
   \end{align*}
+\end{frame}
+
+\begin{frame}{Final score model}
+  \[
+  s_theta(\bx, \by, \beta)
+  \]
 \end{frame}
 
 \section{Equivariant learning}
