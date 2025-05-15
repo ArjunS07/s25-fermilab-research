@@ -1,0 +1,10 @@
+venv/
+*.DS_Store
+*.hdf5
+*.synctex.gz
+*.snm
+*.out
+*.log
+*.nav
+*.toc
+*.aux
