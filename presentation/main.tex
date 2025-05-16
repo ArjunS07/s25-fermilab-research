@@ -1,7 +1,7 @@
 %----------------------------------------------------------------------------------------
 %    PACKAGES AND THEMES
 %----------------------------------------------------------------------------------------
-\documentclass[aspectratio=169,xcolor=dvipsnames]{beamer}
+\documentclass[handout, aspectratio=169,xcolor=dvipsnames]{beamer}
 \makeatletter
 \def\input@path{{theme/}}
 \makeatother
@@ -86,7 +86,7 @@
       \end{itemize}
       \pause
       \begin{align*}
-          p(o | \beta) &= \int  p(x, \beta | \theta) dz
+          p(o | \beta) &= \int  p(o, \beta | \beta) dz
       \end{align*}
     \end{column}
    
@@ -348,7 +348,7 @@ Learn $f_\theta$ s.t.
 
 \begin{frame}{Conditional generation}
   \begin{align*}
-   p(\bx | \by) &= \frac{p(\by | \bx) p(\bx)}{\textcolor{red}{p(\by)}}
+   \nbx \log p(\bx | \by) &= \frac{p(\by | \bx) p(\bx)}{\textcolor{red}{p(\by)}}
   \end{align*}
   \pause
   \begin{align*}
