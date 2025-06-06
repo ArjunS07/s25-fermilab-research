@@ -8,3 +8,5 @@ venv/
 *.nav
 *.toc
 *.aux
+
+cs101-presentation/dataset
