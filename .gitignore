@@ -9,4 +9,5 @@ venv/
 *.toc
 *.aux
 
-cs101-presentation/dataset
+archive/cs101-presentation/dataset
+summer-prep/diffusion-emoji/dataset
