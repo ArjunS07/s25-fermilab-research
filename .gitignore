@@ -11,3 +11,5 @@ venv/
 
 archive/cs101-presentation/dataset
 summer-prep/diffusion-emoji/dataset
+
+*.pyc
