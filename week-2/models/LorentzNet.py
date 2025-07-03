@@ -7,22 +7,25 @@ class LGEB(nn.Module):
         self.c_weight = c_weight
         n_edge_attr = 2 # dims for Minkowski norm & inner product
 
+
+        # Applied to edges to produce messages
         self.phi_e = nn.Sequential(
             nn.Linear(n_input * 2 + n_edge_attr, n_hidden, bias=False),
             nn.BatchNorm1d(n_hidden),
             nn.ReLU(),
             nn.Linear(n_hidden, n_hidden),
             nn.ReLU())
-
+        
+        # Applied to scalar features of nodes to produce node embeddings
         self.phi_h = nn.Sequential(
             nn.Linear(n_hidden + n_input + n_node_attr, n_hidden),
             nn.BatchNorm1d(n_hidden),
             nn.ReLU(),
             nn.Linear(n_hidden, n_output))
 
+        # Applied to messages
         layer = nn.Linear(n_hidden, 1, bias=False)
         torch.nn.init.xavier_uniform_(layer.weight, gain=0.001)
-
         self.phi_x = nn.Sequential(
             nn.Linear(n_hidden, n_hidden),
             nn.ReLU(),
@@ -36,12 +39,7 @@ class LGEB(nn.Module):
         if last_layer:
             del self.phi_x
 
-    def m_model(self, hi, hj, norms, dots):
-        out = torch.cat([hi, hj, norms, dots], dim=1)
-        out = self.phi_e(out)
-        w = self.phi_m(out)
-        out = out * w
-        return out
+
 
     def h_model(self, h, edges, m, node_attr):
         i, j = edges
@@ -50,6 +48,13 @@ class LGEB(nn.Module):
         out = h + self.phi_h(agg)
         return out
 
+    def m_model(self, hi, hj, norms, dots):
+        out = torch.cat([hi, hj, norms, dots], dim=1)
+        out = self.phi_e(out)
+        w = self.phi_m(out)
+        out = out * w
+        return out
+    
     def x_model(self, x, edges, x_diff, m):
         i, j = edges
         trans = x_diff * self.phi_x(m)
@@ -139,6 +144,8 @@ def normsq4(p):
          `\|p\|^2 = p[0]^2-p[1]^2-p[2]^2-p[3]^2`
     ''' 
     psq = torch.pow(p, 2)
+
+    # 2t^2 - (t^2 + x^2 + y^2 + z^2)
     return 2 * psq[..., 0] - psq.sum(dim=-1)
     
 def dotsq4(p,q):
