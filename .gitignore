@@ -13,3 +13,11 @@ archive/cs101-presentation/dataset
 summer-prep/diffusion-emoji/dataset
 
 *.pyc
+
+*.bbl
+*.blg
+*.pkl
+
+*/gen/*
+
+*.xml
