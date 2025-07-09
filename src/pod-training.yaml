@@ -41,6 +41,7 @@ spec:
         pip install --upgrade pip
         git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
         cp -r /tmp/repo/src /mnt/data/
+        pip install numpy torch matplotlib
         pip install -r /mnt/data/src/requirements.txt 
     volumeMounts:
       - mountPath: /mnt/data
