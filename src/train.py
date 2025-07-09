@@ -52,8 +52,6 @@ if __name__ == "__main__":
     np.random.seed(RANDOM_SEED)
     random.seed(RANDOM_SEED)
 
-    os.system("pip install torch-geometric torch-cluster")
-
     # JetNet data download args
     parser = argparse.ArgumentParser(description="Train LorentzFMNet on JetNet dataset")
     parser.add_argument("--out_dir", default="/mnt/data/output")
