@@ -1,20 +1,56 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: as-jet-training-pod
+  name: as-jet-train-pod
 spec:
+  restartPolicy: Never
+  volumes:
+    - name: as-train-pvc
+      persistentVolumeClaim:
+        claimName: as-jet-training-pvc
+
+  initContainers:
+  - name: setup-env
+    image: python:3.10-slim
+    command:
+      - /bin/bash
+      - -c
+      - |
+        set -ex
+        apt-get update && apt-get install -y \
+          python3.10-venv python3.10-dev libffi-dev \
+          gcc g++ curl git wget
+
+        python3.10 -m venv /mnt/data/python-env
+        source /mnt/data/python-env/bin/activate
+        pip install --upgrade pip
+
+        git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
+        cp -r /tmp/repo/src /mnt/data/
+        pip install -r /mnt/data/src/requirements.txt || true
+    volumeMounts:
+      - mountPath: /mnt/data
+        name: as-train-pvc
+    resources:
+      requests:
+        memory: "1Gi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1"
+
   containers:
-  - name: gpu-container
-    image: pytorch/pytorch:2.7.1-cuda11.8-cudnn9-runtime
+  - name: trainer
+    image: python:3.10-slim
     command:
       - /bin/bash
       - -c
       - |
         source /mnt/data/python-env/bin/activate
-        jupyter lab --NotebookApp.token=627a7b3b --ip=0.0.0.0 --no-browser --allow-root
+        python /mnt/data/src/train.py --out_dir /mnt/data/output
     volumeMounts:
       - mountPath: /mnt/data
-        name: as-jet-training-pvc
+        name: as-train-pvc
     resources:
       limits:
         nvidia.com/gpu: 1
@@ -24,38 +60,3 @@ spec:
         nvidia.com/gpu: 1
         memory: "8Gi"
         cpu: "2"
-
-  initContainers:
-  - name: package-installer
-    image: ubuntu:22.04
-    command:
-      - /bin/bash
-      - -c
-      - |
-        set -ex
-        apt-get update
-        apt-get install -y python3.10 python3.10-venv python3-pip \
-          vim screen wget rsync gcc g++ git curl
-        python3.10 -m venv /mnt/data/python-env
-        source /mnt/data/python-env/bin/activate
-        pip install --upgrade pip
-        git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
-        cp -r /tmp/repo/src /mnt/data/
-        pip install numpy torch matplotlib
-        pip install -r /mnt/data/src/requirements.txt 
-    volumeMounts:
-      - mountPath: /mnt/data
-        name: as-jet-training-pvc
-    resources:
-      limits:
-        memory: "1Gi"
-        cpu: "100m"
-      requests:
-        memory: "512Mi"
-        cpu: "100m"
-
-  restartPolicy: Never
-  volumes:
-    - name: as-jet-training-pvc
-      persistentVolumeClaim:
-        claimName: as-jet-training-pvc

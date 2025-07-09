@@ -52,6 +52,8 @@ if __name__ == "__main__":
 
     # JetNet data download args
     parser = argparse.ArgumentParser(description="Train LorentzFMNet on JetNet dataset")
+    parser.add_argument("--out_dir", default="/mnt/data/output")
+
     parser.add_argument("--jet_types", type=str, nargs="+", default=data_args["jet_type"],
                         help="List of jet types to train on (e.g., 'g', 'q', 't')")
     parser.add_argument("--data_dir", type=str, default=data_args["data_dir"],
@@ -82,8 +84,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Make folders if they do not exist
-    make_clear_folder("gen/figs")
-    make_clear_folder("gen/logs")
+    make_clear_folder(f"{args.out_dir}/figs")
+    make_clear_folder(f"{args.out_dir}/logs")
 
     X_train = JetNet(
         jet_type=args.jet_types,
@@ -152,14 +154,14 @@ if __name__ == "__main__":
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.title("Training Loss")
-    plt.savefig("gen/figs/training_loss.png")
+    plt.savefig(f"{args.out_dir}/figs/training_loss.png")
 
-    with open("gen/logs/traing_loss.csv", "w") as f:
+    with open(f"{args.out_dir}/logs/training_loss.csv", "w") as f:
         f.write("epoch,loss\n")
         for epoch, loss in enumerate(losses):
             f.write(f"{epoch},{loss}\n")
     # Save the model
-    torch.save(model.state_dict(), "gen/model.pth")
+    torch.save(model.state_dict(), f"{args.out_dir}/model.pth")
 
     samples = []
     with torch.no_grad():
@@ -181,8 +183,8 @@ if __name__ == "__main__":
     
     # Save up to 1000 random generated samples
     rand_idx = random.randint(0, args.n_samples - 1000)
-    torch.save(samples[rand_idx:rand_idx+1000], "gen/samples_cartesian_1000.pt")
-        
+    torch.save(samples[rand_idx:rand_idx+1000], f"{args.out_dir}/samples_cartesian_1000.pt")
+
     polar_gen_features = cartesian_to_EtaPhiPtE(x).to(device)
     x_test = (X_test[:args.n_samples][0]).to(device)
 
@@ -220,6 +222,6 @@ if __name__ == "__main__":
         jets1=jets1,
         jets2=jets2,
     )
-    with open("gen/eval_info.pkl", "wb") as f:
+    with open(f"{args.out_dir}/eval_info.pkl", "wb") as f:
         pickle.dump(eval_info, f)
     print("Evaluation metrics saved to eval_info.pkl")
