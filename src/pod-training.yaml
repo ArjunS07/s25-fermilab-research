@@ -40,8 +40,6 @@ spec:
         else
           echo "No requirements.txt found, skipping pip install"
         fi
-        pip install torch
-        pip install torch-geometric torch-cluster
     volumeMounts:
       - mountPath: /mnt/data
         name: as-train-pvc

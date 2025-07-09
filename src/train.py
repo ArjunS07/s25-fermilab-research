@@ -1,3 +1,4 @@
+import os
 import argparse
 import pickle
 
@@ -50,6 +51,8 @@ if __name__ == "__main__":
     torch.manual_seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
     random.seed(RANDOM_SEED)
+
+    os.system("pip install torch-geometric torch-cluster")
 
     # JetNet data download args
     parser = argparse.ArgumentParser(description="Train LorentzFMNet on JetNet dataset")
