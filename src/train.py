@@ -95,7 +95,6 @@ if __name__ == "__main__":
         particle_features=JetNet.ALL_PARTICLE_FEATURES if MASK else JetNet.ALL_PARTICLE_FEATURES[:-1],
         jet_features=data_args["jet_features"],
         split_fraction=args.split_fraction,
-        download=True,
         split="train",
     )
     X_test = JetNet(
@@ -105,7 +104,6 @@ if __name__ == "__main__":
         particle_features=JetNet.ALL_PARTICLE_FEATURES if MASK else JetNet.ALL_PARTICLE_FEATURES[:-1],
         jet_features=data_args["jet_features"],
         split_fraction=args.split_fraction,
-        download=True,
         split="valid",
     )
     print(f"{len(X_train)=}, {len(X_test)=}")
