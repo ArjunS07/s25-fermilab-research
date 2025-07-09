@@ -6,6 +6,7 @@ import torch
 import random
 from torch import nn
 from torch.utils.data import DataLoader
+from scipy.stats import anderson
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -108,9 +109,16 @@ if __name__ == "__main__":
         split="valid",
     )
     print(f"{len(X_train)=}, {len(X_test)=}")
-
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train)
     print(f"{X_train_particle_transformed.shape=}")
+
+    # Normalize the features
+    e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
+    e_c_mirrored = np.concatenate([e_c, -e_c])
+    p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
+    p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
+    p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
+    final_scale = min([anderson(data).fit_result.params.scale for data in [e_c_mirrored, p_x, p_y, p_z]])
 
     model = LorentzFMNet(
         n_hidden=args.n_hidden,
@@ -118,6 +126,8 @@ if __name__ == "__main__":
         dropout=args.dropout,
         c_weight=args.c_weight
     ).to(device)
+
+    X_train_particle_transformed = (1/final_scale) * X_train_particle_transformed
 
     X_train_loaded = DataLoader(
         X_train_particle_transformed,
@@ -175,11 +185,11 @@ if __name__ == "__main__":
 
             for i in range(args.integration_steps):
                 x_batch = model.step(x_batch, times[i], times[i + 1], method=ode_solver_methods[args.ode_solver])
-                samples.append(x_batch)
+            samples.append(x_batch)
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-    samples = torch.stack(samples, dim=0)
+    samples = torch.cat(samples, dim=0)
     
     # Save up to 1000 random generated samples
     rand_idx = random.randint(0, args.n_samples - 1000)
