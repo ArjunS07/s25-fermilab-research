@@ -209,12 +209,12 @@ if __name__ == "__main__":
         seed=RANDOM_SEED
     )
 
-    # TODO
-    eval_info["fpnd_g"] = eval.fpnd(
-        jets=polar_gen_features[:, :, :3],
-        jet_type="g",
-        use_tqdm=False
-    )
+    # Requires torch geometric
+    # eval_info["fpnd_g"] = eval.fpnd(
+    #     jets=polar_gen_features[:, :, :3],
+    #     jet_type="g",
+    #     use_tqdm=False
+    # )
 
     jets1 = polar_gen_features[:, :, :]
     jets2 = X_test[:][0]
