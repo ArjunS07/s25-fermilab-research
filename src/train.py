@@ -97,6 +97,7 @@ if __name__ == "__main__":
         jet_features=data_args["jet_features"],
         split_fraction=args.split_fraction,
         split="train",
+        download=True
     )
     X_test = JetNet(
         jet_type=args.jet_types,
@@ -106,6 +107,7 @@ if __name__ == "__main__":
         jet_features=data_args["jet_features"],
         split_fraction=args.split_fraction,
         split="valid",
+        download=True
     )
     print(f"{len(X_train)=}, {len(X_test)=}")
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train)
