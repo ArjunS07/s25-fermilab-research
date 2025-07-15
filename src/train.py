@@ -9,9 +9,6 @@ from torch import nn
 from torch.utils.data import DataLoader
 from scipy.stats import anderson
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-
 from jetnet.datasets import JetNet
 import jetnet.evaluation as eval
 from jetnet.utils import cartesian_to_EtaPhiPtE
@@ -73,9 +70,8 @@ if __name__ == "__main__":
     parser.add_argument("--c_weight", type=float, default=1.0, help="Weight for the c parameter in the network")
     
     # Training
-    parser.add_argument("--batch_size", type=int, default=128, help="Batch size for training")
+    parser.add_argument("--batch_size", type=int, default=10_000, help="Batch size for training")
     parser.add_argument("--num_epochs", type=int, default=10, help="Number of epochs to train the model")
-    parser.add_argument("--train-sample-size", type=int, default=50_000, help="Number of training samples to use")
 
     # Integration
     parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
@@ -88,6 +84,8 @@ if __name__ == "__main__":
     # Make folders if they do not exist
     make_clear_folder(f"{args.out_dir}/figs")
     make_clear_folder(f"{args.out_dir}/logs")
+
+    print("Downloading datasets...")
 
     X_train = JetNet(
         jet_type=args.jet_types,
@@ -114,12 +112,12 @@ if __name__ == "__main__":
     print(f"{X_train_particle_transformed.shape=}")
 
     # Normalize the features
-    e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
-    e_c_mirrored = np.concatenate([e_c, -e_c])
-    p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
-    p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
-    p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
-    final_scale = min([anderson(data).fit_result.params.scale for data in [e_c_mirrored, p_x, p_y, p_z]])
+    # e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
+    # e_c_mirrored = np.concatenate([e_c, -e_c])
+    # p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
+    # p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
+    # p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
+    # final_scale = min([anderson(data).fit_result.params.scale for data in [e_c_mirrored, p_x, p_y, p_z]])
 
     model = LorentzFMNet(
         n_hidden=args.n_hidden,
@@ -128,7 +126,7 @@ if __name__ == "__main__":
         c_weight=args.c_weight
     ).to(device)
 
-    X_train_particle_transformed = (1/final_scale) * X_train_particle_transformed
+    # X_train_particle_transformed = (1/final_scale) * X_train_particle_transformed
 
     X_train_loaded = DataLoader(
         X_train_particle_transformed,
@@ -138,6 +136,8 @@ if __name__ == "__main__":
     
     losses = []
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+    print("Beginning training")
 
     for epoch in range(args.num_epochs):
         epoch_loss = []
@@ -156,16 +156,24 @@ if __name__ == "__main__":
             optimizer.step()
 
             epoch_loss.append(loss.item())
+        
+            if torch.cuda.is_available():
+                if i % 100 == 0:
+                    current_memory = torch.cuda.memory_allocated() / 1024**2
+                    print(f"Epoch {epoch}, Batch {i}, Loss: {loss.item():.4f}, GPU Memory: {current_memory:.1f}MB")
+                    # Clear cache periodically to prevent memory buildup
+                    if current_memory > 10000:  # If using more than 10GB
+                        torch.cuda.empty_cache()
 
         losses.append(np.mean(epoch_loss))
         if epoch % 10 == 0:
             print(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {losses[-1]:.4f}")
     
-    sns.lineplot(x=range(len(losses)), y=losses)
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Training Loss")
-    plt.savefig(f"{args.out_dir}/figs/training_loss.png")
+    # sns.lineplot(x=range(len(losses)), y=losses)
+    # plt.xlabel("Epoch")
+    # plt.ylabel("Loss")
+    # plt.title("Training Loss")
+    # plt.savefig(f"{args.out_dir}/figs/training_loss.png")
 
     with open(f"{args.out_dir}/logs/training_loss.csv", "w") as f:
         f.write("epoch,loss\n")
@@ -173,6 +181,7 @@ if __name__ == "__main__":
             f.write(f"{epoch},{loss}\n")
     # Save the model
     torch.save(model.state_dict(), f"{args.out_dir}/model.pth")
+    print("Model saved to model.pth")
 
     samples = []
     with torch.no_grad():
@@ -187,17 +196,20 @@ if __name__ == "__main__":
             for i in range(args.integration_steps):
                 x_batch = model.step(x_batch, times[i], times[i + 1], method=ode_solver_methods[args.ode_solver])
             samples.append(x_batch)
+            if start_idx % 100 == 0:
+                print(f"Processed samples {start_idx} to {end_idx}")
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+    print("Done generating samples! Saving samples")
     samples = torch.cat(samples, dim=0)
+    torch.save(samples, f"{args.out_dir}/samples_cartesian.pt")
     
-    # Save up to 1000 random generated samples
-    rand_idx = random.randint(0, args.n_samples - 1000)
-    torch.save(samples[rand_idx:rand_idx+1000], f"{args.out_dir}/samples_cartesian_1000.pt")
-
-    polar_gen_features = cartesian_to_EtaPhiPtE(x).to(device)
-    x_test = (X_test[:args.n_samples][0]).to(device)
+    try:
+        polar_gen_features = cartesian_to_EtaPhiPtE(samples).to(device)
+        x_test = (X_test[:args.n_samples][0]).to(device)
+    except Exception as e:
+        breakpoint()
 
     # Metrics
     eval_info = {}
