@@ -8,7 +8,8 @@ def psi(p):
     '''
     return torch.sign(p) * torch.log(torch.abs(p) + 1)
 
-def minkowski_features(x):
+def minkowski_features(x, zero_masks_bool):
+    x = x[zero_masks_bool]
     x_i = x.unsqueeze(-2) # second-last dimension - N
     x_j = x.unsqueeze(-3) # third-last dimension - B
     x_diffs = x_i - x_j # (batch_size, n_particles, n_particles, n_features)
@@ -62,10 +63,10 @@ class FMLorentzLayer(nn.Module):
         return out
 
 
-    def forward(self, x_t: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x_t: torch.Tensor, zero_masks: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         phi_t = self.phi_t(t.unsqueeze(-1))
 
-        norms, dots, diffs = minkowski_features(x_t)
+        norms, dots, diffs = minkowski_features(x_t, zero_masks)
         messages = self.message_passing(norms, dots, diffs)
 
         batch_size, n_particles, _, n_hidden = messages.shape
@@ -90,9 +91,14 @@ class LorentzFMNet(nn.Module):
             for _ in range(n_layers)
         ])
 
-    def forward(self, x_t: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        for layer in self.layers:
-            vel = layer(x_t, t)
+    def forward(self, x_t: torch.Tensor, zero_masks: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        zero_masks_bool = zero_masks.bool()
+        for i, layer in enumerate(self.layers):
+            if i == 0:
+                vel = layer(x_t, zero_masks_bool, t)
+            else:
+                # Pass the output of the previous layer as input to the next layer
+                vel = layer(vel, zero_masks_bool, t)
         return vel
 
     def step(self, x_t: torch.Tensor, t_start: torch.Tensor, t_end: torch.Tensor, method: ode_solver_methods=ode_solver_methods.euler) -> torch.Tensor:
