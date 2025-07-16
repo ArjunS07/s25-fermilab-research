@@ -2,17 +2,20 @@ import torch
 from torch import nn
 
 from util.minkowski_utils import normsq4, dotsq4
+from enum import Enum
+ode_solver_methods = Enum('ode_solver_methods', ['euler', 'midpoint'])
+
     
 def psi(p):
     ''' `\psi(p) = Sgn(p) \cdot \log(|p| + 1)`
     '''
     return torch.sign(p) * torch.log(torch.abs(p) + 1)
 
-def minkowski_features(x, zero_masks_bool):
-    x = x[zero_masks_bool]
+def minkowski_features(x):
+    # print(f"{x.shape=}")
     x_i = x.unsqueeze(-2) # second-last dimension - N
     x_j = x.unsqueeze(-3) # third-last dimension - B
-    x_diffs = x_i - x_j # (batch_size, n_particles, n_particles, n_features)
+    x_diffs = x_i - x_j # (batch_size, n_particles, n_particles, 
 
     norms = normsq4(x_diffs)
     dots = dotsq4(x_i, x_j)
@@ -60,14 +63,18 @@ class FMLorentzLayer(nn.Module):
         out = self.phi_e(inp)
         # print(f"phi_e(norms, dots) = {out.shape}")
         out = out * self.phi_m(out)
+        
         return out
 
 
-    def forward(self, x_t: torch.Tensor, zero_masks: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x_t: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         phi_t = self.phi_t(t.unsqueeze(-1))
+        # print(f"{phi_t.shape=}")
 
-        norms, dots, diffs = minkowski_features(x_t, zero_masks)
+        norms, dots, diffs = minkowski_features(x_t)
+        # print(f"{norms.shape=}, {dots.shape=}, {diffs.shape=}")
         messages = self.message_passing(norms, dots, diffs)
+        # print(f"{messages.shape=}, {phi_t.shape=}")
 
         batch_size, n_particles, _, n_hidden = messages.shape
         t_broadcast = phi_t.view(batch_size, 1, 1, -1).expand(-1, n_particles, n_particles, -1)
@@ -80,9 +87,6 @@ class FMLorentzLayer(nn.Module):
         
         return velocity
     
-from enum import Enum
-ode_solver_methods = Enum('ode_solver_methods', ['euler', 'midpoint'])
-
 class LorentzFMNet(nn.Module):
     def __init__(self, n_hidden, n_layers, dropout=0., c_weight=1.0):
         super(LorentzFMNet, self).__init__()
@@ -91,14 +95,13 @@ class LorentzFMNet(nn.Module):
             for _ in range(n_layers)
         ])
 
-    def forward(self, x_t: torch.Tensor, zero_masks: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        zero_masks_bool = zero_masks.bool()
+    def forward(self, x_t: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         for i, layer in enumerate(self.layers):
             if i == 0:
-                vel = layer(x_t, zero_masks_bool, t)
+                vel = layer(x_t, t)
             else:
                 # Pass the output of the previous layer as input to the next layer
-                vel = layer(vel, zero_masks_bool, t)
+                vel = layer(vel, t)
         return vel
 
     def step(self, x_t: torch.Tensor, t_start: torch.Tensor, t_end: torch.Tensor, method: ode_solver_methods=ode_solver_methods.euler) -> torch.Tensor:
@@ -112,7 +115,7 @@ class LorentzFMNet(nn.Module):
 
             # Translate x_t by the expected velocity at t_start
             return x_t + (t_end - t_start) * self.forward(x_t=x_t, t=t_start)
-        
+
         elif method == ode_solver_methods.midpoint:
             batch_size = x_t.shape[0]
             t_start = t_start.unsqueeze(0).repeat(batch_size).view(-1, 1, 1)

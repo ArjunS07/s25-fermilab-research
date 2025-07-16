@@ -16,12 +16,15 @@ from jetnet.utils import cartesian_to_EtaPhiPtE
 from FMLorentzNet import LorentzFMNet, ode_solver_methods
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from util.file_management import make_clear_folder
+from util.distributions import sample_massless_4momentum_clouds
 
 RANDOM_SEED = 42
 
-MASK = True
+MASK = False
 NUM_PARTICLES = 30
+NUM_PARTICLE_FEATURES = 4 # E/c, px, py, pz
 TRAIN_SPLIT = 0.7
+
 
 feature_maxes = JetNet.fpnd_norm.feature_maxes
 if MASK:
@@ -64,14 +67,14 @@ if __name__ == "__main__":
     
     
     # Network hyperparameters
-    parser.add_argument("--n_hidden", type=int, default=64, help="Number of hidden units in the network")
-    parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
+    parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
+    parser.add_argument("--n_layers", type=int, default=6, help="Number of layers in the network")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
     parser.add_argument("--c_weight", type=float, default=1.0, help="Weight for the c parameter in the network")
     
     # Training
-    parser.add_argument("--batch_size", type=int, default=10_000, help="Batch size for training")
-    parser.add_argument("--num_epochs", type=int, default=10, help="Number of epochs to train the model")
+    parser.add_argument("--batch_size", type=int, default=1024, help="Batch size for training")
+    parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
 
     # Integration
     parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
@@ -112,12 +115,15 @@ if __name__ == "__main__":
     print(f"{X_train_particle_transformed.shape=}")
 
     # Normalize the features
-    # e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
-    # e_c_mirrored = np.concatenate([e_c, -e_c])
-    # p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
-    # p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
-    # p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
-    # final_scale = min([anderson(data).fit_result.params.scale for data in [e_c_mirrored, p_x, p_y, p_z]])
+    e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
+    e_c_mirrored = np.concatenate([e_c, -e_c])
+    p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
+    p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
+    p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
+    final_scale = min([anderson(data).fit_result.params.scale for data in [e_c_mirrored, p_x, p_y, p_z]])
+    with open(f"{args.out_dir}/scaling.txt", "w") as f:
+        f.write(f"Final scale: {final_scale}\n")
+        f.close()
 
     model = LorentzFMNet(
         n_hidden=args.n_hidden,
@@ -126,7 +132,9 @@ if __name__ == "__main__":
         c_weight=args.c_weight
     ).to(device)
 
-    # X_train_particle_transformed = (1/final_scale) * X_train_particle_transformed
+    torch.save(model.state_dict(), f"{args.out_dir}/model_initial.pth")
+
+    X_train_particle_transformed = (1/final_scale) * X_train_particle_transformed
 
     X_train_loaded = DataLoader(
         X_train_particle_transformed,
@@ -143,7 +151,9 @@ if __name__ == "__main__":
         epoch_loss = []
 
         for i, data in enumerate(X_train_loaded):
-            x_0 = torch.randn_like(data).to(device)
+            # print(data.shape)
+            x_0 = sample_massless_4momentum_clouds(n_clouds=len(data), cloud_size=NUM_PARTICLES).to(device)
+            # print(x_0.shape)
             x_1 = data.to(device)
 
             t = torch.rand(x_0.shape[0], device=device).view(-1, 1, 1)  # Reshape t to match the expected input shape
@@ -151,7 +161,7 @@ if __name__ == "__main__":
             dx_t = x_1 - x_0
             optimizer.zero_grad()
 
-            loss = nn.MSELoss()(model(x_t, t), dx_t)
+            loss = nn.MSELoss()(model.forward(x_t, t), dx_t)
             loss.backward()
             optimizer.step()
 
@@ -179,15 +189,15 @@ if __name__ == "__main__":
         f.write("epoch,loss\n")
         for epoch, loss in enumerate(losses):
             f.write(f"{epoch},{loss}\n")
-    # Save the model
-    torch.save(model.state_dict(), f"{args.out_dir}/model.pth")
-    print("Model saved to model.pth")
+
+    torch.save(model.state_dict(), f"{args.out_dir}/final_model.pth")
+    print("Model saved to final_model.pth")
 
     samples = []
     with torch.no_grad():
         model.eval()
         times = torch.linspace(0, 1, args.integration_steps + 1).to(device)
-        x = torch.randn(args.n_samples, NUM_PARTICLES, 4).to(device)
+        x = torch.randn(args.n_samples, NUM_PARTICLES, NUM_PARTICLE_FEATURES).to(device)
 
         for start_idx in range(0, args.n_samples, args.batch_size):
             end_idx = min(start_idx + args.batch_size, args.n_samples)
@@ -202,7 +212,15 @@ if __name__ == "__main__":
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
     print("Done generating samples! Saving samples")
+    with open(f"{args.out_dir}/samples.txt", "w") as f:
+        for sample in samples:
+            sample = sample.cpu().numpy()
+            sample = final_scale * sample  # Scale back to original scale
+            f.write(f"{sample.tolist()}\n")
+        f.close()
     samples = torch.cat(samples, dim=0)
+    # Multiply by the final scale to get the original scale
+    samples = final_scale * samples
     torch.save(samples, f"{args.out_dir}/samples_cartesian.pt")
     
     try:
@@ -218,8 +236,8 @@ if __name__ == "__main__":
         gen_jets=polar_gen_features
     )
     eval_info["fpd"] = eval.fpd(
-        real_features=x_test.reshape((-1, 4)).to(device),
-        gen_features=polar_gen_features.reshape((-1, 4)).to(device),
+        real_features=x_test.reshape((-1, NUM_PARTICLE_FEATURES)).to(device),
+        gen_features=polar_gen_features.reshape((-1, NUM_PARTICLE_FEATURES)).to(device),
         seed=RANDOM_SEED
     )
 
@@ -230,21 +248,28 @@ if __name__ == "__main__":
     #     use_tqdm=False
     # )
 
-    jets1 = polar_gen_features[:, :, :]
+    # Don't include mass
+    jets1 = polar_gen_features[:, :, :3]
     jets2 = X_test[:][0]
-    eval_info["w1efp"] = eval.w1efp(
-        jets1=jets1,
-        jets2=jets2,
-        use_particle_masses=True
-    )
-    eval_info["w1m"] = eval.w1m(
-        jets1=jets1,
-        jets2=jets2,
-    )
-    eval_info["w1p"] = eval.w1p(
-        jets1=jets1,
-        jets2=jets2,
-    )
+    try:
+        eval_info["w1efp"] = eval.w1efp(
+            jets1=jets1,
+            jets2=jets2,
+        )
+    except Exception as e:
+        print(f"Error calculating W1 EFP metrics: {e}")
+    try:
+        eval_info["w1m"] = eval.w1m(
+            jets1=jets1,
+            jets2=jets2,
+        )
+        eval_info["w1p"] = eval.w1p(
+            jets1=jets1,
+            jets2=jets2,
+        )
+    except Exception as e:
+        print(f"Error calculating W1 metrics: {e}")
+        
     with open(f"{args.out_dir}/eval_info.pkl", "wb") as f:
         pickle.dump(eval_info, f)
     print("Evaluation metrics saved to eval_info.pkl")

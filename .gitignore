@@ -19,5 +19,6 @@ summer-prep/diffusion-emoji/dataset
 *.pkl
 
 */gen/*
+*/out/*
 
 *.xml

@@ -1,11 +1,11 @@
 import torch
 from jetnet.utils import EtaPhiPtE_to_cartesian
 
+from jetnet.utils import EtaPhiPtE_to_cartesian
+
 def transform_rel_particle_coordinates_to_cartesian(X):
     """
-    Transforms relative particle coordinates to absolute Cartesian coordinates :math:`(E/c, p_x, p_y, p_z)`.
-     
-    Uses the JetNet relEtaPhiPt_to_cartesian utility function
+    Transforms relative particle coordinates to absolute Cartesian coordinates using the JetNet relEtaPhiPt_to_cartesian utility function
 
     Requires X to be a list of length N_jets where each item is a tuple (particle_features, jet_features)
     where particle_features is of shape (n_particles, n_particle_features)
@@ -18,6 +18,7 @@ def transform_rel_particle_coordinates_to_cartesian(X):
     """
 
     particle_polarrel_features = X[:][0][:, :, :3]
+    # masks = X[:][0][:, :, 3] 
     
     # Phi has to be the second column for the JetNet utility function
     jet_eta = (X[:][1][:, 0]).unsqueeze(1)
@@ -36,3 +37,7 @@ def transform_rel_particle_coordinates_to_cartesian(X):
 
     stacked = torch.stack([eta, phi, pt, p0], axis=-1)
     return EtaPhiPtE_to_cartesian(stacked)
+    # cartesian_feats = EtaPhiPtE_to_cartesian(stacked)
+    
+    # Return the Cartesian coordinates and the masks
+    # return torch.cat([cartesian_feats, masks.unsqueeze(-1)], dim=-1)
