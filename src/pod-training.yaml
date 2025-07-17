@@ -11,6 +11,9 @@ spec:
   initContainers:
   - name: setup-env
     image: python:3.10-slim
+    volumeMounts:
+      - mountPath: /mnt/data
+        name: as-train-pvc
     command:
       - /bin/bash
       - -c
@@ -24,12 +27,12 @@ spec:
 
         rm -rf /mnt/data/python-env
         
-        # Create the virtual environment
+        # Create the virtual environment ON THE PERSISTENT VOLUME
         python -m venv /mnt/data/python-env
         source /mnt/data/python-env/bin/activate
         pip install --upgrade pip
         
-        # Clone repository
+        # Clone repository TO THE PERSISTENT VOLUME
         git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
         cp -r /tmp/repo/src /mnt/data/
 
@@ -46,8 +49,13 @@ spec:
         TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
         echo "PyTorch version: $TORCH_VERSION"
 
+        # Verify everything is in place
+        echo "=== Verifying setup ==="
+        ls -la /mnt/data/
+        ls -la /mnt/data/python-env/
+        echo "Virtual environment created at: /mnt/data/python-env"
+        echo "Source code copied to: /mnt/data/src"
         
-        apiVersion: v1
   containers:
   - name: debug
     image: python:3.10-slim
@@ -55,6 +63,9 @@ spec:
       - /bin/bash
       - -c
       - |
+        echo "=== Checking persistent volume contents ==="
+        ls -la /mnt/data/
+        
         echo "=== Activating your existing environment ==="
         source /mnt/data/python-env/bin/activate
         
@@ -70,12 +81,12 @@ spec:
         python -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('Device count:', torch.cuda.device_count())"
         
         echo "=== Starting Jupyter ==="
-        echo "Run: kubectl port-forward as-jet-debug-minimal 8888:8888"
+        echo "Run: kubectl port-forward as-jet-training-pod 8888:8888"
         echo "Then open: http://localhost:8888"
         
         # Start Jupyter
         cd /mnt/data/src
-        jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root --token='' --password=''
+        jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
         
     ports:
     - containerPort: 8888

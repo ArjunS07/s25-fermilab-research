@@ -45,12 +45,13 @@ class FMLorentzLayer(nn.Module):
         )
 
         layer = nn.Linear(n_hidden, 1, bias=False)
-        torch.nn.init.xavier_uniform_(layer.weight, gain=0.001)
+        torch.nn.init.xavier_uniform_(layer.weight)
         self.phi_x = nn.Sequential(
             #  Message + time -> Embedding
             nn.Linear(n_hidden * 2, n_hidden),
             nn.ReLU(),
-            layer)
+            nn.Linear(n_hidden, 1, bias=False),
+            nn.Tanh())
 
         self.phi_m = nn.Sequential(
             nn.Linear(n_hidden, 1),
@@ -58,12 +59,12 @@ class FMLorentzLayer(nn.Module):
     
     
     def message_passing(self, norms, dots, diffs):
-        inp = torch.stack([norms, dots], dim=-1)  # Concatenate along feature dimension
-        # print(f"{inp.shape=}")
+        # inp = torch.stack([norms, dots], dim=-1)  # Concatenate along feature dimension
+        inp = torch.cat([norms.unsqueeze(-1), dots.unsqueeze(-1)], dim=-1)
+        # print(f"{inp.shape=} {inp.mean()=}, {inp.std()=}")
         out = self.phi_e(inp)
-        # print(f"phi_e(norms, dots) = {out.shape}")
-        out = out * self.phi_m(out)
-        
+        # Residual connection
+        out = out * (1 + self.phi_m(out))
         return out
 
 
@@ -83,7 +84,7 @@ class FMLorentzLayer(nn.Module):
         messages_with_time = torch.cat([messages, t_broadcast], dim=-1)
         velocity_magnitude = self.phi_x(messages_with_time)
         velocity = velocity_magnitude * diffs
-        velocity = torch.mean(velocity, dim=-2)
+        velocity = torch.sum(velocity, dim=-2)
         
         return velocity
     
@@ -100,8 +101,8 @@ class LorentzFMNet(nn.Module):
             if i == 0:
                 vel = layer(x_t, t)
             else:
-                # Pass the output of the previous layer as input to the next layer
-                vel = layer(vel, t)
+                # Residual connection
+                vel = layer(vel, t) + vel
         return vel
 
     def step(self, x_t: torch.Tensor, t_start: torch.Tensor, t_end: torch.Tensor, method: ode_solver_methods=ode_solver_methods.euler) -> torch.Tensor:
@@ -114,7 +115,9 @@ class LorentzFMNet(nn.Module):
             t_end = t_end.unsqueeze(0).repeat(batch_size).view(-1, 1, 1)
 
             # Translate x_t by the expected velocity at t_start
-            return x_t + (t_end - t_start) * self.forward(x_t=x_t, t=t_start)
+            update = self.forward(x_t=x_t, t=t_start)
+            print(f"Update: mean={update.mean()}, std={update.std()}")
+            return x_t + (t_end - t_start) * update
 
         elif method == ode_solver_methods.midpoint:
             batch_size = x_t.shape[0]

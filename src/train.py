@@ -1,3 +1,4 @@
+import datetime
 import os
 import argparse
 import pickle
@@ -46,7 +47,7 @@ data_args = {
 }
 
 if __name__ == "__main__":
-    device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using {device} device")
     torch.manual_seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
@@ -85,8 +86,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Make folders if they do not exist
-    make_clear_folder(f"{args.out_dir}/figs")
-    make_clear_folder(f"{args.out_dir}/logs")
+    out_dir = f"{args.out_dir}/{str(datetime.datetime.now()).replace(' ', '_')}"
+    make_clear_folder(out_dir)
+    make_clear_folder(f"{out_dir}/models")
+    make_clear_folder(f"{out_dir}/logs")
+    make_clear_folder(f"{out_dir}/gen")
 
     print("Downloading datasets...")
 
@@ -112,8 +116,6 @@ if __name__ == "__main__":
     )
     print(f"{len(X_train)=}, {len(X_test)=}")
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train)
-    print(f"{X_train_particle_transformed.shape=}")
-
     # Normalize the features
     e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
     e_c_mirrored = np.concatenate([e_c, -e_c])
@@ -121,9 +123,10 @@ if __name__ == "__main__":
     p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
     p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
     final_scale = min([anderson(data).fit_result.params.scale for data in [e_c_mirrored, p_x, p_y, p_z]])
-    with open(f"{args.out_dir}/scaling.txt", "w") as f:
+    with open(f"{out_dir}/logs/scaling.txt", "w") as f:
         f.write(f"Final scale: {final_scale}\n")
         f.close()
+    X_train_particle_transformed = (1/final_scale) * X_train_particle_transformed
 
     model = LorentzFMNet(
         n_hidden=args.n_hidden,
@@ -131,10 +134,8 @@ if __name__ == "__main__":
         dropout=args.dropout,
         c_weight=args.c_weight
     ).to(device)
+    torch.save(model.state_dict(), f"{out_dir}/models/model_initial.pth")
 
-    torch.save(model.state_dict(), f"{args.out_dir}/model_initial.pth")
-
-    X_train_particle_transformed = (1/final_scale) * X_train_particle_transformed
 
     X_train_loaded = DataLoader(
         X_train_particle_transformed,
@@ -154,11 +155,12 @@ if __name__ == "__main__":
             # print(data.shape)
             x_0 = sample_massless_4momentum_clouds(n_clouds=len(data), cloud_size=NUM_PARTICLES).to(device)
             # print(x_0.shape)
-            x_1 = data.to(device)
+            x_1 = data.to(device)[:, :, :4]
 
             t = torch.rand(x_0.shape[0], device=device).view(-1, 1, 1)  # Reshape t to match the expected input shape
             x_t = (1 - t) * x_0 + t * x_1  # Linear interpolation
             dx_t = x_1 - x_0
+            # print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
             optimizer.zero_grad()
 
             loss = nn.MSELoss()(model.forward(x_t, t), dx_t)
@@ -167,31 +169,35 @@ if __name__ == "__main__":
 
             epoch_loss.append(loss.item())
         
-            if torch.cuda.is_available():
-                if i % 100 == 0:
+            if i % 100 == 0:
+                if torch.cuda.is_available():
                     current_memory = torch.cuda.memory_allocated() / 1024**2
                     print(f"Epoch {epoch}, Batch {i}, Loss: {loss.item():.4f}, GPU Memory: {current_memory:.1f}MB")
                     # Clear cache periodically to prevent memory buildup
                     if current_memory > 10000:  # If using more than 10GB
                         torch.cuda.empty_cache()
+                for name, param in model.named_parameters():
+                    if param.grad is not None:
+                        print(f"{i=}, {name}: {param.grad.abs().mean().item():.4e}")
+
 
         losses.append(np.mean(epoch_loss))
         if epoch % 10 == 0:
             print(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {losses[-1]:.4f}")
     
-    # sns.lineplot(x=range(len(losses)), y=losses)
-    # plt.xlabel("Epoch")
-    # plt.ylabel("Loss")
-    # plt.title("Training Loss")
-    # plt.savefig(f"{args.out_dir}/figs/training_loss.png")
-
-    with open(f"{args.out_dir}/logs/training_loss.csv", "w") as f:
+    with open(f"{out_dir}/logs/training_loss.csv", "w") as f:
         f.write("epoch,loss\n")
         for epoch, loss in enumerate(losses):
             f.write(f"{epoch},{loss}\n")
 
-    torch.save(model.state_dict(), f"{args.out_dir}/final_model.pth")
+    torch.save(model.state_dict(), f"{out_dir}/models/final_model.pth")
     print("Model saved to final_model.pth")
+    with open(f"{out_dir}/logs/model_info.txt", "w") as f:
+        f.write(f"Model hyperparameters:\n")
+        for arg in vars(args):
+            f.write(f"{arg}: {getattr(args, arg)}\n")
+        f.write(f"Final scale: {final_scale}\n")
+        f.close()
 
     samples = []
     with torch.no_grad():
@@ -211,17 +217,10 @@ if __name__ == "__main__":
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+
     print("Done generating samples! Saving samples")
-    with open(f"{args.out_dir}/samples.txt", "w") as f:
-        for sample in samples:
-            sample = sample.cpu().numpy()
-            sample = final_scale * sample  # Scale back to original scale
-            f.write(f"{sample.tolist()}\n")
-        f.close()
-    samples = torch.cat(samples, dim=0)
-    # Multiply by the final scale to get the original scale
-    samples = final_scale * samples
-    torch.save(samples, f"{args.out_dir}/samples_cartesian.pt")
+    samples = final_scale * torch.cat(samples, dim=0)
+    torch.save(samples, f"{out_dir}/gen/samples_cartesian.pt")
     
     try:
         polar_gen_features = cartesian_to_EtaPhiPtE(samples).to(device)
@@ -269,7 +268,7 @@ if __name__ == "__main__":
         )
     except Exception as e:
         print(f"Error calculating W1 metrics: {e}")
-        
-    with open(f"{args.out_dir}/eval_info.pkl", "wb") as f:
+
+    with open(f"{out_dir}/logs/eval_info.pkl", "wb") as f:
         pickle.dump(eval_info, f)
     print("Evaluation metrics saved to eval_info.pkl")
