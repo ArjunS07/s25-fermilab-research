@@ -9,7 +9,9 @@ ode_solver_methods = Enum('ode_solver_methods', ['euler', 'midpoint'])
 def psi(p):
     ''' `\psi(p) = Sgn(p) \cdot \log(|p| + 1)`
     '''
-    return torch.sign(p) * torch.log(torch.abs(p) + 1)
+    # Clamp inputs
+    p = torch.clamp(p, -1e6, 1e6)
+    return torch.sign(p) * torch.log1p(torch.abs(p))
 
 def minkowski_features(x, device='cpu'):
     # print(f"{x.shape=}")
@@ -44,27 +46,29 @@ class FMLorentzLayer(nn.Module):
             nn.ReLU()
         )
 
-        layer = nn.Linear(n_hidden, 1, bias=False)
-        torch.nn.init.xavier_uniform_(layer.weight)
         self.phi_x = nn.Sequential(
-            #  Message + time -> Embedding
+            nn.LayerNorm(n_hidden * 2),
             nn.Linear(n_hidden * 2, n_hidden),
             nn.ReLU(),
-            nn.Linear(n_hidden, 4, bias=False))
+            nn.Linear(n_hidden, 4, bias=True))
 
         self.phi_m = nn.Sequential(
             nn.Linear(n_hidden, 1))
     
         self.device = device
+
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight, gain=0.7)
     
     
     def message_passing(self, norms, dots, diffs):
         # inp = torch.stack([norms, dots], dim=-1)  # Concatenate along feature dimension
         inp = torch.cat([norms.unsqueeze(-1), dots.unsqueeze(-1)], dim=-1).to(self.device)
         # print(f"{inp.shape=} {inp.mean()=}, {inp.std()=}")
-        out = self.phi_e(inp).to(self.device)
-        # Residual connection
-        out = out * (1 + self.phi_m(out))
+        base = self.phi_e(inp).to(self.device)
+        scale = torch.tanh(self.phi_m(base))  # restrict to [-1, 1]
+        out = base * (1 + scale)
         return out.to(self.device)
 
 
@@ -83,9 +87,9 @@ class FMLorentzLayer(nn.Module):
         # Concatenate messages with time
         messages_with_time = torch.cat([messages, t_broadcast], dim=-1).to(self.device)
         velocity_magnitude = self.phi_x(messages_with_time).to(self.device)
+        diffs = diffs / (torch.norm(diffs, dim=-1, keepdim=True) + 1e-6)
         velocity = (velocity_magnitude * diffs).to(self.device)
         velocity = torch.sum(velocity, dim=-2).to(self.device)
-        
         return velocity
     
 class LorentzFMNet(nn.Module):
@@ -101,9 +105,10 @@ class LorentzFMNet(nn.Module):
         for i, layer in enumerate(self.layers):
             if i == 0:
                 vel = layer(x_t, t).to(self.device)
+                print(f"Layer {i}: vel shape={vel.shape}, mean={vel.mean()}, std={vel.std()}")
             else:
-                # Residual connection
                 vel = layer(vel, t)
+                print(f"Layer {i}: vel shape={vel.shape}, mean={vel.mean()}, std={vel.std()}")
         return vel
 
     def step(self, x_t: torch.Tensor, t_start: torch.Tensor, t_end: torch.Tensor, method: ode_solver_methods=ode_solver_methods.euler) -> torch.Tensor:
@@ -117,7 +122,7 @@ class LorentzFMNet(nn.Module):
 
             # Translate x_t by the expected velocity at t_start
             update = self.forward(x_t=x_t, t=t_start)
-            print(f"Update: mean={update.mean()}, std={update.std()}")
+            # print(f"Update: mean={update.mean()}, std={update.std()}")
             return x_t + (t_end - t_start) * update
 
         elif method == ode_solver_methods.midpoint:
