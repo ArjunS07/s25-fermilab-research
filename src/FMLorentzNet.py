@@ -11,21 +11,21 @@ def psi(p):
     '''
     return torch.sign(p) * torch.log(torch.abs(p) + 1)
 
-def minkowski_features(x):
+def minkowski_features(x, device='cpu'):
     # print(f"{x.shape=}")
-    x_i = x.unsqueeze(-2) # second-last dimension - N
-    x_j = x.unsqueeze(-3) # third-last dimension - B
-    x_diffs = x_i - x_j # (batch_size, n_particles, n_particles, 
+    x_i = x.unsqueeze(-2).to(device)  # second-last dimension - N
+    x_j = x.unsqueeze(-3).to(device)  # third-last dimension - B
+    x_diffs = x_i - x_j  # (batch_size, n_particles, n_particles, 
 
-    norms = normsq4(x_diffs)
-    dots = dotsq4(x_i, x_j)
+    norms = normsq4(x_diffs).to(device)
+    dots = dotsq4(x_i, x_j).to(device)
     norms, dots = psi(norms), psi(dots)
     return norms, dots, x_diffs
 
 N_EDGE_FEATURES = 2
 class FMLorentzLayer(nn.Module):
     def __init__(self,n_hidden, 
-                 dropout = 0., c_weight=1.0, last_layer=False):
+                 dropout = 0., c_weight=1.0, last_layer=False, device='cpu'):
         super(FMLorentzLayer, self).__init__()
 
         self.c_weight = c_weight
@@ -50,59 +50,60 @@ class FMLorentzLayer(nn.Module):
             #  Message + time -> Embedding
             nn.Linear(n_hidden * 2, n_hidden),
             nn.ReLU(),
-            nn.Linear(n_hidden, 1, bias=False),
-            nn.Tanh())
+            nn.Linear(n_hidden, 4, bias=False))
 
         self.phi_m = nn.Sequential(
-            nn.Linear(n_hidden, 1),
-            nn.Sigmoid())
+            nn.Linear(n_hidden, 1))
+    
+        self.device = device
     
     
     def message_passing(self, norms, dots, diffs):
         # inp = torch.stack([norms, dots], dim=-1)  # Concatenate along feature dimension
-        inp = torch.cat([norms.unsqueeze(-1), dots.unsqueeze(-1)], dim=-1)
+        inp = torch.cat([norms.unsqueeze(-1), dots.unsqueeze(-1)], dim=-1).to(self.device)
         # print(f"{inp.shape=} {inp.mean()=}, {inp.std()=}")
-        out = self.phi_e(inp)
+        out = self.phi_e(inp).to(self.device)
         # Residual connection
         out = out * (1 + self.phi_m(out))
-        return out
+        return out.to(self.device)
 
 
     def forward(self, x_t: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        phi_t = self.phi_t(t.unsqueeze(-1))
+        phi_t = self.phi_t(t.unsqueeze(-1)).to(self.device)
         # print(f"{phi_t.shape=}")
 
-        norms, dots, diffs = minkowski_features(x_t)
+        norms, dots, diffs = minkowski_features(x_t, self.device)
         # print(f"{norms.shape=}, {dots.shape=}, {diffs.shape=}")
-        messages = self.message_passing(norms, dots, diffs)
+        messages = self.message_passing(norms, dots, diffs).to(self.device)
         # print(f"{messages.shape=}, {phi_t.shape=}")
 
         batch_size, n_particles, _, n_hidden = messages.shape
-        t_broadcast = phi_t.view(batch_size, 1, 1, -1).expand(-1, n_particles, n_particles, -1)
+        t_broadcast = phi_t.view(batch_size, 1, 1, -1).expand(-1, n_particles, n_particles, -1).to(self.device)
 
         # Concatenate messages with time
-        messages_with_time = torch.cat([messages, t_broadcast], dim=-1)
-        velocity_magnitude = self.phi_x(messages_with_time)
-        velocity = velocity_magnitude * diffs
-        velocity = torch.sum(velocity, dim=-2)
+        messages_with_time = torch.cat([messages, t_broadcast], dim=-1).to(self.device)
+        velocity_magnitude = self.phi_x(messages_with_time).to(self.device)
+        velocity = (velocity_magnitude * diffs).to(self.device)
+        velocity = torch.sum(velocity, dim=-2).to(self.device)
         
         return velocity
     
 class LorentzFMNet(nn.Module):
-    def __init__(self, n_hidden, n_layers, dropout=0., c_weight=1.0):
+    def __init__(self, n_hidden, n_layers, dropout=0., c_weight=1.0, device='cpu'):
         super(LorentzFMNet, self).__init__()
+        self.device = device
         self.layers = nn.ModuleList([
-            FMLorentzLayer(n_hidden, dropout=dropout, c_weight=c_weight)
+            FMLorentzLayer(n_hidden, dropout=dropout, c_weight=c_weight, device=device)
             for _ in range(n_layers)
         ])
 
     def forward(self, x_t: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         for i, layer in enumerate(self.layers):
             if i == 0:
-                vel = layer(x_t, t)
+                vel = layer(x_t, t).to(self.device)
             else:
                 # Residual connection
-                vel = layer(vel, t) + vel
+                vel = layer(vel, t)
         return vel
 
     def step(self, x_t: torch.Tensor, t_start: torch.Tensor, t_end: torch.Tensor, method: ode_solver_methods=ode_solver_methods.euler) -> torch.Tensor:

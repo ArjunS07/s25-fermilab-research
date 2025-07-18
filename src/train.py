@@ -132,7 +132,8 @@ if __name__ == "__main__":
         n_hidden=args.n_hidden,
         n_layers=args.n_layers,
         dropout=args.dropout,
-        c_weight=args.c_weight
+        c_weight=args.c_weight,
+        device=device
     ).to(device)
     torch.save(model.state_dict(), f"{out_dir}/models/model_initial.pth")
 
@@ -153,14 +154,13 @@ if __name__ == "__main__":
 
         for i, data in enumerate(X_train_loaded):
             # print(data.shape)
-            x_0 = sample_massless_4momentum_clouds(n_clouds=len(data), cloud_size=NUM_PARTICLES).to(device)
+            x_0 = sample_massless_4momentum_clouds(n_clouds=len(data), cloud_size=NUM_PARTICLES, device=device).to(device)
             # print(x_0.shape)
             x_1 = data.to(device)[:, :, :4]
 
-            t = torch.rand(x_0.shape[0], device=device).view(-1, 1, 1)  # Reshape t to match the expected input shape
+            t = torch.rand(x_0.shape[0], device=device).view(-1, 1, 1) 
             x_t = (1 - t) * x_0 + t * x_1  # Linear interpolation
             dx_t = x_1 - x_0
-            # print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
             optimizer.zero_grad()
 
             loss = nn.MSELoss()(model.forward(x_t, t), dx_t)
@@ -169,16 +169,13 @@ if __name__ == "__main__":
 
             epoch_loss.append(loss.item())
         
-            if i % 100 == 0:
+            if i % 500 == 0:
+                print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
                 if torch.cuda.is_available():
-                    current_memory = torch.cuda.memory_allocated() / 1024**2
-                    print(f"Epoch {epoch}, Batch {i}, Loss: {loss.item():.4f}, GPU Memory: {current_memory:.1f}MB")
-                    # Clear cache periodically to prevent memory buildup
-                    if current_memory > 10000:  # If using more than 10GB
-                        torch.cuda.empty_cache()
-                for name, param in model.named_parameters():
-                    if param.grad is not None:
-                        print(f"{i=}, {name}: {param.grad.abs().mean().item():.4e}")
+                    allocated = torch.cuda.memory_allocated() / 1024**2       # Tensors currently live
+                    reserved = torch.cuda.memory_reserved() / 1024**2         # Memory reserved by PyTorch's caching allocator
+                    max_allocated = torch.cuda.max_memory_allocated() / 1024**2  # Peak allocation during program
+                    print(f"Epoch {epoch}, Batch {i}, Loss: {loss.item():.4f}. Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB, Peak: {max_allocated:.2f} MB")
 
 
         losses.append(np.mean(epoch_loss))
@@ -203,7 +200,7 @@ if __name__ == "__main__":
     with torch.no_grad():
         model.eval()
         times = torch.linspace(0, 1, args.integration_steps + 1).to(device)
-        x = torch.randn(args.n_samples, NUM_PARTICLES, NUM_PARTICLE_FEATURES).to(device)
+        x = sample_massless_4momentum_clouds(n_clouds=len(data), cloud_size=NUM_PARTICLES, device=device).to(device)
 
         for start_idx in range(0, args.n_samples, args.batch_size):
             end_idx = min(start_idx + args.batch_size, args.n_samples)
