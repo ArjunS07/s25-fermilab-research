@@ -1,7 +1,5 @@
 import datetime
-import os
 import argparse
-import pickle
 
 import numpy as np
 import torch
@@ -11,10 +9,9 @@ from torch.utils.data import DataLoader
 from scipy.stats import anderson
 
 from jetnet.datasets import JetNet
-import jetnet.evaluation as eval
-from jetnet.utils import cartesian_to_EtaPhiPtE
 
-from FMLorentzNet import LorentzFMNet, ode_solver_methods
+from models.ConditionalLEFlowMatching import JetFMGenerator
+from util import jet_attributes
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from util.file_management import make_clear_folder
 from util.distributions import sample_massless_4momentum_clouds
@@ -27,21 +24,14 @@ NUM_PARTICLE_FEATURES = 4 # E/c, px, py, pz
 TRAIN_SPLIT = 0.7
 
 
-feature_maxes = JetNet.fpnd_norm.feature_maxes
-if MASK:
-    feature_maxes = feature_maxes + [1]
-
 data_args = {
-    # "jet_type": ["g", "q", "t"],
     "jet_type": ["g"],
     "data_dir": "datasets/jetnet",
     "num_particles": NUM_PARTICLES,
     "particle_features": (
         JetNet.ALL_PARTICLE_FEATURES if MASK else JetNet.ALL_PARTICLE_FEATURES[:-1]
     ),
-    # The order of the list is preserved in the retrieved data
     "jet_features": ["eta", "pt", "mass", "num_particles", "type"],
-    # "particle_normalisation": particle_normalizer,
     "split_fraction": [TRAIN_SPLIT, 1 - TRAIN_SPLIT, 0],
     "download": True
 }
@@ -74,13 +64,12 @@ if __name__ == "__main__":
     parser.add_argument("--c_weight", type=float, default=1.0, help="Weight for the c parameter in the network")
     
     # Training
+    parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to generate")
     parser.add_argument("--batch_size", type=int, default=1024, help="Batch size for training")
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
 
     # Integration
     parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
-    parser.add_argument("--ode_solver", type=str, choices=[m.name for m in ode_solver_methods], default="euler",
-                        help="ODE solver method to use")
     parser.add_argument("--integration_steps", type=int, default=16, help="Number of integration steps for ODE solver")
     
     args = parser.parse_args()
@@ -91,8 +80,6 @@ if __name__ == "__main__":
     make_clear_folder(f"{out_dir}/models")
     make_clear_folder(f"{out_dir}/logs")
     make_clear_folder(f"{out_dir}/gen")
-
-    print("Downloading datasets...")
 
     X_train = JetNet(
         jet_type=args.jet_types,
@@ -116,67 +103,71 @@ if __name__ == "__main__":
     )
     print(f"{len(X_train)=}, {len(X_test)=}")
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train)
-    # Normalize the features
+
     e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
     e_c_mirrored = np.concatenate([e_c, -e_c])
     p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
     p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
     p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
     final_scale = min([anderson(data).fit_result.params.scale for data in [e_c_mirrored, p_x, p_y, p_z]])
-    with open(f"{out_dir}/logs/scaling.txt", "w") as f:
-        f.write(f"Final scale: {final_scale}\n")
+    with open(f"{out_dir}/logs/final_scale.txt", "w") as f:
+        f.write(f"{final_scale}\n")
         f.close()
     X_train_particle_transformed = (1/final_scale) * X_train_particle_transformed
 
-    model = LorentzFMNet(
-        n_hidden=args.n_hidden,
+        
+    model: JetFMGenerator = JetFMGenerator(
+        n_particles=args.num_particles,
         n_layers=args.n_layers,
-        dropout=args.dropout,
-        c_weight=args.c_weight,
-        device=device
+        c=args.c_weight
     ).to(device)
     torch.save(model.state_dict(), f"{out_dir}/models/model_initial.pth")
 
+    jet_info = X_train[:][1]
+    encoded_jet_types = jet_attributes.one_hot_enc_jet_type(jet_info[:, 4].long())
+    jet_info_cropped = jet_info[:, :4]  # Keep only the first 4 features (eta, p_t, mass, num_particles)
+    jet_info = torch.cat([jet_info_cropped, encoded_jet_types], dim=-1)
 
     X_train_loaded = DataLoader(
-        X_train_particle_transformed,
+        list(zip(X_train_particle_transformed, jet_info))[:args.n_train_samples],
         batch_size=args.batch_size,
         shuffle=True,
-        pin_memory=True)
+        pin_memory=True
+    )
     
     losses = []
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-
-    print("Beginning training")
-
+    # TODO: Cosine learning rate scheduler
+    optimizer = torch.optim.Adam(model.parameters(), lr=16e-4)
     for epoch in range(args.num_epochs):
         epoch_loss = []
 
         for i, data in enumerate(X_train_loaded):
-            # print(data.shape)
-            x_0 = sample_massless_4momentum_clouds(n_clouds=len(data), cloud_size=NUM_PARTICLES, device=device).to(device)
-            # print(x_0.shape)
-            x_1 = data.to(device)[:, :, :4]
-
-            t = torch.rand(x_0.shape[0], device=device).view(-1, 1, 1) 
-            x_t = (1 - t) * x_0 + t * x_1  # Linear interpolation
-            dx_t = x_1 - x_0
             optimizer.zero_grad()
 
-            loss = nn.MSELoss()(model.forward(x_t, t), dx_t)
+            jet_info = data[1].to(device)
+            x_1 = data[0].to(device)[:, :, :4]
+            x_0 = torch.randn_like(x_1, device=device)  # Sample random initial state
+
+            t = torch.rand(x_0.shape[0], device=device)
+            t_viewed = t.view(-1, 1, 1)
+            x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
+            dx_t = x_1 - x_0
+
+            pred = model.forward(x_t, t, jet_info, device=device)
+            loss = nn.MSELoss()(pred, dx_t)
             loss.backward()
+            model.clip_gradients()
             optimizer.step()
 
             epoch_loss.append(loss.item())
         
-            if i % 500 == 0:
+            if i % 5_000 == 0:
                 print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
                 if torch.cuda.is_available():
                     allocated = torch.cuda.memory_allocated() / 1024**2       # Tensors currently live
                     reserved = torch.cuda.memory_reserved() / 1024**2         # Memory reserved by PyTorch's caching allocator
                     max_allocated = torch.cuda.max_memory_allocated() / 1024**2  # Peak allocation during program
                     print(f"Epoch {epoch}, Batch {i}, Loss: {loss.item():.4f}. Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB, Peak: {max_allocated:.2f} MB")
-
 
         losses.append(np.mean(epoch_loss))
         if epoch % 10 == 0:
@@ -188,84 +179,30 @@ if __name__ == "__main__":
             f.write(f"{epoch},{loss}\n")
 
     torch.save(model.state_dict(), f"{out_dir}/models/final_model.pth")
-    print("Model saved to final_model.pth")
-    with open(f"{out_dir}/logs/model_info.txt", "w") as f:
-        f.write(f"Model hyperparameters:\n")
+    with open(f"{out_dir}/logs/args.txt", "w") as f:
+        f.write(f"CLI args:\n")
         for arg in vars(args):
             f.write(f"{arg}: {getattr(args, arg)}\n")
-        f.write(f"Final scale: {final_scale}\n")
         f.close()
 
     samples = []
+    jet_attr_generator = jet_attributes.load_model().to(device)
     with torch.no_grad():
         model.eval()
+        jet_attr_generator.eval()
+        
         times = torch.linspace(0, 1, args.integration_steps + 1).to(device)
-        x = sample_massless_4momentum_clouds(n_clouds=len(data), cloud_size=NUM_PARTICLES, device=device).to(device)
+        x = torch.randn((args.n_samples, NUM_PARTICLES, NUM_PARTICLE_FEATURES), device=device)
 
         for start_idx in range(0, args.n_samples, args.batch_size):
             end_idx = min(start_idx + args.batch_size, args.n_samples)
             x_batch = x[start_idx:end_idx]
+            generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_generator, device, n_jet_types=3, num_jets=args.batch_size)
 
             for i in range(args.integration_steps):
-                x_batch = model.step(x_batch, times[i], times[i + 1], method=ode_solver_methods[args.ode_solver])
+                x_batch = model.step(x_batch, generated_jet_attrs, times[i], times[i + 1])
             samples.append(x_batch)
-            if start_idx % 100 == 0:
-                print(f"Processed samples {start_idx} to {end_idx}")
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
 
     print("Done generating samples! Saving samples")
     samples = final_scale * torch.cat(samples, dim=0)
     torch.save(samples, f"{out_dir}/gen/samples_cartesian.pt")
-    
-    try:
-        polar_gen_features = cartesian_to_EtaPhiPtE(samples).to(device)
-        x_test = (X_test[:args.n_samples][0]).to(device)
-    except Exception as e:
-        breakpoint()
-
-    # Metrics
-    eval_info = {}
-    eval_info["cov_mmd"] = eval.cov_mmd(
-        real_jets=x_test[:, :, :3].to(device),
-        gen_jets=polar_gen_features
-    )
-    eval_info["fpd"] = eval.fpd(
-        real_features=x_test.reshape((-1, NUM_PARTICLE_FEATURES)).to(device),
-        gen_features=polar_gen_features.reshape((-1, NUM_PARTICLE_FEATURES)).to(device),
-        seed=RANDOM_SEED
-    )
-
-    # Requires torch geometric
-    # eval_info["fpnd_g"] = eval.fpnd(
-    #     jets=polar_gen_features[:, :, :3],
-    #     jet_type="g",
-    #     use_tqdm=False
-    # )
-
-    # Don't include mass
-    jets1 = polar_gen_features[:, :, :3]
-    jets2 = X_test[:][0]
-    try:
-        eval_info["w1efp"] = eval.w1efp(
-            jets1=jets1,
-            jets2=jets2,
-        )
-    except Exception as e:
-        print(f"Error calculating W1 EFP metrics: {e}")
-    try:
-        eval_info["w1m"] = eval.w1m(
-            jets1=jets1,
-            jets2=jets2,
-        )
-        eval_info["w1p"] = eval.w1p(
-            jets1=jets1,
-            jets2=jets2,
-        )
-    except Exception as e:
-        print(f"Error calculating W1 metrics: {e}")
-
-    with open(f"{out_dir}/logs/eval_info.pkl", "wb") as f:
-        pickle.dump(eval_info, f)
-    print("Evaluation metrics saved to eval_info.pkl")
