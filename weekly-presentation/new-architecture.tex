@@ -1,0 +1,120 @@
+%----------------------------------------------------------------------------------------
+%    PACKAGES AND THEMES
+%----------------------------------------------------------------------------------------
+\documentclass[handout, aspectratio=169,xcolor=dvipsnames]{beamer}
+\makeatletter
+\def\input@path{{theme/}}
+\makeatother
+\usetheme{CleanEasy}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+% \usepackage[brazil]{babel}
+\usepackage{fix-cm}
+\usepackage{amsmath}
+\usepackage{mathtools}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{graphicx} % Allows including images
+\usepackage{booktabs} % Allows the use of \toprule, \midrule and \bottomrule in tables
+\usepackage{tikz}
+\usetikzlibrary{positioning, shapes, arrows, calc, decorations.pathreplacing, arrows.meta, backgrounds, patterns, overlay-beamer-styles}
+\usepackage{etoolbox}
+\usepackage{animate}
+\usepackage{multimedia}
+\usepackage{media9}
+
+\usepackage{subfiles}
+
+
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\by}{\mathbf{y}}
+\newcommand{\pd}{p_\text{data}}
+\newcommand{\pt}{p_\theta}
+\newcommand{\nbx}{\nabla_{\bx}}
+
+\newcommand{\btx}{\mathbf{\tilde{x}}}
+\newcommand{\qs}{q_{\sigma}}
+\newcommand{\nbtx}{\nabla_{\btx}}
+
+%----------------------------------------------------------------------------------------
+%    LAYOUT CONFIGURATION
+%----------------------------------------------------------------------------------------
+\input{configs/configs}
+%----------------------------------------------------------------------------------------
+
+% References from references.bib
+\usepackage[backend=bibtex,sorting=none]{biblatex}
+\addbibresource{references.bib}
+
+
+\begin{document}
+
+\section{Week 3}
+
+
+\begin{frame}{Old architecture based on LorentzNet}
+
+    $x$ = Cartesian particle 4-momenta, $\phi_\cdot$ = learnable functions, $\psi(\cdot) = \text{sgn}(\cdot) \log(|\cdot| + 1)$, $c = $ hyperparameter, $N = \#$ particles, $|| \cdot ||, \langle \cdot \rangle$ = Minkowski norm and inner product
+    \vspace{0.5cm}
+    \begin{columns}
+        \begin{column}{0.5\textwidth}
+            \textbf{LGEB (\cite{gongEfficientLorentzEquivariant2022})}
+            \begin{align*}
+                m_{ij}^l &= \phi_e(h_i^l, h_j^l, \psi(||x_i^l - x_j^l||), \psi(\langle x_i^l, x_j^l \rangle)) \\
+                m_{ij}^l &= \phi_m(m_{ij}^l) \cdot m_{ij}^l
+            \end{align*}
+            \begin{align*}
+                x_i^{l+1} &= x_i^l + \frac{c}{N} \sum\limits_{j \in [N]} \phi_x(m_{ij}^l) \cdot |x_i - x_j|         
+            \end{align*}
+            \begin{align*}
+                h_i^{l+1} &= h_i^l + \phi_h(h_i^l, \sum\limits_{j \in [N]} \phi_w(m_{ij}^l) m_{ij}^l)
+            \end{align*}
+        \end{column}
+        \begin{column}{0.5\textwidth}
+            \textbf{Simple LE block this week}
+            \begin{align*}
+                m^l_{ij} &= \phi_e(\psi(||x_i^l - x_j^l||), \psi(\langle x_i^l, x_j^l \rangle))\\
+                m^l_{ij} &= \phi_m(m^l_{ij}) \cdot m^l_{ij}
+            \end{align*}
+            \begin{align*}
+                x_i^{l+1} &= x_i^l + \frac{c}{N} \sum\limits_{j \in [N]} \phi_x(m_{ij}, g) \cdot |x_j^l - x_i^l|
+            \end{align*}
+            $g = $ global feature vector (currently time embedding $\phi_t(t)$)
+        \end{column}
+    \end{columns}
+\end{frame}
+
+\begin{frame}[allowframebreaks]{New architecture}
+    \begin{enumerate}
+        \item Embed scalar time value to random Fourier features through two fully connected layers with 32 and 64 nodes (following \cite{wuFastPointCloud2023})
+        \item Concatenate time embedding with jet conditioning information, which consists of: \begin{enumerate}
+            \item One-hot encoded jet type
+            \item Jet mass
+            \item Jet transverse momentum
+            \item Jet number of constituents
+        \end{enumerate}
+        \item Pass this through a fully connected layer of size 64 to produce the initial global embeddings $g_0$
+        \item Concatenate $g_0$ with features $x_1^0 \dots x_n^0$ initialized from the initial distribution $p_0$.
+        \item Now, we use 6 Lorentz-group equivariant layers. \begin{enumerate}
+            \item The input to the $l+1$-th layer is $g^l$ and $x^{l}_n \dots x^l_N$.
+            \item Calculate messages $m^l_{ij} = \phi_m(\psi(||x_i^l - x_j^l||), \psi(\langle x_i^l, x_j^l \rangle))$
+            \item Update the global embedding $g_{l+1} = \phi_{eg}(g_l, \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_e(m_{ij}) \bigoplus \sum\limits_{i, j \in [N]} \phi_e(m_{ij}))$
+            \item Feed in the updated global embedding as well as the original embedding to update the graph embeddings $$
+            x_i^{l+1} = x_i^{l} + \phi_x(g_0 \bigoplus g^{l+1} \bigoplus \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}) \bigoplus \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}))
+            $$
+            \item Pass the results $g^{l+1}$ and $x_i^{l+1}$ to the next layer
+        \end{enumerate}
+        \item After the final LE layer, run the particle representations through a final round of message-passing with the final global embedding $$
+        x_i^{L+1} = x_i^{L} + \phi_x(g_0 \bigoplus g^{L} \bigoplus \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}) \bigoplus \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}))
+        $$
+    \end{enumerate}
+\end{frame}
+
+
+
+\begin{frame}[allowframebreaks]{References}
+\printbibliography
+\end{frame}
+\end{document}
