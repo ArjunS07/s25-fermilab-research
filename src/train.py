@@ -127,10 +127,10 @@ if __name__ == "__main__":
     ).to(device)
     torch.save(model.state_dict(), f"{out_dir}/models/model_initial.pth")
 
-    jet_info = X_train[:][1]
-    encoded_jet_types = jet_attributes.one_hot_enc_jet_type(jet_info[:, 4].long())
+    jet_info = X_train[:][1].to(device)
+    encoded_jet_types = jet_attributes.one_hot_enc_jet_type(jet_info[:, 4].long()).to(device)
     jet_info_cropped = jet_info[:, :4]  # Keep only the first 4 features (eta, p_t, mass, num_particles)
-    jet_info = torch.cat([jet_info_cropped, encoded_jet_types], dim=-1)
+    jet_info = torch.cat([jet_info_cropped, encoded_jet_types], dim=-1).to(device)
 
     X_train_loaded = DataLoader(
         list(zip(X_train_particle_transformed, jet_info))[:args.n_train_samples],
