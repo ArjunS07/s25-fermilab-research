@@ -14,13 +14,13 @@ def psi(p):
     p = torch.clamp(p, -1e6, 1e6)
     return torch.sign(p) * torch.log1p(torch.abs(p))
 
-def minkowski_features(x, device='cpu'):
-    x_i = x.unsqueeze(-2).to(device)  # second-last dimension - N
-    x_j = x.unsqueeze(-3).to(device)  # third-last dimension - B
+def minkowski_features(x):
+    x_i = x.unsqueeze(-2)  # second-last dimension - N
+    x_j = x.unsqueeze(-3)  # third-last dimension - B
     x_diffs = x_i - x_j  # (batch_size, n_particles, n_particles, 4)
 
-    norms = normsq4(x_diffs).to(device)
-    dots = dotsq4(x_i, x_j).to(device)
+    norms = normsq4(x_diffs)
+    dots = dotsq4(x_i, x_j)
     norms, dots = psi(norms), psi(dots)
     return norms, dots, x_diffs
 
@@ -150,7 +150,7 @@ class LorentzEquivariantLayer(nn.Module):
         self.node_norm = nn.LayerNorm(particle_dim)
         self.global_norm = nn.LayerNorm(global_dim)
         
-    def forward(self, x, g, g_0, device='cpu'):
+    def forward(self, x, g, g_0):
         """
         Args:
             x: (batch_size, n_particles, particle_dim) - particle features
@@ -160,7 +160,7 @@ class LorentzEquivariantLayer(nn.Module):
         batch_size, n_particles, _ = x.shape
         
         # Minkowski edge features
-        norms, dots, _ = minkowski_features(x[..., :4], device) 
+        norms, dots, _ = minkowski_features(x[..., :4]) 
         
         # messages m_ij = phi_m(psi(||x_i - x_j||), psi(⟨x_i, x_j⟩))
         edge_features = torch.stack([norms, dots], dim=-1)  # (batch, n_particles, n_particles, 2)
@@ -242,7 +242,7 @@ class JetFMGenerator(nn.Module):
         # Gradient clipping for stability
         self.gradient_clip_val = 1.0
         
-    def forward(self, x, t, jet_conditions, device='cpu'):
+    def forward(self, x, t, jet_conditions):
         """
         Args:
             x: (batch_size, n_particles, 4) - initial particle 4-momenta
@@ -261,10 +261,10 @@ class JetFMGenerator(nn.Module):
         # Apply Lorentz-equivariant layers
         g = g_0
         for layer in self.le_layers:
-            x, g = layer(x, g, g_0, device)
+            x, g = layer(x, g, g_0)
         
         # Final message passing: collapse final global feature to per-particle features
-        norms, dots, _ = minkowski_features(x[..., :4], device)
+        norms, dots, _ = minkowski_features(x[..., :4])
         edge_features = torch.stack([norms, dots], dim=-1)
         
         edge_shape = edge_features.shape
