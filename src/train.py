@@ -150,8 +150,6 @@ if __name__ == "__main__":
             true_masks = data[0].to(device)[:, :, 4] if MASK else None
             x_0 = torch.randn_like(x_1, device=device)  # Sample random initial state
 
-            breakpoint()
-
             t = torch.rand(x_0.shape[0], device=device)
             t_viewed = t.view(-1, 1, 1)
             x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation

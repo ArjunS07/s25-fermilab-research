@@ -1,0 +1,61 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-train-job
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: as-train-pvc
+          persistentVolumeClaim:
+            claimName: as-jet-training-pvc
+
+      initContainers:
+      - name: setup-env
+        image: python:3.10-slim
+        volumeMounts:
+          - mountPath: /mnt/data
+            name: as-train-pvc
+        command:
+          - /bin/bash
+          - -c
+          - |
+            mkdir -p /mnt/data
+            ls -la /mnt/data
+
+      containers:
+      - name: train
+        image: python:3.10-slim
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -e  # fail on any error
+
+            echo "=== Cloning repo and preparing code ==="
+            git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
+            rm -rf /mnt/data/src
+            cp -r /tmp/repo/src /mnt/data/
+
+            echo "=== Activating environment and starting training ==="
+            export CUDA_LAUNCH_BLOCKING=1
+            export TORCH_USE_CUDA_DSA=1
+
+            . /mnt/data/python-env/bin/activate
+            cd /mnt/data/src
+            python3 train.py --batch_size=324 --num_epochs=40 --n_samples=50000 --n_layers=8
+        volumeMounts:
+          - mountPath: /mnt/data
+            name: as-train-pvc
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+            memory: "32Gi"
+            cpu: "4"
+          requests:
+            nvidia.com/gpu: 1
+            memory: "32Gi"
+            cpu: "2"
