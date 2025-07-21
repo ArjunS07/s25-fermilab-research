@@ -95,10 +95,10 @@ spec:
         name: as-train-pvc
     resources:
       limits:
-        nvidia.com/gpu: 2
-        memory: "16Gi"
+        nvidia.com/gpu: 1
+        memory: "32Gi"
         cpu: "4"
       requests:
-        nvidia.com/gpu: 2
-        memory: "16Gi"
+        nvidia.com/gpu: 1
+        memory: "32Gi"
         cpu: "2"
