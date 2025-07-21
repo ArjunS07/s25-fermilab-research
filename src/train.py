@@ -1,6 +1,8 @@
 import pickle
 import datetime
 import argparse
+import os
+import shutil
 
 import numpy as np
 import torch
@@ -223,3 +225,15 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         jet_types=len(args.jet_types)
     )
+
+    # move everything in out/ to final_out/
+    final_out_dir = f"{args.out_dir}/final_out"
+    make_clear_folder(final_out_dir)
+    for item in os.listdir(out_dir):
+        src_path = os.path.join(out_dir, item)
+        dst_path = os.path.join(final_out_dir, item)
+        if os.path.isdir(src_path):
+            shutil.move(src_path, dst_path)
+        else:
+            shutil.copy2(src_path, dst_path)
+    print(f"Training complete. Output saved to {final_out_dir}")
