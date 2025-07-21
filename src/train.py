@@ -1,3 +1,4 @@
+from copyreg import pickle
 import datetime
 import argparse
 
@@ -7,8 +8,11 @@ import random
 from torch import nn
 from torch.utils.data import DataLoader
 from scipy.stats import anderson
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from jetnet.datasets import JetNet
+from jetnet.utils import cartesian_to_EtaPhiPtE
 
 from models.ConditionalLEFlowMatching import JetFMGenerator
 from util import jet_attributes
@@ -204,5 +208,81 @@ if __name__ == "__main__":
             samples.append(x_batch)
 
     print("Done generating samples! Saving samples")
-    samples = final_scale * torch.cat(samples, dim=0)
-    torch.save(samples, f"{out_dir}/gen/samples_cartesian.pt")
+    samples_cartesian = final_scale * torch.cat(samples, dim=0)
+    torch.save(samples_cartesian, f"{out_dir}/gen/samples_cartesian.pt")
+
+    
+    # Metrics
+    eval_info = {}
+
+    gen_features_absolute = cartesian_to_EtaPhiPtE(samples_cartesian)
+    jet_eta = (X_test[:][1][:, 0]).unsqueeze(1)
+    jet_phi_vals = (2 * torch.pi) * torch.rand(len(X_test)).unsqueeze(1)
+    jet_phi_vals -= torch.pi
+    jet_pt_ec = X_test[:][1][:, 1:3]
+    jet_features = torch.concat([jet_eta, jet_phi_vals, jet_pt_ec], dim=-1)
+    eta_rel, phi_rel, pt_rel = torch.unbind(X_test[:][0][:, :, :3], axis=-1)
+    Eta, Phi, Pt, _ = torch.unbind(jet_features, axis=-1)
+    pt = pt_rel * Pt.unsqueeze(1)
+    eta = eta_rel + Eta.unsqueeze(1)
+    phi = phi_rel + Phi.unsqueeze(1)
+    p0 = pt * torch.cosh(eta)
+    test_features_absolute = [eta, phi, pt, p0]
+
+    eval_info["cov_mmd"] = eval.cov_mmd(
+        real_jets=test_features_absolute[:, :, :3].to(device),
+        gen_jets=gen_features_absolute
+    )
+    eval_info["fpd"] = eval.fpd(
+        real_features=test_features_absolute.reshape((-1, NUM_PARTICLE_FEATURES)).to(device),
+        gen_features=gen_features_absolute.reshape((-1, NUM_PARTICLE_FEATURES)).to(device),
+        seed=RANDOM_SEED
+    )
+    jets1 = gen_features_absolute[:, :, :]
+    jets2 = test_features_absolute[:][0]
+    try:
+        eval_info["w1efp"] = eval.w1efp(
+            jets1=jets1,
+            jets2=jets2,
+        )
+    except Exception as e:
+        print(f"Error calculating W1 EFP metrics: {e}")
+    try:
+        eval_info["w1m"] = eval.w1m(
+            jets1=jets1,
+            jets2=jets2,
+        )
+        eval_info["w1p"] = eval.w1p(
+            jets1=jets1,
+            jets2=jets2,
+        )
+    except Exception as e:
+        print(f"Error calculating W1 metrics: {e}")
+
+    with open(f"{out_dir}/logs/eval_info.pkl", "wb") as f:
+        pickle.dump(eval_info, f)
+    print("Evaluation metrics saved to eval_info.pkl")
+
+    # Generate figures
+    features_polar = [r"$\eta$", r"$\phi$", r"$p_T$", r"$E/c$"]
+    fig, axs = plt.subplots(1, 4, figsize=(20, 10))
+    for i, feature in enumerate(features_polar):
+        sns.kdeplot(
+            x=gen_features_absolute[:, :, i].flatten().cpu().numpy(),
+            ax=axs[i],
+            label="Generated",
+            fill=True,
+            alpha=0.5
+        )
+        sns.kdeplot(
+            x=test_features_absolute[:, :, i].flatten().cpu().numpy(),
+            ax=axs[i],
+            label="Test set",
+            fill=True,
+            alpha=0.5
+        )
+        axs[i].set_title(feature)
+        axs[i].legend()
+    plt.suptitle("Feature Distributions: Generated vs Real Jets")
+    plt.tight_layout()
+    plt.savefig(f"{out_dir}/gen/feature_distributions.png", dpi=300)
