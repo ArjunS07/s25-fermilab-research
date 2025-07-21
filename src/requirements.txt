@@ -152,8 +152,6 @@ toml==0.10.2
 tomli==2.2.1
 toolz==1.0.0
 torch==2.7.1
-torch-cluster==1.6.3
-torch-geometric==2.6.1
 tornado==6.5.1
 tqdm==4.67.1
 traitlets==5.14.3
