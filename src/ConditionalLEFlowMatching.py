@@ -4,8 +4,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from util import jet_attributes
-
 from util.minkowski_utils import normsq4, dotsq4
+
+N_JET_FEATURES = 4
 
 def psi(p):
     ''' `\psi(p) = Sgn(p) \cdot \log(|p| + 1)` '''
@@ -158,46 +159,37 @@ class LorentzEquivariantLayer(nn.Module):
         """
         batch_size, n_particles, _ = x.shape
         
-        # Compute Minkowski edge features
+        # Minkowski edge features
         norms, dots, _ = minkowski_features(x[..., :4], device) 
         
-        # Compute messages m_ij = phi_m(psi(||x_i - x_j||), psi(⟨x_i, x_j⟩))
+        # messages m_ij = phi_m(psi(||x_i - x_j||), psi(⟨x_i, x_j⟩))
         edge_features = torch.stack([norms, dots], dim=-1)  # (batch, n_particles, n_particles, 2)
-        
         # Reshape for MLP processing
         edge_shape = edge_features.shape
         edge_features_flat = edge_features.view(-1, 2)
         messages_flat = self.phi_m(edge_features_flat)
         
-        # Process messages for global and node updates
         edge_features_global = self.phi_e(messages_flat).view(*edge_shape[:-1], -1)
-        edge_features_node = self.phi_ex(messages_flat).view(*edge_shape[:-1], -1)
-        
-        # Aggregate messages (sum and average pooling)
         sum_pooled_global = edge_features_global.sum(dim=(1, 2))  # (batch, hidden_dim//2)
         avg_pooled_global = edge_features_global.mean(dim=(1, 2))  # (batch, hidden_dim//2)
-        
-        sum_pooled_node = edge_features_node.sum(dim=2)  # (batch, n_particles, hidden_dim//2)
-        avg_pooled_node = edge_features_node.mean(dim=2)  # (batch, n_particles, hidden_dim//2)
-        
         # Update global embedding
         global_input = torch.cat([g, sum_pooled_global, avg_pooled_global], dim=-1)
         g_new = self.phi_eg(global_input)
         g_new = self.global_norm(g_new + g)  # Residual connection with normalization
         
-        # Update node embeddings
+        edge_features_node = self.phi_ex(messages_flat).view(*edge_shape[:-1], -1)
+        sum_pooled_node = edge_features_node.sum(dim=2)  # (batch, n_particles, hidden_dim//2)
+        avg_pooled_node = edge_features_node.mean(dim=2)  # (batch, n_particles, hidden_dim//2)
+        # Use global features to update node features.
         # Broadcast global features to match node dimensions
         g_0_broadcast = g_0.unsqueeze(1).expand(-1, n_particles, -1)
         g_new_broadcast = g_new.unsqueeze(1).expand(-1, n_particles, -1)
-        
         node_input = torch.cat([
             g_0_broadcast, 
             g_new_broadcast, 
             sum_pooled_node, 
             avg_pooled_node
         ], dim=-1)
-        
-        # Reshape for MLP
         node_input_flat = node_input.view(-1, node_input.shape[-1])
         x_update_flat = self.phi_x(node_input_flat)
         x_update = x_update_flat.view(batch_size, n_particles, -1)
@@ -215,7 +207,7 @@ class JetFMGenerator(nn.Module):
                  global_dim=64,
                  n_layers=6,
                  hidden_dim=128,
-                 n_jet_types=5,
+                 n_jet_types=5, # Maximum number of jet types used during training of NF model
                  c=1.0):
         super().__init__()
         
@@ -229,7 +221,7 @@ class JetFMGenerator(nn.Module):
         
         # Initial global embedding
         # Input: [time_embed, jet_type_onehot, eta, jet_p_t, jet_mass, jet_n_constituents]
-        conditioning_dim = global_dim + n_jet_types + 4
+        conditioning_dim = global_dim + n_jet_types + N_JET_FEATURES
         self.initial_global = PhiMLP(conditioning_dim, [global_dim, global_dim], global_dim)
         
         # Lorentz-equivariant layers
@@ -265,19 +257,13 @@ class JetFMGenerator(nn.Module):
 
         # Initial global embedding
         g_0 = self.initial_global(conditioning)
-
-        # Initialize particle features (pad x if needed)
-        if x.shape[-1] < self.particle_dim:
-            padding = torch.zeros(batch_size, self.n_particles, 
-                                self.particle_dim - x.shape[-1], device=device)
-            x = torch.cat([x, padding], dim=-1)
         
         # Apply Lorentz-equivariant layers
         g = g_0
         for layer in self.le_layers:
             x, g = layer(x, g, g_0, device)
         
-        # Final message passing
+        # Final message passing: collapse final global feature to per-particle features
         norms, dots, _ = minkowski_features(x[..., :4], device)
         edge_features = torch.stack([norms, dots], dim=-1)
         
@@ -292,9 +278,6 @@ class JetFMGenerator(nn.Module):
         # Final node update
         g_0_broadcast = g_0.unsqueeze(1).expand(-1, self.n_particles, -1)
         g_broadcast = g.unsqueeze(1).expand(-1, self.n_particles, -1)
-
-        print(f"g_0_broadcast shape: {g_0_broadcast.shape}, g_broadcast shape: {g_broadcast.shape}")
-
         final_input = torch.cat([
             g_0_broadcast,
             g_broadcast,
@@ -304,10 +287,10 @@ class JetFMGenerator(nn.Module):
 
         final_input_flat = final_input.view(-1, final_input.shape[-1])
         x_final_flat = self.final_phi_x(final_input_flat)
-        x_final = x_final_flat.view(batch_size, self.n_particles, -1)
+        x_final_update = x_final_flat.view(batch_size, self.n_particles, -1)
         
         # Final residual connection
-        x_out = self.final_norm(x + x_final)
+        x_out = self.final_norm(x + x_final_update)
 
         return x_out
     
