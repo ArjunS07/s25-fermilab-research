@@ -19,14 +19,14 @@ from util.file_management import make_clear_folder
 
 RANDOM_SEED = 42
 
-MASK = False
-NUM_PARTICLES = 30
+MASK = True
+NUM_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4 # E/c, px, py, pz
 TRAIN_SPLIT = 0.7
 
 
 data_args = {
-    "jet_type": ["g"],
+    "jet_type": ["g", "q", "t"],
     "data_dir": "datasets/jetnet",
     "num_particles": NUM_PARTICLES,
     "particle_features": (
@@ -108,17 +108,16 @@ if __name__ == "__main__":
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train)
 
     e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
-    e_c_mirrored = np.concatenate([e_c, -e_c])
     p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
     p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
     p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
-    final_scale = min([anderson(data).fit_result.params.scale for data in [e_c_mirrored, p_x, p_y, p_z]])
+    scales = [np.std(e_c), np.std(p_x), np.std(p_y), np.std(p_z)]
+    final_scale = np.mean(scales)
+    
     with open(f"{out_dir}/logs/final_scale.txt", "w") as f:
         f.write(f"{final_scale}\n")
-        f.close()
-    X_train_particle_transformed = (1/final_scale) * X_train_particle_transformed
+    X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
 
-        
     model: JetFMGenerator = JetFMGenerator(
         n_particles=args.num_particles,
         n_layers=args.n_layers,
@@ -129,7 +128,7 @@ if __name__ == "__main__":
     jet_info = X_train[:][1].to(device)
     encoded_jet_types = jet_attributes.one_hot_enc_jet_type(jet_info[:, 4].long()).to(device)
     jet_info_cropped = jet_info[:, :4]  # Keep only the first 4 features (eta, p_t, mass, num_particles)
-    jet_info = torch.cat([jet_info_cropped, encoded_jet_types], dim=-1).to(device)
+    jet_info = torch.cat([encoded_jet_types, jet_info_cropped], dim=-1).to(device)
 
     X_train_loaded = DataLoader(
         list(zip(X_train_particle_transformed, jet_info))[:args.n_train_samples],
@@ -148,14 +147,17 @@ if __name__ == "__main__":
 
             jet_info = data[1].to(device)
             x_1 = data[0].to(device)[:, :, :4]
+            true_masks = data[0].to(device)[:, :, 4] if MASK else None
             x_0 = torch.randn_like(x_1, device=device)  # Sample random initial state
+
+            breakpoint()
 
             t = torch.rand(x_0.shape[0], device=device)
             t_viewed = t.view(-1, 1, 1)
             x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
             dx_t = x_1 - x_0
 
-            pred = model.forward(x_t, t, jet_info)
+            pred = model.forward(x_t, t, jet_info, true_masks)
             loss = nn.MSELoss()(pred, dx_t)
             loss.backward()
             model.clip_gradients()
@@ -163,13 +165,14 @@ if __name__ == "__main__":
 
             epoch_loss.append(loss.item())
         
-            if i % 5_000 == 0:
+            if i % (args.batch_size * 10) == 0:
+                print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}")
                 print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
                 if torch.cuda.is_available():
                     allocated = torch.cuda.memory_allocated() / 1024**2       # Tensors currently live
                     reserved = torch.cuda.memory_reserved() / 1024**2         # Memory reserved by PyTorch's caching allocator
                     max_allocated = torch.cuda.max_memory_allocated() / 1024**2  # Peak allocation during program
-                    print(f"Epoch {epoch}, Batch {i}, Loss: {loss.item():.4f}. Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB, Peak: {max_allocated:.2f} MB")
+                    print(f"Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB, Peak: {max_allocated:.2f} MB")
 
         losses.append(np.mean(epoch_loss))
         if epoch % 10 == 0:
@@ -196,5 +199,6 @@ if __name__ == "__main__":
         final_scale=final_scale,
         integration_steps=args.integration_steps,
         n_samples=args.n_samples,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        jet_types=len(args.jet_types)
     )

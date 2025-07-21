@@ -5,7 +5,7 @@ from models.ConditionalLEFlowMatching import JetFMGenerator
 
 
 def generate_samples(
-        model,
+        model: JetFMGenerator,
         device,
         out_dir,
         num_particles,
@@ -13,36 +13,43 @@ def generate_samples(
         final_scale,
         integration_steps,
         n_samples,
-        batch_size
+        batch_size,
+        jet_types=3,
 ):
-    samples = []
+
     jet_attr_generator = jet_attributes.load_model().to(device)
     with torch.no_grad():
         model.eval()
         jet_attr_generator.eval()
         
         times = torch.linspace(0, 1, integration_steps + 1).to(device)
-        x = torch.randn((n_samples, num_particles, num_particle_features), device=device)
 
         for start_idx in range(0, n_samples, batch_size):
-            end_idx = min(start_idx + batch_size, n_samples)
-            x_batch = x[start_idx:end_idx].to(device)
-            generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_generator, device, n_jet_types=1, num_jets=x_batch.shape[0])
-            generated_jet_attrs = generated_jet_attrs.to(device)
+            current_batch_size = min(batch_size, n_samples - start_idx)
+            x = torch.randn(
+                (current_batch_size, num_particles, num_particle_features),
+                device=device
+            )
+            generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_generator, device, n_jet_types=jet_types, num_jets=x.shape[0])
+            masks = jet_attributes.generate_masks(
+                generated_jet_attrs[:, -1],
+                max_n_particles=num_particles,
+                device=device
+            )
 
             for i in range(integration_steps):
-                x_batch = model.step(x_batch, generated_jet_attrs, times[i], times[i + 1])
-            samples.append(x_batch)
-
+                x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1])
+            
+            with open(f"{out_dir}/gen/samples.pt", "ab") as f:
+                torch.save(final_scale * x, f"{out_dir}/gen/samples_batch_{start_idx//batch_size:04d}.pt")
+                
             if start_idx % (batch_size * 10) == 0:
                 print(f"Generated {start_idx + batch_size} samples so far")
-
-    try:
-        print("Done generating samples! Saving samples")
-        samples_cartesian = final_scale * torch.cat(samples, dim=0)
-        torch.save(samples_cartesian, f"{out_dir}/gen/samples_cartesian.pt")
-    except Exception as e:
-        breakpoint()
+            
+            del x, generated_jet_attrs
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
 
 
 if __name__ == "__main__":

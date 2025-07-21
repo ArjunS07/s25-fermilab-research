@@ -150,17 +150,25 @@ class LorentzEquivariantLayer(nn.Module):
         self.node_norm = nn.LayerNorm(particle_dim)
         self.global_norm = nn.LayerNorm(global_dim)
         
-    def forward(self, x, g, g_0):
+    def forward(self, x, g, g_0, mask):
         """
         Args:
             x: (batch_size, n_particles, particle_dim) - particle features
             g: (batch_size, global_dim) - current global embedding
             g_0: (batch_size, global_dim) - initial global embedding
+            mask: (batch_size, n_particles) - binary mask where 1=valid particle, 0=padded
         """
         batch_size, n_particles, _ = x.shape
+
+        mask_expanded = mask.unsqueeze(-1)  # (batch, n_particles, 1)
+        edge_mask = mask.unsqueeze(-1) * mask.unsqueeze(-2)  # (batch, n_particles, n_particles)
         
         # Minkowski edge features
         norms, dots, _ = minkowski_features(x[..., :4]) 
+
+        # Zero out features for masked edges
+        norms = norms * edge_mask
+        dots = dots * edge_mask
         
         # messages m_ij = phi_m(psi(||x_i - x_j||), psi(⟨x_i, x_j⟩))
         edge_features = torch.stack([norms, dots], dim=-1)  # (batch, n_particles, n_particles, 2)
@@ -168,18 +176,25 @@ class LorentzEquivariantLayer(nn.Module):
         edge_shape = edge_features.shape
         edge_features_flat = edge_features.view(-1, 2)
         messages_flat = self.phi_m(edge_features_flat)
+
+        edge_mask_expanded = edge_mask.unsqueeze(-1)  # (batch, n_particles, n_particles, 1)
         
         edge_features_global = self.phi_e(messages_flat).view(*edge_shape[:-1], -1)
+        edge_features_global = edge_features_global * edge_mask_expanded
+        valid_edge_count = edge_mask.sum(dim=(1, 2), keepdim=True).clamp(min=1)  # (batch, 1, 1)
         sum_pooled_global = edge_features_global.sum(dim=(1, 2))  # (batch, hidden_dim//2)
-        avg_pooled_global = edge_features_global.mean(dim=(1, 2))  # (batch, hidden_dim//2)
+        avg_pooled_global = sum_pooled_global / valid_edge_count.squeeze(-1)  # (batch, hidden_dim//2)
         # Update global embedding
         global_input = torch.cat([g, sum_pooled_global, avg_pooled_global], dim=-1)
         g_new = self.phi_eg(global_input)
         g_new = self.global_norm(g_new + g)  # Residual connection with normalization
         
         edge_features_node = self.phi_ex(messages_flat).view(*edge_shape[:-1], -1)
+        edge_features_node = edge_features_node * edge_mask_expanded
+        valid_neighbor_count = edge_mask.sum(dim=2, keepdim=True).clamp(min=1)  # (batch, n_particles, 1)
         sum_pooled_node = edge_features_node.sum(dim=2)  # (batch, n_particles, hidden_dim//2)
-        avg_pooled_node = edge_features_node.mean(dim=2)  # (batch, n_particles, hidden_dim//2)
+        avg_pooled_node = sum_pooled_node / valid_neighbor_count  # (batch, n_particles, hidden_dim//2)
+
         # Use global features to update node features.
         # Broadcast global features to match node dimensions
         g_0_broadcast = g_0.unsqueeze(1).expand(-1, n_particles, -1)
@@ -193,16 +208,21 @@ class LorentzEquivariantLayer(nn.Module):
         node_input_flat = node_input.view(-1, node_input.shape[-1])
         x_update_flat = self.phi_x(node_input_flat)
         x_update = x_update_flat.view(batch_size, n_particles, -1)
+
+        x_update = x_update * mask_expanded
         
         # Residual connection with normalization
         x_new = self.node_norm(x + x_update)
+
+        # Guarantee that masked particles remain unchanged
+        x_new = x_new * mask_expanded + x * (1 - mask_expanded)
         
         return x_new, g_new
 
 class JetFMGenerator(nn.Module):
     """Flow matching model for jet generation"""
     def __init__(self, 
-                 n_particles=30,
+                 n_particles=150,
                  particle_dim=4,  # 4-momentum
                  global_dim=64,
                  n_layers=6,
@@ -242,12 +262,13 @@ class JetFMGenerator(nn.Module):
         # Gradient clipping for stability
         self.gradient_clip_val = 1.0
         
-    def forward(self, x, t, jet_conditions):
+    def forward(self, x, t, jet_conditions, mask):
         """
         Args:
             x: (batch_size, n_particles, 4) - initial particle 4-momenta
             t: (batch_size,) - time values
             jet_conditions: (batch_size, n_jet_types + 4) - jet type one-hot and other features
+            mask: (batch_size, n_particles) - binary mask where 1=valid particle, 0=padded
         """
         batch_size = x.shape[0]
         
@@ -257,14 +278,20 @@ class JetFMGenerator(nn.Module):
 
         # Initial global embedding
         g_0 = self.initial_global(conditioning)
+
+        mask_expanded = mask.unsqueeze(-1)  # (batch, n_particles, 1)
+        x = x * mask_expanded  # Zero out padded positions
         
         # Apply Lorentz-equivariant layers
         g = g_0
         for layer in self.le_layers:
-            x, g = layer(x, g, g_0)
+            x, g = layer(x, g, g_0, mask)
         
         # Final message passing: collapse final global feature to per-particle features
+        edge_mask = mask.unsqueeze(-1) * mask.unsqueeze(-2)  # (batch, n_particles, n_particles)
         norms, dots, _ = minkowski_features(x[..., :4])
+        norms = norms * edge_mask
+        dots = dots * edge_mask
         edge_features = torch.stack([norms, dots], dim=-1)
         
         edge_shape = edge_features.shape
@@ -272,8 +299,13 @@ class JetFMGenerator(nn.Module):
         messages_flat = self.final_phi_m(edge_features_flat)
         
         edge_features_node = self.final_phi_ex(messages_flat).view(*edge_shape[:-1], -1)
+        edge_mask_expanded = edge_mask.unsqueeze(-1)  # (batch, n_particles, n_particles, 1)
+        edge_features_node = edge_features_node * edge_mask_expanded
+        
+        valid_neighbor_count = edge_mask.sum(dim=2, keepdim=True).clamp(min=1)  # (batch, n_particles, 1)
         sum_pooled_node = edge_features_node.sum(dim=2)
-        avg_pooled_node = edge_features_node.mean(dim=2)
+        avg_pooled_node = sum_pooled_node / valid_neighbor_count
+
         
         # Final node update
         g_0_broadcast = g_0.unsqueeze(1).expand(-1, self.n_particles, -1)
@@ -288,9 +320,12 @@ class JetFMGenerator(nn.Module):
         final_input_flat = final_input.view(-1, final_input.shape[-1])
         x_final_flat = self.final_phi_x(final_input_flat)
         x_final_update = x_final_flat.view(batch_size, self.n_particles, -1)
-        
+
+        x_final_update = x_final_update * mask_expanded
+
         # Final residual connection
         x_out = self.final_norm(x + x_final_update)
+        x_out = x_out * mask_expanded
 
         return x_out
     
@@ -298,73 +333,83 @@ class JetFMGenerator(nn.Module):
         """Clip gradients for training stability"""
         torch.nn.utils.clip_grad_norm_(self.parameters(), self.gradient_clip_val)
     
-    def step(self, x_t, jet_conditions, t_start, t_end, method='euler'):
+    def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler'):
         """
         Calculate the probability density at a particular time step
         """
         if method == 'euler':
             batch_size = x_t.shape[0]
-            update = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions)
+            update = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
             x_next = x_t + update * (t_end - t_start)
             return x_next
         else:
             raise NotImplementedError(f"Method {method} not implemented")
 
-# Example usage and training utilities
-# Training step example
-def training_step(model: JetFMGenerator, optimizer, jet_conditions, target, device='cpu'):
-    """Example training step with gradient clipping"""
-    optimizer.zero_grad()
 
-    x_0 = torch.randn_like(target, device=device)  # Initial state
-    x_1 = target.to(device)[:, :, :4]
-    
-    t = torch.rand(x_0.shape[0], device=device)
-    t_viewed = t.view(-1, 1, 1)  # Reshape for broadcasting
-    x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
-    dx_t = x_1 - x_0
+def train_model(
+        model: JetFMGenerator,
+        x_train_loaded: torch.utils.data.DataLoader,
+        device: torch.device,
+        num_epochs: int,
+        batch_size: int,
+        warmup_pct=0.1,
+        lr=1e-3,
+        weight_decay=1e-2
+):
+    losses = []
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    loss = nn.MSELoss()(model.forward(x_t, t, jet_conditions, device=device), dx_t)
-    loss.backward()
-    model.clip_gradients()
-    optimizer.step()
+    total_steps = num_epochs * len(x_train_loaded)
+    warmup_steps = int(warmup_pct * total_steps)
 
-    return loss.item()
+    def lr_lambda(current_step):
+        if current_step < warmup_steps:
+            # Linear warm-up
+            return float(current_step) / float(max(1, warmup_steps))
+        else:
+            # Cosine annealing after warm-up
+            progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return 0.5 * (1.0 + np.cos(np.pi * progress))
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-if __name__ == "__main__":
-    torch.manual_seed(42)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    current_step = 0
+    for epoch in range(num_epochs):
+        epoch_loss = []
 
-    batch_size = 50
+        for i, data in enumerate(x_train_loaded):
+            optimizer.zero_grad()
 
-    jet_attr_generator = jet_attributes.load_model().to(device)
-    with torch.no_grad():
-        generated_jet_attrs, _ = jet_attributes.generate_jets(
-            jet_attr_generator, device, n_jet_types=3, num_jets=batch_size
-        )
+            jet_info = data[1].to(device)
+            x_1 = data[0].to(device)[:, :, :4]
+            x_0 = torch.randn_like(x_1, device=device)  # Sample random initial state
 
-    model: JetFMGenerator = JetFMGenerator().to(device)
-    target = torch.randn(batch_size, 30, 4, device=device) + 0.2 * torch.randn(batch_size, 30, 4, device=device)  # Placeholder target
+            t = torch.rand(x_0.shape[0], device=device)
+            t_viewed = t.view(-1, 1, 1)
+            x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
+            dx_t = x_1 - x_0
 
-    n_epochs = 25
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    for epoch in range(n_epochs):
-        loss = training_step(model, optimizer, generated_jet_attrs, target, device)
-        print(f"Epoch {epoch + 1}/{n_epochs}, Training loss: {loss}")
+            pred = model.forward(x_t, t, jet_info)
+            loss = nn.MSELoss()(pred, dx_t)
+            loss.backward()
+            model.clip_gradients()
+            optimizer.step()
 
-    integration_steps = 8
-    
-    n_samples = 25
-    times = torch.linspace(0, 1, integration_steps + 1).to(device)
+            scheduler.step()
+            current_step += 1
 
-    x = torch.randn(n_samples, 30, 4, device=device)  # Sample initial state
-    generated_jet_attrs, _ = jet_attributes.generate_jets(
-        jet_attr_generator, device, n_jet_types=3, num_jets=n_samples
-    )
-    x0 = x.clone()
-    with torch.no_grad():
-        model.eval()
-        model.to(device)
-        x = x.to(device)
-        for i in range(integration_steps):
-            x = model.step(x, generated_jet_attrs, times[i], times[i + 1])
+            epoch_loss.append(loss.item())
+
+            if i % (batch_size * 10) == 0:
+                current_lr = optimizer.param_groups[0]['lr']
+                print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(x_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
+                print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
+                if torch.cuda.is_available():
+                    allocated = torch.cuda.memory_allocated() / 1024**2       # Tensors currently live
+                    reserved = torch.cuda.memory_reserved() / 1024**2         # Memory reserved by PyTorch's caching allocator
+                    max_allocated = torch.cuda.max_memory_allocated() / 1024**2  # Peak allocation during program
+                    print(f"Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB, Peak: {max_allocated:.2f} MB")
+
+        losses.append(np.mean(epoch_loss))
+        if epoch % 10 == 0:
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {losses[-1]:.4f}, LR: {current_lr:.6f}")

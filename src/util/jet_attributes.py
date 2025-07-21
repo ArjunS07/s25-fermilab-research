@@ -2,6 +2,8 @@ import pickle
 import torch
 
 NUM_CLASSES = 5  # Number of jet types
+MAX_N_PARTICLES = 150  # Maximum number of particles in a jet
+MIN_N_PARTICLES = 4  # Minimum number of particles in a jet
 MODEL_PATH = "gen/models/jet_attr_nf_model.pkl"
 
 def load_model(model_path=MODEL_PATH):
@@ -28,7 +30,7 @@ def one_hot_enc_jet_type(y, num_classes=NUM_CLASSES):
 def generate_jets(model, device, n_jet_types, num_jets=1000, one_hot_types=None):
     """
     Use a pretrained normalizing flow model to generate jets.
-    Generates jets with features eta, p_t, mass, and number of particles.
+    Generates jets with features jet_types (in the form of 5 one-hot encoded slots), eta, p_t, mass, and number of particles.
 
     Args:
         model: Pretrained normalizing flow model.
@@ -41,8 +43,31 @@ def generate_jets(model, device, n_jet_types, num_jets=1000, one_hot_types=None)
         sample_jet_types = torch.randint(0, n_jet_types, (num_jets,)).to(device)
         one_hot_types = one_hot_enc_jet_type(sample_jet_types)
     jets, jet_logprobs = model.sample(num_jets, context=one_hot_types)
+    jets[:, -1] = torch.round(jets[:, -1])
+    jets[:, -1] = torch.clamp(jets[:, -1], MIN_N_PARTICLES, MAX_N_PARTICLES) 
     jets = torch.cat([
         one_hot_types,  # Add one-hot encoded jet types
         jets,
     ], dim=-1).to(device)  # Concatenate along the last dimension
     return jets, jet_logprobs
+
+def generate_masks(num_particles, max_n_particles, device):
+    """
+    Generate random masks for the particles in each jet.
+    
+    Args:
+        num_particles (batch_size, ): Number of particles per jet.
+        max_n_particles (int): Maximum number of particles in a jet.
+        device: Device to run the model on (e.g., 'cpu' or 'cuda').
+
+    Returns:
+        torch.Tensor: Random masks for the particles in each jet.
+    """
+    masks = [
+        torch.concat((
+            torch.ones(int(n_ones), device=device),
+            torch.zeros(max_n_particles - int(n_ones), device=device)
+        ))
+        for n_ones in num_particles
+    ]
+    return torch.stack(masks)
