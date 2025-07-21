@@ -81,6 +81,7 @@ if __name__ == "__main__":
     make_clear_folder(f"{out_dir}/models")
     make_clear_folder(f"{out_dir}/logs")
     make_clear_folder(f"{out_dir}/gen")
+    print(f"Output directory: {out_dir}")
 
     X_train = JetNet(
         jet_type=args.jet_types,
