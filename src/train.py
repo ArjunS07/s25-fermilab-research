@@ -137,8 +137,25 @@ if __name__ == "__main__":
     )
     
     losses = []
-    # TODO: Cosine learning rate scheduler
-    optimizer = torch.optim.Adam(model.parameters(), lr=16e-4)
+
+    lr = 1e-3
+    weight_decay = 1e-2
+    warmup_pct = 0.1
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    total_steps = args.num_epochs * len(X_train_loaded)
+    warmup_steps = int(warmup_pct * total_steps)
+
+    def lr_lambda(current_step):
+        if current_step < warmup_steps:
+            # Linear warm-up
+            return float(current_step) / float(max(1, warmup_steps))
+        else:
+            # Cosine annealing after warm-up
+            progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return 0.5 * (1.0 + np.cos(np.pi * progress))
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+    current_step = 0
     for epoch in range(args.num_epochs):
         epoch_loss = []
 
@@ -161,10 +178,14 @@ if __name__ == "__main__":
             model.clip_gradients()
             optimizer.step()
 
+            scheduler.step()
+            current_step += 1
+
             epoch_loss.append(loss.item())
         
             if i % (args.batch_size * 10) == 0:
-                print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}")
+                current_lr = optimizer.param_groups[0]['lr']
+                print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
                 print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
                 if torch.cuda.is_available():
                     allocated = torch.cuda.memory_allocated() / 1024**2       # Tensors currently live
@@ -174,7 +195,8 @@ if __name__ == "__main__":
 
         losses.append(np.mean(epoch_loss))
         if epoch % 10 == 0:
-            print(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {losses[-1]:.4f}")
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {losses[-1]:.4f}, LR: {current_lr:.6f}")
     
     with open(f"{out_dir}/logs/training_loss.csv", "w") as f:
         f.write("epoch,loss\n")
