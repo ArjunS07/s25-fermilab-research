@@ -41,7 +41,7 @@ class PhiMLP(nn.Module):
             if i < len(dims) - 2:
                 if use_batch_norm:
                     layers.append(nn.BatchNorm1d(dims[i+1]))
-                layers.append(nn.LeakyReLU(0.2, inplace=True))
+                layers.append(nn.LeakyReLU(0.01, inplace=True))
                 if dropout > 0:
                     layers.append(nn.Dropout(dropout))
         
