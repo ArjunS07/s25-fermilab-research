@@ -51,7 +51,7 @@
 
 \begin{document}
 
-\section{Week 3}
+\section{Week 5 Updates}
 
 
 \begin{frame}{Old architecture based on LorentzNet}
@@ -73,7 +73,7 @@
             \end{align*}
         \end{column}
         \begin{column}{0.5\textwidth}
-            \textbf{Simple LE block this week}
+            \textbf{Simple LE block}
             \begin{align*}
                 m^l_{ij} &= \phi_e(\psi(||x_i^l - x_j^l||), \psi(\langle x_i^l, x_j^l \rangle))\\
                 m^l_{ij} &= \phi_m(m^l_{ij}) \cdot m^l_{ij}
@@ -86,32 +86,127 @@
     \end{columns}
 \end{frame}
 
+\begin{frame}{Performance}
+    6 layers, 100 epochs, gluons only. 500 generated samples over 32 steps.
+    \begin{figure}
+        \includegraphics[height=0.6\textheight]{figs/old-model-performance-gluons.png}
+    \end{figure}
+\end{frame}
+
 \begin{frame}[allowframebreaks]{New architecture}
     \begin{enumerate}
         \item Embed scalar time value to random Fourier features through two fully connected layers with 32 and 64 nodes (following \cite{wuFastPointCloud2023})
         \item Concatenate time embedding with jet conditioning information, which consists of: \begin{enumerate}
             \item One-hot encoded jet type
+            \item Jet $\eta$
             \item Jet mass
             \item Jet transverse momentum
             \item Jet number of constituents
         \end{enumerate}
         \item Pass this through a fully connected layer of size 64 to produce the initial global embeddings $g_0$
         \item Concatenate $g_0$ with features $x_1^0 \dots x_n^0$ initialized from the initial distribution $p_0$.
-        \item Now, we use 6 Lorentz-group equivariant layers. \begin{enumerate}
+        \item Now, we use $L$ Lorentz-group equivariant layers. \begin{enumerate}
             \item The input to the $l+1$-th layer is $g^l$ and $x^{l}_n \dots x^l_N$.
             \item Calculate messages $m^l_{ij} = \phi_m(\psi(||x_i^l - x_j^l||), \psi(\langle x_i^l, x_j^l \rangle))$
-            \item Update the global embedding $g_{l+1} = \phi_{eg}(g_l, \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_e(m_{ij}) \bigoplus \sum\limits_{i, j \in [N]} \phi_e(m_{ij}))$
+            \item Update the global embedding $g_{l+1} = \phi_{eg}(g^l, \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_e(m_{ij}) , \sum\limits_{i, j \in [N]} \phi_e(m_{ij}))$
             \item Feed in the updated global embedding as well as the original embedding to update the graph embeddings $$
-            x_i^{l+1} = x_i^{l} + \phi_x(g_0 \bigoplus g^{l+1} \bigoplus \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}) \bigoplus \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}))
+            x_i^{l+1} = x_i^{l} + \phi_x(g_0 , g^{l+1} , \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}) , \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}))
             $$
             \item Pass the results $g^{l+1}$ and $x_i^{l+1}$ to the next layer
         \end{enumerate}
         \item After the final LE layer, run the particle representations through a final round of message-passing with the final global embedding $$
-        x_i^{L+1} = x_i^{L} + \phi_x(g_0 \bigoplus g^{L} \bigoplus \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}) \bigoplus \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}))
+        x_i^{L+1} = x_i^{L} + \phi_x(g_0 , g^{L} , \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}) , \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}))
         $$
     \end{enumerate}
 \end{frame}
 
+\begin{frame}{Jet conditioning implementation}
+    \begin{itemize}
+        \item During training, use the real features corresponding to each jet.
+        \item During inference: \begin{itemize}
+            \item Use the normalizing flow to generate jet attributes
+            \item Round the number of jet constituents and clamp to [4, 150]
+            \item Generate masks corresponding to the desired number of constituents
+        \end{itemize}
+    \end{itemize}
+\end{frame}
+
+\begin{frame}[allowframebreaks]{Preliminary results}
+    100 epochs, 6 layers, gluons only. 500 generated samples with 32 steps.
+    \begin{figure}
+        \includegraphics[width=0.8\textwidth]{figs/generated_vs_test_distribution_cartesian.png}
+    \end{figure}
+        \begin{figure}
+        \includegraphics[width=0.8\textwidth]{figs/generated_vs_test_distribution_polar.png}
+    \end{figure}
+
+    \begin{table}
+        \caption{Metrics relative to test set}
+        \begin{tabular}{|c| c | c |}
+            \hline
+            Metric & Value & MPGAN Value \\ \hline
+            Covariance ($\uparrow$) & 0.068 & 0.240 \\
+            MMD ($\downarrow$) & 2.018 & 0.045 \\\hline
+        \end{tabular}
+    \end{table}
+\end{frame}
+
+\begin{frame}[allowframebreaks]{Inspiration for new architecture}
+    \begin{figure}
+        \includegraphics[height=0.6\textheight]{figs/epic-jedifm.png}
+        \caption{EPiC-FM \cite{buhmannEPiClyFastParticle2023}}
+    \end{figure}
+    \begin{figure}
+        \includegraphics[height=0.75\textheight]{figs/lorentznet.png}
+    \end{figure}
+    \begin{figure}
+        \includegraphics[width=0.6\textwidth]{figs/fpcd.png}
+        \caption{FPCD \cite{wuFastPointCloud2023}}
+    \end{figure}
+\end{frame}
+
+\begin{frame}{Implementation details for next training runs}
+    \begin{itemize}
+        \item AdamW \cite{loshchilovDecoupledWeightDecay2019} optimizer
+        \item Learning rate: linear warm-up followed by cosine annealing (same as \cite{buhmannEPiClyFastParticle2023})
+        \item LeakyRELU activation (negative slope = 0.01)
+        \item Zero padding for variable-sized particle clouds
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Zero padding}
+    In each layer:
+    \begin{itemize}
+        \item Calculate edge features for all particles and multiply by expanded mask
+        \item Multiply results of $\phi_e(m_{ij})$, $\phi_{ex}(m_{ij})$ by expanded mask
+        \item Keep track of valid edges for average pooling
+        \item To guarantee the mask is respected, multiply node updates and final nodes by mask before passing to next layer
+    \end{itemize}
+\end{frame}
+
+\begin{frame}{Learning rate}
+    \begin{figure}
+        \includegraphics[width=0.8\textwidth]{figs/learning_rate_schedule.png}
+        \caption{Linear warm-up followed by cosine annealing}
+    \end{figure}
+\end{frame}
+
+\begin{frame}[allowframebreaks]{This week}
+    \begin{itemize}
+        \item Run jobs today: \begin{itemize}
+            \item Entire dataset; $\approx$ 50 epochs; $\approx$ 8 layers
+            \item Entire dataeset; $\approx$ 1000 epochs; $\approx$ 12 layers
+        \end{itemize}
+        \item Implement parallelized training with Hugging Face Accelerate
+        \item Set up sampling pipeline while training the model to get an indication of how performance improves over time (since FM loss tends to be meaningless after the first epoch)
+        \item Theoretical problems with equivariance \begin{itemize}
+            \item Currently initializing from normal distribution
+            \item Go over E(3)-equivariant papers in detail and try to develop something similar to CoM trick
+        \end{itemize}
+        \item Set up plots typically used in jet generation papers
+        \item Mean flow setup (should be the first paper to use it for jets)
+    \end{itemize}
+\end{frame}
 
 
 \begin{frame}[allowframebreaks]{References}

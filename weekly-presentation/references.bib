@@ -862,6 +862,25 @@
   file = {/Users/arjunsharma/Zotero/storage/BCPS5CVE/Karras et al. - 2022 - Elucidating the Design Space of Diffusion-Based Generative Models.pdf}
 }
 
+@misc{kazdanCPSampleClassifierProtected2024,
+  title = {{{CPSample}}: {{Classifier Protected Sampling}} for {{Guarding Training Data During Diffusion}}},
+  shorttitle = {{{CPSample}}},
+  author = {Kazdan, Joshua and Sun, Hao and Han, Jiaqi and Petersen, Felix and Ermon, Stefano},
+  year = {2024},
+  month = sep,
+  number = {arXiv:2409.07025},
+  eprint = {2409.07025},
+  primaryclass = {cs},
+  publisher = {arXiv},
+  doi = {10.48550/arXiv.2409.07025},
+  urldate = {2025-07-12},
+  abstract = {Diffusion models have a tendency to exactly replicate their training data, especially when trained on small datasets. Most prior work has sought to mitigate this problem by imposing differential privacy constraints or masking parts of the training data, resulting in a notable substantial decrease in image quality. We present CPSample, a method that modifies the sampling process to prevent training data replication while preserving image quality. CPSample utilizes a classifier that is trained to overfit on random binary labels attached to the training data. CPSample then uses classifier guidance to steer the generation process away from the set of points that can be classified with high certainty, a set that includes the training data. CPSample achieves FID scores of 4.97 and 2.97 on CIFAR-10 and CelebA-64, respectively, without producing exact replicates of the training data. Unlike prior methods intended to guard the training images, CPSample only requires training a classifier rather than retraining a diffusion model, which is computationally cheaper. Moreover, our technique provides diffusion models with greater robustness against membership inference attacks, wherein an adversary attempts to discern which images were in the model's training dataset. We show that CPSample behaves like a built-in rejection sampler, and we demonstrate its capabilities to prevent mode collapse in Stable Diffusion.},
+  archiveprefix = {arXiv},
+  langid = {english},
+  keywords = {Computer Science - Machine Learning},
+  file = {/Users/arjunsharma/Zotero/storage/UH2TJV6G/Kazdan et al. - 2024 - CPSample Classifier Protected Sampling for Guarding Training Data During Diffusion.pdf}
+}
+
 @misc{kengIntroductionStochasticCalculus2022,
   title = {An {{Introduction}} to {{Stochastic Calculus}}},
   author = {Keng, Brian},
@@ -937,6 +956,24 @@
   file = {/Users/arjunsharma/Zotero/storage/MUTND7LT/Klein et al. - 2022 - Generative structured normalizing flow Gaussian processes applied to spectroscopic data.pdf;/Users/arjunsharma/Zotero/storage/CNIBR7WV/2212.html}
 }
 
+@misc{klotzMinimalSensingOrienting2025,
+  title = {Minimal {{Sensing}} for {{Orienting}} a {{Solar Panel}}},
+  author = {Klotz, Jeremy and Nayar, Shree K.},
+  year = {2025},
+  month = apr,
+  number = {arXiv:2504.10765},
+  eprint = {2504.10765},
+  primaryclass = {cs},
+  publisher = {arXiv},
+  doi = {10.48550/arXiv.2504.10765},
+  urldate = {2025-07-12},
+  abstract = {A solar panel harvests the most energy when pointing in the direction that maximizes the total illumination (irradiance) falling on it. Given an arbitrary orientation of a panel and an arbitrary environmental illumination, we address the problem of finding the direction of maximum total irradiance. We develop a minimal sensing approach where measurements from just four photodetectors are used to iteratively vary the tilt of the panel to maximize the irradiance. Many environments produce irradiance functions with multiple local maxima. As a result, simply measuring the gradient of the irradiance function and applying gradient ascent will not work. We show that a larger, optimized tilt between the detectors and the panel is equivalent to blurring the irradiance function. This has the effect of eliminating local maxima and turning the irradiance function into a unimodal one, whose maximum can be found using gradient ascent. We show that there is a close relationship between our approach and scale space theory. We have collected a large dataset of high-dynamic range lighting environments in New York City, called UrbanSky. We used this dataset to conduct simulations to verify the robustness of our approach. Finally, we have built a portable solar panel with four compact detectors and an actuator to conduct experiments in various real-world settings: direct sunlight, cloudy sky, urban settings with occlusions and shadows, and complex indoor lighting. In all cases, we show significant improvements in harvested energy compared to standard approaches for controlling the orientation of a solar panel.},
+  archiveprefix = {arXiv},
+  langid = {english},
+  keywords = {Computer Science - Computer Vision and Pattern Recognition},
+  file = {/Users/arjunsharma/Zotero/storage/DLJPJBZ5/Klotz and Nayar - 2025 - Minimal Sensing for Orienting a Solar Panel.pdf}
+}
+
 @misc{kolloviehFlowMatchingGaussian2025,
   title = {Flow {{Matching}} with {{Gaussian Process Priors}} for {{Probabilistic Time Series Forecasting}}},
   author = {Kollovieh, Marcel and Lienen, Marten and L{\"u}dke, David and Schwinn, Leo and G{\"u}nnemann, Stephan},
@@ -1008,6 +1045,25 @@
   file = {/Users/arjunsharma/Zotero/storage/6LVKWKIF/Li et al. - 2024 - Does Lorentz-symmetric design boost network performance in jet physics.pdf}
 }
 
+@misc{linTFGFlowTrainingfreeGuidance2025,
+  title = {{{TFG-Flow}}: {{Training-free Guidance}} in {{Multimodal Generative Flow}}},
+  shorttitle = {{{TFG-Flow}}},
+  author = {Lin, Haowei and Li, Shanda and Ye, Haotian and Yang, Yiming and Ermon, Stefano and Liang, Yitao and Ma, Jianzhu},
+  year = {2025},
+  month = mar,
+  number = {arXiv:2501.14216},
+  eprint = {2501.14216},
+  primaryclass = {cs},
+  publisher = {arXiv},
+  doi = {10.48550/arXiv.2501.14216},
+  urldate = {2025-07-12},
+  abstract = {Given an unconditional generative model and a predictor for a target property (e.g., a classifier), the goal of training-free guidance is to generate samples with desirable target properties without additional training. As a highly efficient technique for steering generative models toward flexible outcomes, training-free guidance has gained increasing attention in diffusion models. However, existing methods only handle data in continuous spaces, while many scientific applications involve both continuous and discrete data (referred to as multimodality). Another emerging trend is the growing use of the simple and general flow matching framework in building generative foundation models, where guided generation remains under-explored. To address this, we introduce TFG-Flow, a novel training-free guidance method for multimodal generative flow. TFG-Flow addresses the curse-of-dimensionality while maintaining the property of unbiased sampling in guiding discrete variables. We validate TFG-Flow on four molecular design tasks and show that TFG-Flow has great potential in drug design by generating molecules with desired properties.},
+  archiveprefix = {arXiv},
+  langid = {english},
+  keywords = {Computer Science - Artificial Intelligence,Computer Science - Computational Engineering Finance and Science,Computer Science - Machine Learning},
+  file = {/Users/arjunsharma/Zotero/storage/FNRAXLZA/Lin et al. - 2025 - TFG-Flow Training-free Guidance in Multimodal Generative Flow.pdf}
+}
+
 @misc{lipmanFlowMatchingGenerative2023,
   title = {Flow {{Matching}} for {{Generative Modeling}}},
   author = {Lipman, Yaron and Chen, Ricky T. Q. and {Ben-Hamu}, Heli and Nickel, Maximilian and Le, Matt},
@@ -1076,6 +1132,23 @@
   archiveprefix = {arXiv},
   keywords = {Computer Science - Artificial Intelligence,Computer Science - Machine Learning,Computer Science - Social and Information Networks},
   file = {/Users/arjunsharma/Zotero/storage/ZJJXTC3A/Liu et al. - 2023 - Generative Diffusion Models on Graphs Methods and Applications.pdf;/Users/arjunsharma/Zotero/storage/SW7MEYPC/2302.html}
+}
+
+@misc{loshchilovDecoupledWeightDecay2019,
+  title = {Decoupled {{Weight Decay Regularization}}},
+  author = {Loshchilov, Ilya and Hutter, Frank},
+  year = {2019},
+  month = jan,
+  number = {arXiv:1711.05101},
+  eprint = {1711.05101},
+  primaryclass = {cs},
+  publisher = {arXiv},
+  doi = {10.48550/arXiv.1711.05101},
+  urldate = {2025-07-22},
+  abstract = {L\$\_2\$ regularization and weight decay regularization are equivalent for standard stochastic gradient descent (when rescaled by the learning rate), but as we demonstrate this is {\textbackslash}emph\{not\} the case for adaptive gradient algorithms, such as Adam. While common implementations of these algorithms employ L\$\_2\$ regularization (often calling it "weight decay" in what may be misleading due to the inequivalence we expose), we propose a simple modification to recover the original formulation of weight decay regularization by {\textbackslash}emph\{decoupling\} the weight decay from the optimization steps taken w.r.t. the loss function. We provide empirical evidence that our proposed modification (i) decouples the optimal choice of weight decay factor from the setting of the learning rate for both standard SGD and Adam and (ii) substantially improves Adam's generalization performance, allowing it to compete with SGD with momentum on image classification datasets (on which it was previously typically outperformed by the latter). Our proposed decoupled weight decay has already been adopted by many researchers, and the community has implemented it in TensorFlow and PyTorch; the complete source code for our experiments is available at https://github.com/loshchil/AdamW-and-SGDW},
+  archiveprefix = {arXiv},
+  keywords = {Computer Science - Machine Learning,Computer Science - Neural and Evolutionary Computing,Mathematics - Optimization and Control},
+  file = {/Users/arjunsharma/Zotero/storage/HT5D9HAD/Loshchilov and Hutter - 2019 - Decoupled Weight Decay Regularization.pdf;/Users/arjunsharma/Zotero/storage/WLPNPIQN/1711.html}
 }
 
 @misc{luoUnderstandingDiffusionModels2022,
@@ -1835,6 +1908,24 @@
   file = {/Users/arjunsharma/Zotero/storage/9KXM3S4X/Wu et al. - 2024 - Protein structure generation via folding diffusion.pdf}
 }
 
+@misc{xuGeoDiffGeometricDiffusion2022,
+  title = {{{GeoDiff}}: A {{Geometric Diffusion Model}} for {{Molecular Conformation Generation}}},
+  shorttitle = {{{GeoDiff}}},
+  author = {Xu, Minkai and Yu, Lantao and Song, Yang and Shi, Chence and Ermon, Stefano and Tang, Jian},
+  year = {2022},
+  month = mar,
+  number = {arXiv:2203.02923},
+  eprint = {2203.02923},
+  primaryclass = {cs},
+  publisher = {arXiv},
+  doi = {10.48550/arXiv.2203.02923},
+  urldate = {2025-07-14},
+  abstract = {Predicting molecular conformations from molecular graphs is a fundamental problem in cheminformatics and drug discovery. Recently, significant progress has been achieved with machine learning approaches, especially with deep generative models. Inspired by the diffusion process in classical non-equilibrium thermodynamics where heated particles will diffuse from original states to a noise distribution, in this paper, we propose a novel generative model named GeoDiff for molecular conformation prediction. GeoDiff treats each atom as a particle and learns to directly reverse the diffusion process (i.e., transforming from a noise distribution to stable conformations) as a Markov chain. Modeling such a generation process is however very challenging as the likelihood of conformations should be roto-translational invariant. We theoretically show that Markov chains evolving with equivariant Markov kernels can induce an invariant distribution by design, and further propose building blocks for the Markov kernels to preserve the desirable equivariance property. The whole framework can be efficiently trained in an end-to-end fashion by optimizing a weighted variational lower bound to the (conditional) likelihood. Experiments on multiple benchmarks show that GeoDiff is superior or comparable to existing state-of-the-art approaches, especially on large molecules.},
+  archiveprefix = {arXiv},
+  keywords = {Computer Science - Machine Learning,Quantitative Biology - Quantitative Methods},
+  file = {/Users/arjunsharma/Zotero/storage/HT6XSTI5/Xu et al. - 2022 - GeoDiff a Geometric Diffusion Model for Molecular Conformation Generation.pdf;/Users/arjunsharma/Zotero/storage/ZBF99YYR/2203.html}
+}
+
 @misc{yanSwinGNNRethinkingPermutation2024a,
   title = {{{SwinGNN}}: {{Rethinking Permutation Invariance}} in {{Diffusion Models}} for {{Graph Generation}}},
   shorttitle = {{{SwinGNN}}},
@@ -1867,6 +1958,25 @@
   archiveprefix = {arXiv},
   keywords = {Computer Science - Computer Vision and Pattern Recognition,Computer Science - Machine Learning},
   file = {/Users/arjunsharma/Zotero/storage/YU6J5YPP/Zhang et al. - 2023 - A Survey on Graph Diffusion Models Generative AI in Science for Molecule, Protein and Material.pdf;/Users/arjunsharma/Zotero/storage/R5Z5K9FM/2304.html}
+}
+
+@misc{zhaoGeoAdaEfficientlyFinetune2025,
+  title = {{{GeoAda}}: {{Efficiently Finetune Geometric Diffusion Models}} with {{Equivariant Adapters}}},
+  shorttitle = {{{GeoAda}}},
+  author = {Zhao, Wanjia and Han, Jiaqi and Gu, Siyi and Jiang, Mingjian and Zou, James and Ermon, Stefano},
+  year = {2025},
+  month = jul,
+  number = {arXiv:2507.02085},
+  eprint = {2507.02085},
+  primaryclass = {cs},
+  publisher = {arXiv},
+  doi = {10.48550/arXiv.2507.02085},
+  urldate = {2025-07-12},
+  abstract = {Geometric diffusion models have shown remarkable success in molecular dynamics and structure generation. However, efficiently fine-tuning them for downstream tasks with varying geometric controls remains underexplored. In this work, we propose an SE(3)-equivariant adapter framework (GeoAda) that enables flexible and parameter-efficient fine-tuning for controlled generative tasks without modifying the original model architecture. GeoAda introduces a structured adapter design: control signals are first encoded through coupling operators, then processed by a trainable copy of selected pretrained model layers, and finally projected back via decoupling operators followed by an equivariant zero-initialized convolution. By fine-tuning only these lightweight adapter modules, GeoAda preserves the model's geometric consistency while mitigating overfitting and catastrophic forgetting. We theoretically prove that the proposed adapters maintain SE(3)-equivariance, ensuring that the geometric inductive biases of the pretrained diffusion model remain intact during adaptation. We demonstrate the wide applicability of GeoAda across diverse geometric control types, including frame control, global control, subgraph control, and a broad range of application domains such as particle dynamics, molecular dynamics, human motion prediction, and molecule generation. Empirical results show that GeoAda achieves state-of-the-art fine-tuning performance while preserving original task accuracy, whereas other baselines experience significant performance degradation due to overfitting and catastrophic forgetting.},
+  archiveprefix = {arXiv},
+  langid = {english},
+  keywords = {Computer Science - Artificial Intelligence,Computer Science - Machine Learning},
+  file = {/Users/arjunsharma/Zotero/storage/Q7V8L3Y6/Zhao et al. - 2025 - GeoAda Efficiently Finetune Geometric Diffusion Models with Equivariant Adapters.pdf}
 }
 
 @article{zhouOptimizationMoleculesDeep2019,
