@@ -78,7 +78,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Make folders if they do not exist
-    out_dir = f"{args.out_dir}/{str(datetime.datetime.now()).replace(' ', '_')}"
+    out_dir = f"{args.out_dir}/{str(datetime.datetime.now()).replace(' ', '_')}-{''.join(args.jet_types)}jets-{args.num_epochs}epochs-{args.n_layers}layers-{args.integration_steps}steps"
     make_clear_folder(out_dir)
     make_clear_folder(f"{out_dir}/models")
     make_clear_folder(f"{out_dir}/logs")
