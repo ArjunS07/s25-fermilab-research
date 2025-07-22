@@ -56,9 +56,28 @@ spec:
     resources:
       limits:
         nvidia.com/gpu: 1
-        memory: "32Gi"
-        cpu: "4"
+        memory: "16Gi"
+        cpu: "2.4"
       requests:
         nvidia.com/gpu: 1
-        memory: "32Gi"
+        memory: "16Gi"
         cpu: "2"
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: NotIn
+            values:
+                  - gpn-fiona-mizzou-2.rnet.missouri.edu
+                  - rci-nrp-gpu-05.sdsu.edu
+                  - node-2-2.sdsc.optiputer.net
+          - key: nvidia.com/gpu.product
+            operator: In
+            values:
+            - NVIDIA-GeForce-RTX-4090
+            - NVIDIA-GeForce-RTX-3090
+            - NVIDIA-A10
+            - NVIDIA-TITAN-RTX
+            - NVIDIA-RTX-A5000

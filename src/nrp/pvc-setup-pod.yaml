@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: as-jet-training-pod
+  name: as-jet-pvc-setup-pod
 spec:
   restartPolicy: Never
   volumes:
@@ -43,45 +43,3 @@ spec:
         else
           echo "No requirements.txt found, skipping pip install"
         fi
-
-  containers:
-  - name: debug
-    image: python:3.10-slim
-    command:
-      - /bin/bash
-      - -c
-      - |
-        echo "=== Checking persistent volume contents ==="
-        ls -la /mnt/data/
-        
-        echo "=== Activating existing environment ==="
-        source /mnt/data/python-env/bin/activate
-        
-        # Install Jupyter in existing environment
-        pip install jupyter ipython
-        
-        # Set debugging environment variables
-        export CUDA_LAUNCH_BLOCKING=1
-        export TORCH_USE_CUDA_DSA=1
-        
-        
-        echo "Run: kubectl port-forward as-jet-training-pod 8888:8888"
-        
-        # Start Jupyter
-        cd /mnt/data/src
-        jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
-        
-    ports:
-    - containerPort: 8888
-    volumeMounts:
-      - mountPath: /mnt/data
-        name: as-train-pvc
-    resources:
-      limits:
-        nvidia.com/gpu: 1
-        memory: "32Gi"
-        cpu: "4"
-      requests:
-        nvidia.com/gpu: 1
-        memory: "32Gi"
-        cpu: "2"
