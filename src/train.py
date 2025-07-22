@@ -17,6 +17,7 @@ from util import jet_attributes
 from generate_samples import generate_samples
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from util.file_management import make_clear_folder
+from util.memory_management import log_memory_usage
 
 RANDOM_SEED = 42
 
@@ -107,7 +108,7 @@ if __name__ == "__main__":
     with open(f"{out_dir}/gen/x_test.pkl", "wb") as f:
         pickle.dump(X_test, f)
     print(f"{len(X_train)=}, {len(X_test)=}")
-    X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train)
+    X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
 
     e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
     p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
@@ -133,9 +134,11 @@ if __name__ == "__main__":
     jet_info = torch.cat([encoded_jet_types, jet_info_cropped], dim=-1).to(device)
 
     X_train_loaded = DataLoader(
-        list(zip(X_train_particle_transformed, jet_info))[:args.n_train_samples],
+        X_train_particle_transformed,
         batch_size=args.batch_size,
-        shuffle=True
+        shuffle=False, # needs to be in the same order as jet_info
+        num_workers=2,
+        pin_memory=True if torch.cuda.is_available() else False
     )
     
     losses = []
@@ -159,14 +162,16 @@ if __name__ == "__main__":
 
     current_step = 0
     for epoch in range(args.num_epochs):
-        epoch_loss = []
+        epoch_loss = 0
+        num_batches = 0
 
         for i, data in enumerate(X_train_loaded):
             optimizer.zero_grad()
 
-            jet_info = data[1].to(device)
-            x_1 = data[0].to(device)[:, :, :4]
-            true_masks = data[0].to(device)[:, :, 4] if MASK else None
+            # jet_info = data[1].to(device)
+            batch_jet_info = jet_info[i * args.batch_size:(i + 1) * args.batch_size].to(device)
+            x_1 = data.to(device)[:, :, :4]
+            true_masks = data.to(device)[:, :, 4] if MASK else None
             x_0 = torch.randn_like(x_1, device=device)  # Sample random initial state
 
             t = torch.rand(x_0.shape[0], device=device)
@@ -174,31 +179,59 @@ if __name__ == "__main__":
             x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
             dx_t = x_1 - x_0
 
-            pred = model.forward(x_t, t, jet_info, true_masks)
+            pred = model.forward(x_t, t, batch_jet_info, true_masks)
             loss = nn.MSELoss()(pred, dx_t)
             loss.backward()
             model.clip_gradients()
             optimizer.step()
 
             scheduler.step()
+            
+            epoch_loss += loss.item()
+            num_batches += 1
             current_step += 1
 
-            epoch_loss.append(loss.item())
-        
+
+            if i % 100 == 0 and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
             if i % (args.batch_size * 10) == 0:
                 current_lr = optimizer.param_groups[0]['lr']
+                current_avg_loss = epoch_loss / num_batches
                 print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
                 print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
-                if torch.cuda.is_available():
-                    allocated = torch.cuda.memory_allocated() / 1024**2       # Tensors currently live
-                    reserved = torch.cuda.memory_reserved() / 1024**2         # Memory reserved by PyTorch's caching allocator
-                    max_allocated = torch.cuda.max_memory_allocated() / 1024**2  # Peak allocation during program
-                    print(f"Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB, Peak: {max_allocated:.2f} MB")
 
-        losses.append(np.mean(epoch_loss))
+                log_memory_usage()
+            del pred, loss, x_t, dx_t, x_0
+
+        losses.append(epoch_loss / num_batches)
         if epoch % 10 == 0:
             current_lr = optimizer.param_groups[0]['lr']
             print(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {losses[-1]:.4f}, LR: {current_lr:.6f}")
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # Get validation metrics
+        if epoch % 10 == 0 or epoch == args.num_epochs - 1:
+            print(f"Generating samples for epoch {epoch+1}...")
+            model.eval()
+            with torch.no_grad():
+                make_clear_folder(f"{out_dir}/gen/epoch_{epoch+1}")
+                val_samples = generate_samples(
+                    model=model,
+                    device=device,
+                    out_dir=f"{out_dir}/gen/epoch_{epoch+1}",
+                    num_particles=args.num_particles,
+                    num_particle_features=NUM_PARTICLE_FEATURES,
+                    final_scale=final_scale,
+                    integration_steps=16,
+                    n_samples=args.n_samples,
+                    batch_size=args.batch_size,
+                    jet_types=len(args.jet_types)
+                )
+                del val_samples
+            model.train()
     
     with open(f"{out_dir}/logs/training_loss.csv", "w") as f:
         f.write("epoch,loss\n")
@@ -215,7 +248,7 @@ if __name__ == "__main__":
     generate_samples(
         model=model,
         device=device,
-        out_dir=out_dir,
+        out_dir=f"{out_dir}/gen",
         num_particles=args.num_particles,
         num_particle_features=NUM_PARTICLE_FEATURES,
         final_scale=final_scale,

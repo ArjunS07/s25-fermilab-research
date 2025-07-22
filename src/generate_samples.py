@@ -39,10 +39,9 @@ def generate_samples(
 
             for i in range(integration_steps):
                 x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1])
-            
-            with open(f"{out_dir}/gen/samples.pt", "ab") as f:
-                torch.save(final_scale * x, f"{out_dir}/gen/samples_batch_{start_idx//batch_size:04d}.pt")
-                
+
+            torch.save(final_scale * x, f"{out_dir}/samples_batch_{start_idx//batch_size:04d}.pt")
+
             if start_idx % (batch_size * 10) == 0:
                 print(f"Generated {start_idx + batch_size} samples so far")
             

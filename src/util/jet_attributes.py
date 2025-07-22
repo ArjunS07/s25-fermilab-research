@@ -58,7 +58,7 @@ def generate_masks(num_particles, max_n_particles, device):
     Args:
         num_particles (batch_size, ): Number of particles per jet.
         max_n_particles (int): Maximum number of particles in a jet.
-        device: Device to run the model on (e.g., 'cpu' or 'cuda').
+        device: Device to generate tensors on
 
     Returns:
         torch.Tensor: Random masks for the particles in each jet.
