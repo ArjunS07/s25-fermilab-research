@@ -1,8 +1,6 @@
 import torch
 from jetnet.utils import EtaPhiPtE_to_cartesian
 
-from jetnet.utils import EtaPhiPtE_to_cartesian
-
 def transform_rel_particle_coordinates_to_cartesian(X):
     """
     Transforms relative particle coordinates to absolute Cartesian coordinates using the JetNet relEtaPhiPt_to_cartesian utility function

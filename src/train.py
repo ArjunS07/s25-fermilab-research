@@ -9,7 +9,6 @@ import torch
 import random
 from torch import nn
 from torch.utils.data import DataLoader
-from scipy.stats import anderson
 
 from jetnet.datasets import JetNet
 
