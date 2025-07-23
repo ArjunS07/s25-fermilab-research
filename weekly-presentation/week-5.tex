@@ -96,27 +96,22 @@
 \begin{frame}[allowframebreaks]{New architecture}
     \begin{enumerate}
         \item Embed scalar time value to random Fourier features through two fully connected layers with 32 and 64 nodes (following \cite{wuFastPointCloud2023})
-        \item Concatenate time embedding with jet conditioning information, which consists of: \begin{enumerate}
-            \item One-hot encoded jet type
-            \item Jet $\eta$
-            \item Jet mass
-            \item Jet transverse momentum
-            \item Jet number of constituents
-        \end{enumerate}
-        \item Pass this through a fully connected layer of size 64 to produce the initial global embeddings $g_0$
-        \item Concatenate $g_0$ with features $x_1^0 \dots x_n^0$ initialized from the initial distribution $p_0$.
+        \item Concatenate time embedding with jet conditioning information, which consists of one-hot encoded type, $\eta$, mass, $p_T$, number of constituents
+        \item Pass this through a fully connected layer of size 64 to produce the initial global embeddings $g^0$
+        \item Concatenate $g^0$ with features $x_1^0 \dots x_N^0$ initialized from the initial distribution $p_0$.
         \item Now, we use $L$ Lorentz-group equivariant layers. \begin{enumerate}
-            \item The input to the $l+1$-th layer is $g^l$ and $x^{l}_n \dots x^l_N$.
-            \item Calculate messages $m^l_{ij} = \phi_m(\psi(||x_i^l - x_j^l||), \psi(\langle x_i^l, x_j^l \rangle))$
-            \item Update the global embedding $g_{l+1} = \phi_{eg}(g^l, \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_e(m_{ij}) , \sum\limits_{i, j \in [N]} \phi_e(m_{ij}))$
+            \item The input to the $l+1$-th layer is $g^l$ and $x^{l}_1 \dots x^l_N$.
+            \item Calculate messages $m^l_{ij} = \phi_e^l(\psi(||x_i^l - x_j^l||), \psi(\langle x_i^l, x_j^l \rangle))$
+            \item Update the global embedding $$g_{l+1} = \phi^l_{g}(g^0, g^l, \frac{c}{N} \sum\limits_{i, j \in [N]} m^l_{ij} \cdot \phi_m^l(m_{ij}) , \sum\limits_{i, j \in [N]} m^l_{ij} \cdot \phi_m^l(m_{ij}))$$
             \item Feed in the updated global embedding as well as the original embedding to update the graph embeddings $$
-            x_i^{l+1} = x_i^{l} + \phi_x(g_0 , g^{l+1} , \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}) , \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}))
+            x_i^{l+1} = x_i^{l} + \sum\limits_{j \in N} \phi^l_{x} (g^0, g^{l+1}, m_{ij}) \cdot x_j^l
             $$
             \item Pass the results $g^{l+1}$ and $x_i^{l+1}$ to the next layer
         \end{enumerate}
         \item After the final LE layer, run the particle representations through a final round of message-passing with the final global embedding $$
-        x_i^{L+1} = x_i^{L} + \phi_x(g_0 , g^{L} , \frac{c}{N} \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}) , \sum\limits_{i, j \in [N]} \phi_{ex}(m_{ij}))
+            x_i^{L+1} = x_i^{L} + \sum\limits_{j \in N} \phi^L_{x} (g^0, g^L, m_{ij}) \cdot x_j^L
         $$
+        \item The final output $v_\theta(t, x^0)_i = x_i^L - x_i^0$
     \end{enumerate}
 \end{frame}
 
@@ -178,7 +173,7 @@
     In each layer:
     \begin{itemize}
         \item Calculate edge features for all particles and multiply by expanded mask
-        \item Multiply results of $\phi_e(m_{ij})$, $\phi_{ex}(m_{ij})$ by expanded mask
+        \item Multiply results of $\phi_e(m_{ij})$, $\phi_{x}(m_{ij})$ by expanded mask
         \item Keep track of valid edges for average pooling
         \item To guarantee the mask is respected, multiply node updates and final nodes by mask before passing to next layer
     \end{itemize}
