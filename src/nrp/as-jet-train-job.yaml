@@ -26,17 +26,37 @@ spec:
             - -c
             - |
               set -e  # fail on any error
+              set -ex
+              apt-get update && apt-get install -y libffi-dev gcc g++ curl git wget build-essential
+              
+              # Ensure the mount directory exists and is writable
+              mkdir -p /mnt/data
+              ls -la /mnt/data
+
+              rm -rf /mnt/data/python-env
+              
+              python -m venv /mnt/data/python-env
+              source /mnt/data/python-env/bin/activate
+              pip install --upgrade pip
+              
+              git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
+              cp -r /tmp/repo/src /mnt/data/
+
+              # Install PyTorch with CUDA support
+              pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+              # Install requirements (ignore failure if requirements.txt missing)
+              if [ -f /mnt/data/src/requirements.txt ]; then
+                pip install -r /mnt/data/src/requirements.txt
+              else
+                echo "No requirements.txt found, skipping pip install"
+              fi
 
               echo "=== Environment setup complete, starting training ==="
               export CUDA_LAUNCH_BLOCKING=1
               export TORCH_USE_CUDA_DSA=1
 
-              source /mnt/data/python-env/bin/activate
               cd /mnt/data/src
-
-              git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
-              cp -r /tmp/repo/src /mnt/data/
-
               UNIQUE_RUN_ID="$POD_UID"
               echo "Unique Run ID: $UNIQUE_RUN_ID"
               python3 train.py --batch_size=25 --num_epochs=50 --n_samples=50000 --n_layers=6| tee -a logs_${UNIQUE_RUN_ID}.txt
