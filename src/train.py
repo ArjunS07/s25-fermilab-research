@@ -107,7 +107,6 @@ if __name__ == "__main__":
     )
     with open(f"{out_dir}/gen/x_test.pkl", "wb") as f:
         pickle.dump(X_test, f)
-    print(f"{len(X_train)=}, {len(X_test)=}")
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
 
     e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
@@ -133,21 +132,19 @@ if __name__ == "__main__":
     jet_info_cropped = jet_info[:, :4]  # Keep only the first 4 features (eta, p_t, mass, num_particles)
     jet_info = torch.cat([encoded_jet_types, jet_info_cropped], dim=-1).to(device)
 
-    X_train_loaded = DataLoader(
-        X_train_particle_transformed,
-        batch_size=args.batch_size,
-        shuffle=False, # needs to be in the same order as jet_info
-        num_workers=2,
-        pin_memory=True if torch.cuda.is_available() else False
-    )
-    
     losses = []
 
-    lr = 1e-3
+    lr = 2e-3
     weight_decay = 1e-2
     warmup_pct = 0.1
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    total_steps = args.num_epochs * len(X_train_loaded)
+
+    epoch_fraction = 0.1  # Use 10% of data per epoch
+    samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
+    steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
+
+    # Fix: Calculate total_steps based on actual steps per epoch
+    total_steps = args.num_epochs * steps_per_epoch
     warmup_steps = int(warmup_pct * total_steps)
 
     def lr_lambda(current_step):
@@ -158,6 +155,7 @@ if __name__ == "__main__":
             # Cosine annealing after warm-up
             progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
             return 0.5 * (1.0 + np.cos(np.pi * progress))
+
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     current_step = 0
@@ -165,11 +163,24 @@ if __name__ == "__main__":
         epoch_loss = 0
         num_batches = 0
 
+        # Generate random indices for this epoch
+        epoch_indices = torch.randperm(len(X_train_particle_transformed))[:samples_per_epoch]
+        X_train_epoch = torch.utils.data.Subset(X_train_particle_transformed, epoch_indices)
+        jet_info_epoch = jet_info[epoch_indices].to(device)  # Move to device once
+        X_train_loaded = DataLoader(
+            X_train_epoch,
+            batch_size=args.batch_size,
+            shuffle=False, 
+            num_workers=2,
+            pin_memory=True if torch.cuda.is_available() else False
+        )
+        
         for i, data in enumerate(X_train_loaded):
             optimizer.zero_grad()
 
-            # jet_info = data[1].to(device)
-            batch_jet_info = jet_info[i * args.batch_size:(i + 1) * args.batch_size].to(device)
+            actual_batch_size = data.shape[0]
+            batch_jet_info = jet_info_epoch[i * args.batch_size:i * args.batch_size + actual_batch_size]
+            
             x_1 = data.to(device)[:, :, :4]
             true_masks = data.to(device)[:, :, 4] if MASK else None
             x_0 = torch.randn_like(x_1, device=device)  # Sample random initial state
@@ -184,24 +195,22 @@ if __name__ == "__main__":
             loss.backward()
             model.clip_gradients()
             optimizer.step()
-
             scheduler.step()
             
             epoch_loss += loss.item()
             num_batches += 1
             current_step += 1
 
-
             if i % 100 == 0 and torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-            if i % (args.batch_size * 10) == 0:
+            if i % 50 == 0:
                 current_lr = optimizer.param_groups[0]['lr']
                 current_avg_loss = epoch_loss / num_batches
                 print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
                 print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
-
                 log_memory_usage()
+                
             del pred, loss, x_t, dx_t, x_0
 
         losses.append(epoch_loss / num_batches)

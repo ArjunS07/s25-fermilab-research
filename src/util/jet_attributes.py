@@ -4,7 +4,7 @@ import torch
 NUM_CLASSES = 5  # Number of jet types
 MAX_N_PARTICLES = 150  # Maximum number of particles in a jet
 MIN_N_PARTICLES = 4  # Minimum number of particles in a jet
-MODEL_PATH = "gen/models/jet_attr_nf_model.pkl"
+MODEL_PATH = "upload/jet_attr_nf_model.pkl"
 
 def load_model(model_path=MODEL_PATH):
     with open(model_path, "rb") as f:
