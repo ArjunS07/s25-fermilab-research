@@ -3,11 +3,15 @@ import datetime
 import argparse
 import os
 import shutil
+import logging
+import sys
 
 import numpy as np
 import torch
 import random
 from torch import nn
+
+
 from torch.utils.data import DataLoader
 
 from jetnet.datasets import JetNet
@@ -40,8 +44,10 @@ data_args = {
 }
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using {device} device")
+    logging.info(f"Using {device} device")
     torch.manual_seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
     random.seed(RANDOM_SEED)
@@ -77,13 +83,15 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
+
     # Make folders if they do not exist
     out_dir = f"{args.out_dir}/{str(datetime.datetime.now()).replace(' ', '_')}-{''.join(args.jet_types)}jets-{args.num_epochs}epochs-{args.n_layers}layers-{args.integration_steps}steps"
     make_clear_folder(out_dir)
     make_clear_folder(f"{out_dir}/models")
     make_clear_folder(f"{out_dir}/logs")
     make_clear_folder(f"{out_dir}/gen")
-    print(f"Output directory: {out_dir}")
+    logging.info(f"Output directory: {out_dir}")
+
 
     X_train = JetNet(
         jet_type=args.jet_types,
@@ -119,6 +127,7 @@ if __name__ == "__main__":
     with open(f"{out_dir}/logs/final_scale.txt", "w") as f:
         f.write(f"{final_scale}\n")
     X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
+    logging.info(f"{final_scale=}")
 
     model: JetFMGenerator = JetFMGenerator(
         n_particles=args.num_particles,
@@ -134,16 +143,15 @@ if __name__ == "__main__":
 
     losses = []
 
-    lr = 2e-3
+    lr = 1e-3
     weight_decay = 1e-2
     warmup_pct = 0.1
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    epoch_fraction = 0.1  # Use 10% of data per epoch
+    epoch_fraction = 0.001  # Use 1% of data per epoch
     samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
     steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
 
-    # Fix: Calculate total_steps based on actual steps per epoch
     total_steps = args.num_epochs * steps_per_epoch
     warmup_steps = int(warmup_pct * total_steps)
 
@@ -157,8 +165,9 @@ if __name__ == "__main__":
             return 0.5 * (1.0 + np.cos(np.pi * progress))
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-
     current_step = 0
+
+    logging.info(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
     for epoch in range(args.num_epochs):
         epoch_loss = 0
         num_batches = 0
@@ -192,6 +201,7 @@ if __name__ == "__main__":
 
             pred = model.forward(x_t, t, batch_jet_info, true_masks)
             loss = nn.MSELoss()(pred, dx_t)
+        
             loss.backward()
             model.clip_gradients()
             optimizer.step()
@@ -204,42 +214,44 @@ if __name__ == "__main__":
             if i % 100 == 0 and torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-            if i % 50 == 0:
-                current_lr = optimizer.param_groups[0]['lr']
-                current_avg_loss = epoch_loss / num_batches
-                print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
-                print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
-                log_memory_usage()
+            # if i % 50 == 0:
+            current_lr = optimizer.param_groups[0]['lr']
+            current_avg_loss = epoch_loss / num_batches
+            logging.info(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
+            logging.info(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
+            log_memory_usage()
                 
             del pred, loss, x_t, dx_t, x_0
 
         losses.append(epoch_loss / num_batches)
-        if epoch % 10 == 0:
-            current_lr = optimizer.param_groups[0]['lr']
-            print(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {losses[-1]:.4f}, LR: {current_lr:.6f}")
-        
+        current_lr = optimizer.param_groups[0]['lr']
+        logging.info(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {losses[-1]:.4f}, LR: {current_lr:.6f}")
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         # Get validation metrics
         if epoch % 10 == 0 or epoch == args.num_epochs - 1:
-            print(f"Generating samples for epoch {epoch+1}...")
+            logging.info(f"Generating samples for epoch {epoch+1}...")
             model.eval()
             with torch.no_grad():
                 make_clear_folder(f"{out_dir}/gen/epoch_{epoch+1}")
-                val_samples = generate_samples(
-                    model=model,
-                    device=device,
-                    out_dir=f"{out_dir}/gen/epoch_{epoch+1}",
-                    num_particles=args.num_particles,
-                    num_particle_features=NUM_PARTICLE_FEATURES,
-                    final_scale=final_scale,
-                    integration_steps=16,
-                    n_samples=args.n_samples,
-                    batch_size=args.batch_size,
-                    jet_types=len(args.jet_types)
-                )
-                del val_samples
+                try:
+                    val_samples = generate_samples(
+                        model=model,
+                        device=device,
+                        out_dir=f"{out_dir}/gen/epoch_{epoch+1}",
+                        num_particles=args.num_particles,
+                        num_particle_features=NUM_PARTICLE_FEATURES,
+                        final_scale=final_scale,
+                        integration_steps=16,
+                        n_samples=max(args.n_samples // 20, 50),
+                        batch_size=args.batch_size,
+                        jet_types=len(args.jet_types)
+                 )
+                    del val_samples
+                except Exception as e:
+                    logging.info(f"Error generating samples for epoch {epoch+1}: {e}")
             model.train()
     
     with open(f"{out_dir}/logs/training_loss.csv", "w") as f:
@@ -274,7 +286,7 @@ if __name__ == "__main__":
         src_path = os.path.join(out_dir, item)
         dst_path = os.path.join(final_out_dir, item)
         if os.path.isdir(src_path):
-            shutil.move(src_path, dst_path)
+            shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
         else:
             shutil.copy2(src_path, dst_path)
-    print(f"Training complete. Output saved to {final_out_dir}")
+    logging.info(f"Training complete. Output saved to {final_out_dir}")

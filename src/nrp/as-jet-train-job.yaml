@@ -16,6 +16,11 @@ spec:
       containers:
         - name: train
           image: python:3.10-slim
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
           command:
             - /bin/bash
             - -c
@@ -28,7 +33,10 @@ spec:
 
               source /mnt/data/python-env/bin/activate
               cd /mnt/data/src
-              python3 train.py --batch_size=25 --num_epochs=50 --n_samples=50000 --n_layers=6
+
+              UNIQUE_RUN_ID="$POD_UID"
+              echo "Unique Run ID: $UNIQUE_RUN_ID"
+              python3 train.py --batch_size=25 --num_epochs=50 --n_samples=50000 --n_layers=6| tee -a logs_${UNIQUE_RUN_ID}.txt
           volumeMounts:
             - mountPath: /mnt/data
               name: as-train-pvc
