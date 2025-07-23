@@ -211,16 +211,15 @@ if __name__ == "__main__":
             num_batches += 1
             current_step += 1
 
-            if i % 100 == 0 and torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-            # if i % 50 == 0:
-            current_lr = optimizer.param_groups[0]['lr']
-            current_avg_loss = epoch_loss / num_batches
-            logging.info(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
-            logging.info(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
-            log_memory_usage()
-                
+            if i % 50 == 0:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                current_lr = optimizer.param_groups[0]['lr']
+                current_avg_loss = epoch_loss / num_batches
+                logging.info(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
+                logging.info(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
+                log_memory_usage()
+                    
             del pred, loss, x_t, dx_t, x_0
 
         losses.append(epoch_loss / num_batches)
