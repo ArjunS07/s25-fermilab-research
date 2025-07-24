@@ -7,7 +7,7 @@ spec:
   volumes:
     - name: as-train-pvc
       persistentVolumeClaim:
-        claimName: as-jet-training-pvc
+        claimName: as-jet-train-pvc
   initContainers:
   - name: setup-env
     image: python:3.10-slim

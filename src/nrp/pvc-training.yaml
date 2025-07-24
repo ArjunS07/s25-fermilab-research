@@ -1,12 +1,11 @@
-# pvc-training.yaml
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: as-jet-training-pvc
+  name: as-jet-train-pvc
 spec:
   storageClassName: rook-cephfs
   accessModes:
     - ReadWriteMany
   resources:
     requests:
-      storage: 24Gi
+      storage: 32Gi
