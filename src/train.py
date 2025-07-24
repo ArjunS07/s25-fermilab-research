@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 
 from jetnet.datasets import JetNet
 
-from models.ConditionalLEFlowMatching import JetFMGenerator
+from models.NewLEFM import JetFMGenerator
 from util import jet_attributes
 from generate_samples import generate_samples
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
@@ -45,6 +45,7 @@ data_args = {
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    logging.getLogger().setLevel(logging.INFO)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f"Using {device} device")
@@ -68,9 +69,8 @@ if __name__ == "__main__":
     
     # Network hyperparameters
     parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
-    parser.add_argument("--n_layers", type=int, default=6, help="Number of layers in the network")
+    parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
-    parser.add_argument("--c_weight", type=float, default=1.0, help="Weight for the c parameter in the network")
     
     # Training
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
@@ -132,7 +132,6 @@ if __name__ == "__main__":
     model: JetFMGenerator = JetFMGenerator(
         n_particles=args.num_particles,
         n_layers=args.n_layers,
-        c=args.c_weight
     ).to(device)
     torch.save(model.state_dict(), f"{out_dir}/models/model_initial.pth")
 
