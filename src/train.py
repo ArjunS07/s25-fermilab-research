@@ -211,7 +211,7 @@ if __name__ == "__main__":
                         integration_steps=16,
                         n_samples=max(args.n_samples // 20, 50),
                         batch_size=args.batch_size,
-                        jet_types=len(data_args["jet_type"])
+                        n_jet_types=len(data_args["jet_type"])
                  )
                     del val_samples
                 except Exception as e:
@@ -241,7 +241,7 @@ if __name__ == "__main__":
         integration_steps=args.integration_steps,
         n_samples=args.n_samples,
         batch_size=args.batch_size,
-        jet_types=data_args["jet_type"]
+        n_jet_types=len(data_args["jet_type"])
     )
 
     # move everything in out/ to final_out/

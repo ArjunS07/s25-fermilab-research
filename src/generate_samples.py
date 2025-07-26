@@ -17,7 +17,7 @@ def generate_samples(
         integration_steps,
         n_samples,
         batch_size,
-        jet_types=3,
+        n_jet_types=3,
 ):
 
     jet_attr_generator = jet_attributes.load_model().to(device)
@@ -33,7 +33,7 @@ def generate_samples(
                 (current_batch_size, num_particles, num_particle_features),
                 device=device
             )
-            generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_generator, device, n_jet_types=jet_types, num_jets=x.shape[0])
+            generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_generator, device, n_jet_types=n_jet_types, num_jets=x.shape[0])
             masks = jet_attributes.generate_masks(
                 generated_jet_attrs[:, -1],
                 max_n_particles=num_particles,
