@@ -102,14 +102,14 @@
         \item Now, we use $L$ Lorentz-group equivariant layers. \begin{enumerate}
             \item The input to the $l+1$-th layer is $g^l$ and $x^{l}_1 \dots x^l_N$.
             \item Calculate messages $m^l_{ij} = \phi_e^l(\psi(||x_i^l - x_j^l||), \psi(\langle x_i^l, x_j^l \rangle))$
-            \item Update the global embedding $$g_{l+1} = \phi^l_{g}(g^0, g^l, \frac{c}{N} \sum\limits_{i, j \in [N]} m^l_{ij} \cdot \phi_m^l(m_{ij}) , \sum\limits_{i, j \in [N]} m^l_{ij} \cdot \phi_m^l(m_{ij}))$$
+            \item Update the global embedding $$g_{l+1} = \phi^l_{g}(g^l, \frac{\alpha_l}{N} \sum\limits_{i, j \in [N]}  \phi_m^l(m_{ij}) m^l_{ij} , \beta_l \sum\limits_{i, j \in [N]}  \phi_m^l(m_{ij}) m^l_{ij})$$
             \item Feed in the updated global embedding as well as the original embedding to update the graph embeddings $$
-            x_i^{l+1} = x_i^{l} + \sum\limits_{j \in N} \phi^l_{x} (g^0, g^{l+1}, m_{ij}) \cdot x_j^l
+            x_i^{l+1} = x_i^{l} + \gamma_l \sum\limits_{j \in N, j \neq i} \phi^l_{x} (g^0, g^{l+1}, m_{ij}) x_j^l
             $$
             \item Pass the results $g^{l+1}$ and $x_i^{l+1}$ to the next layer
         \end{enumerate}
         \item After the final LE layer, run the particle representations through a final round of message-passing with the final global embedding $$
-            x_i^{L+1} = x_i^{L} + \sum\limits_{j \in N} \phi^L_{x} (g^0, g^L, m_{ij}) \cdot x_j^L
+            x_i^{L+1} = x_i^{L} + \sum\limits_{j \in N, j \neq i} \phi^L_{x} (g^0, g^L, m_{ij}) x_j^L
         $$
         \item The final output $v_\theta(t, x^0)_i = x_i^L - x_i^0$
     \end{enumerate}
