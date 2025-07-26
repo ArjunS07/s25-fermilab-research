@@ -195,7 +195,7 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
 
         # Get validation metrics
-        if epoch % 10 == 0 or epoch == args.num_epochs - 1:
+        if epoch % 10 == 0:
             logging.info(f"Generating samples for epoch {epoch+1}...")
             model.eval()
             with torch.no_grad():

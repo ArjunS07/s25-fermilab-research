@@ -1,8 +1,11 @@
+import os
 import pickle
 
 import torch
 from jetnet.datasets import JetNet
 from jetnet.datasets.normalisations import FeaturewiseLinear
+
+from util.file_management import make_clear_folder
 
 
 RANDOM_SEED = 42
@@ -40,8 +43,9 @@ if __name__ == "__main__":
     #                     help="Number of particles to consider in each jet")
     # parser.add_argument("--split_fraction", type=float, nargs=3, default=data_args["split_fraction"],
     #                     help="Fraction of data to use for train, validation, and test splits")
-    
 
+    
+    make_clear_folder("data")
 
 
     X_train = JetNet(
