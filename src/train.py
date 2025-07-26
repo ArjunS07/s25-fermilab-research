@@ -15,6 +15,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from jetnet.datasets import JetNet
+from jetnet.datasets.normalisations import FeaturewiseLinear
 
 from models.NewLEFM import JetFMGenerator
 from util import jet_attributes
@@ -34,11 +35,12 @@ TRAIN_SPLIT = 0.7
 data_args = {
     "jet_type": ["g", "q", "t"],
     "data_dir": "datasets/jetnet",
-    "num_particles": NUM_PARTICLES,
+    "num_particles": NUM_PARTICLES, 
     "particle_features": (
         JetNet.ALL_PARTICLE_FEATURES if MASK else JetNet.ALL_PARTICLE_FEATURES[:-1]
     ),
     "jet_features": ["eta", "pt", "mass", "num_particles", "type"],
+    "jet_normalisation": FeaturewiseLinear(),
     "split_fraction": [TRAIN_SPLIT, 1 - TRAIN_SPLIT, 0],
     "download": True
 }
@@ -179,7 +181,7 @@ if __name__ == "__main__":
             X_train_epoch,
             batch_size=args.batch_size,
             shuffle=False, 
-            num_workers=2,
+            # num_workers=2 if device.type == 'cuda' else 0,
             pin_memory=True if torch.cuda.is_available() else False
         )
         
@@ -192,6 +194,8 @@ if __name__ == "__main__":
             x_1 = data.to(device)[:, :, :4]
             true_masks = data.to(device)[:, :, 4] if MASK else None
             x_0 = torch.randn_like(x_1, device=device)  # Sample random initial state
+            if true_masks is not None:
+                x_0 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_0
 
             t = torch.rand(x_0.shape[0], device=device)
             t_viewed = t.view(-1, 1, 1)
@@ -199,6 +203,7 @@ if __name__ == "__main__":
             dx_t = x_1 - x_0
 
             pred = model.forward(x_t, t, batch_jet_info, true_masks)
+            # breakpoint()
             loss = nn.MSELoss()(pred, dx_t)
         
             loss.backward()
@@ -210,7 +215,8 @@ if __name__ == "__main__":
             num_batches += 1
             current_step += 1
 
-            if i % 50 == 0:
+            # if i % 50 == 0:
+            if True:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 current_lr = optimizer.param_groups[0]['lr']
@@ -264,10 +270,11 @@ if __name__ == "__main__":
             f.write(f"{arg}: {getattr(args, arg)}\n")
         f.close()
     
+    make_clear_folder(f"{out_dir}/gen/samples")
     generate_samples(
         model=model,
         device=device,
-        out_dir=f"{out_dir}/gen",
+        out_dir=f"{out_dir}/gen/samples",
         num_particles=args.num_particles,
         num_particle_features=NUM_PARTICLE_FEATURES,
         final_scale=final_scale,
@@ -287,4 +294,4 @@ if __name__ == "__main__":
             shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
         else:
             shutil.copy2(src_path, dst_path)
-    logging.info(f"Training complete. Output saved to {final_out_dir}")
+    logging.info(f"Training complete. Output saved to {final_out_dir}") 

@@ -199,7 +199,7 @@ class LorentzEquivariantLayer(nn.Module):
         # Broadcast global features to match node dimensions
         g_0_broadcast = g_0.unsqueeze(1).expand(-1, n_particles, -1)
         g_new_broadcast = g_new.unsqueeze(1).expand(-1, n_particles, -1)
-        node_input = torch.cat([
+        node_input = torch.cat([                           
             g_0_broadcast, 
             g_new_broadcast, 
             sum_pooled_node, 
@@ -341,6 +341,7 @@ class JetFMGenerator(nn.Module):
             batch_size = x_t.shape[0]
             update = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
             x_next = x_t + update * (t_end - t_start)
+            print(f"{update.mean()=}, {update.std()=}")
             return x_next
         else:
             raise NotImplementedError(f"Method {method} not implemented")

@@ -1,8 +1,11 @@
 import argparse
 import torch
 from util import jet_attributes
-from models.ConditionalLEFlowMatching import JetFMGenerator
+from models.NewLEFM import JetFMGenerator
+import matplotlib.pyplot as plt
+import seaborn as sns
 
+features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 
 def generate_samples(
         model: JetFMGenerator,
@@ -38,7 +41,24 @@ def generate_samples(
             )
 
             for i in range(integration_steps):
+                print(f"{times[i].item()} to {times[i + 1].item()}")
                 x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1])
+                fig, axs = plt.subplots(1, 4, figsize=(20, 10))
+                
+                for j, feature in enumerate(features):
+                    ax = axs[j]
+                    sns.histplot(
+                        x[:, :, j].flatten().numpy(),
+                        bins=100,
+                        ax=ax,
+                        stat="density",
+                        kde=True,
+                        label="Generated"
+                    )
+                    ax.set_title(feature)
+                    ax.legend()
+                plt.savefig(f"{out_dir}/samples_histogram_{start_idx//batch_size:04d}_step_{i}.png")
+                plt.close(fig)
 
             torch.save(final_scale * x, f"{out_dir}/samples_batch_{start_idx//batch_size:04d}.pt")
 
@@ -57,7 +77,7 @@ if __name__ == "__main__":
     parser.add_argument("--integration_steps", type=int, default=16, help="Number of integration steps for ODE solver")
 
     parser.add_argument("--out_dir", type=str, default="out", help="Output directory to save generated samples")
-    parser.add_argument("--num_particles", type=int, default=30, help="Number of particles in each clud")
+    parser.add_argument("--num_particles", type=int, default=150, help="Number of particles in each jet")
     parser.add_argument("--num_particle_features", type=int, default=4, help="Number of features per particle")
     parser.add_argument("--final_scale", type=float, default=42.0, help="Final scale factor for the generated samples")
 
@@ -67,7 +87,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     model_info = torch.load(args.model_path, map_location=args.device)
-    n_layers = 1 + int(list(model_info.keys())[-37].split("layers.")[-1].split(".")[0])
+    n_layers = 1 + int(list(model_info.keys())[-71].split("layers.")[-1].split(".")[0])
     model = JetFMGenerator(n_layers=n_layers).to(args.device)
     model.load_state_dict(model_info)  # Load the model state dictionary
 
