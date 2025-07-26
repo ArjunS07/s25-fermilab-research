@@ -40,7 +40,6 @@ data_args = {
         JetNet.ALL_PARTICLE_FEATURES if MASK else JetNet.ALL_PARTICLE_FEATURES[:-1]
     ),
     "jet_features": ["eta", "pt", "mass", "num_particles", "type"],
-    "jet_normalisation": FeaturewiseLinear(),
     "split_fraction": [TRAIN_SPLIT, 1 - TRAIN_SPLIT, 0],
     "download": True
 }
