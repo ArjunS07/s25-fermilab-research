@@ -23,6 +23,7 @@ from generate_samples import generate_samples
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from util.file_management import make_clear_folder
 from util.memory_management import log_memory_usage
+from data import data_args
 
 RANDOM_SEED = 42
 
@@ -31,18 +32,6 @@ NUM_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4 # E/c, px, py, pz
 TRAIN_SPLIT = 0.7
 
-
-data_args = {
-    "jet_type": ["g", "q", "t"],
-    "data_dir": "datasets/jetnet",
-    "num_particles": NUM_PARTICLES, 
-    "particle_features": (
-        JetNet.ALL_PARTICLE_FEATURES if MASK else JetNet.ALL_PARTICLE_FEATURES[:-1]
-    ),
-    "jet_features": ["eta", "pt", "mass", "num_particles", "type"],
-    "split_fraction": [TRAIN_SPLIT, 1 - TRAIN_SPLIT, 0],
-    "download": True
-}
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
@@ -58,16 +47,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train LorentzFMNet on JetNet dataset")
     parser.add_argument("--out_dir", default="/mnt/data/output")
 
-    parser.add_argument("--jet_types", type=str, nargs="+", default=data_args["jet_type"],
-                        help="List of jet types to train on (e.g., 'g', 'q', 't')")
-    parser.add_argument("--data_dir", type=str, default=data_args["data_dir"],
-                        help="Directory to store the JetNet dataset")
-    parser.add_argument("--num_particles", type=int, default=data_args["num_particles"],
-                        help="Number of particles to consider in each jet")
-    parser.add_argument("--split_fraction", type=float, nargs=3, default=data_args["split_fraction"],
-                        help="Fraction of data to use for train, validation, and test splits")
-    
-    
     # Network hyperparameters
     parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
     parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
@@ -86,36 +65,18 @@ if __name__ == "__main__":
 
 
     # Make folders if they do not exist
-    out_dir = f"{args.out_dir}/{str(datetime.datetime.now()).replace(' ', '_')}-{''.join(args.jet_types)}jets-{args.num_epochs}epochs-{args.n_layers}layers-{args.integration_steps}steps"
+    out_dir = f"{args.out_dir}/{str(datetime.datetime.now()).replace(' ', '_')}-{args.num_epochs}epochs-{args.n_layers}layers-{args.integration_steps}steps"
     make_clear_folder(out_dir)
     make_clear_folder(f"{out_dir}/models")
     make_clear_folder(f"{out_dir}/logs")
     make_clear_folder(f"{out_dir}/gen")
     logging.info(f"Output directory: {out_dir}")
 
+    with open("data/x_train.pkl", "rb") as f:
+        X_train = pickle.load(f)
+    with open("data/x_test.pkl", "rb") as f:
+        X_test = pickle.load(f)
 
-    X_train = JetNet(
-        jet_type=args.jet_types,
-        data_dir=args.data_dir,
-        num_particles=args.num_particles,
-        particle_features=JetNet.ALL_PARTICLE_FEATURES if MASK else JetNet.ALL_PARTICLE_FEATURES[:-1],
-        jet_features=data_args["jet_features"],
-        split_fraction=args.split_fraction,
-        split="train",
-        download=True
-    )
-    X_test = JetNet(
-        jet_type=args.jet_types,
-        data_dir=args.data_dir,
-        num_particles=args.num_particles,
-        particle_features=JetNet.ALL_PARTICLE_FEATURES if MASK else JetNet.ALL_PARTICLE_FEATURES[:-1],
-        jet_features=data_args["jet_features"],
-        split_fraction=args.split_fraction,
-        split="valid",
-        download=True
-    )
-    with open(f"{out_dir}/gen/x_test.pkl", "wb") as f:
-        pickle.dump(X_test, f)
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
 
     e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
@@ -131,7 +92,7 @@ if __name__ == "__main__":
     logging.info(f"{final_scale=}")
 
     model: JetFMGenerator = JetFMGenerator(
-        n_particles=args.num_particles,
+        n_particles=data_args["num_particles"],
         n_layers=args.n_layers,
     ).to(device)
     torch.save(model.state_dict(), f"{out_dir}/models/model_initial.pth")
@@ -244,13 +205,13 @@ if __name__ == "__main__":
                         model=model,
                         device=device,
                         out_dir=f"{out_dir}/gen/epoch_{epoch+1}",
-                        num_particles=args.num_particles,
+                        num_particles=data_args["num_particles"],
                         num_particle_features=NUM_PARTICLE_FEATURES,
                         final_scale=final_scale,
                         integration_steps=16,
                         n_samples=max(args.n_samples // 20, 50),
                         batch_size=args.batch_size,
-                        jet_types=len(args.jet_types)
+                        jet_types=len(data_args["jet_type"])
                  )
                     del val_samples
                 except Exception as e:
@@ -274,13 +235,13 @@ if __name__ == "__main__":
         model=model,
         device=device,
         out_dir=f"{out_dir}/gen/samples",
-        num_particles=args.num_particles,
+        num_particles=data_args["num_particles"],
         num_particle_features=NUM_PARTICLE_FEATURES,
         final_scale=final_scale,
         integration_steps=args.integration_steps,
         n_samples=args.n_samples,
         batch_size=args.batch_size,
-        jet_types=len(args.jet_types)
+        jet_types=data_args["jet_type"]
     )
 
     # move everything in out/ to final_out/

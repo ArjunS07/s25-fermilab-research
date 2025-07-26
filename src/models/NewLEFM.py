@@ -115,7 +115,7 @@ class LorentzEquivariantLayer(nn.Module):
         
         # Global embedding update phi_g
         self.phi_g = nn.Sequential(
-            nn.Linear(global_dim + 2 * (hidden_dim), hidden_dim),
+            nn.Linear(2*global_dim + hidden_dim, hidden_dim),
             nn.BatchNorm1d(hidden_dim),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Linear(hidden_dim, global_dim),
@@ -124,7 +124,6 @@ class LorentzEquivariantLayer(nn.Module):
             nn.Dropout(0.1),
         )
         self.alpha = nn.Parameter(torch.tensor(1.0)) 
-        self.beta = nn.Parameter(torch.tensor(1.0))  
 
         self.phi_x = nn.Sequential(
             nn.Linear(2 * global_dim + hidden_dim, hidden_dim),
@@ -191,27 +190,21 @@ class LorentzEquivariantLayer(nn.Module):
 
         n_valid = torch.sum(mask, dim=1)  # (batch, 1)
         n_valid = torch.clamp(n_valid, min=1)  # Avoid division by zero - edge case, should never trigger in practice since output is clamped
-        # breakpoint()
         # Global update input
         global_input = torch.cat([
             g_0,  # Initial global embedding
             g,  
             (self.alpha / n_valid).unsqueeze(-1) * sum_weighted_messages, 
         ], dim=-1)
-        # breakpoint()
         
         g_updated = self.phi_g(global_input)
-        # breakpoint()
         g_updated = self.global_norm(g_updated + g)  # Residual connection
-        # breakpoint()
         # Particle updates: x_i^{l+1} = x_i^l + gamma * sum_j phi_x(g^0, g^{l+1}, m_ij) * x_j^l
         # Vectorized implementation
         
         # Expand global embeddings to match message dimensions
         g_0_expanded = g_0.unsqueeze(1).unsqueeze(2).expand(batch_size, n_particles, n_particles, -1)
-        # breakpoint()
         g_updated_expanded = g_updated.unsqueeze(1).unsqueeze(2).expand(batch_size, n_particles, n_particles, -1)
-        # breakpoint()
         print(f"{g_0_expanded.mean()=} {g_0_expanded.std()=} {g_0_expanded.max()=} {g_0_expanded.min()=}")
         
         # Create phi_x input for all pairs (i,j)
@@ -221,40 +214,33 @@ class LorentzEquivariantLayer(nn.Module):
             messages               # (batch, n_particles, n_particles, hidden_dim//2)
         ], dim=-1)  # (batch, n_particles, n_particles, 2*global_dim + hidden_dim//2)
 
-        # breakpoint()
         
         # Reshape for batch processing through phi_x
         phi_x_input_flat = phi_x_input.view(-1, phi_x_input.shape[-1])
         phi_x_output_flat = self.phi_x(phi_x_input_flat)  # (batch*n_particles*n_particles, 1)
         phi_x_output = phi_x_output_flat.view(batch_size, n_particles, n_particles, 1)
-        # breakpoint()
         print(f"{phi_x_output.mean()=} {phi_x_output.std()=} {phi_x_output.max()=} {phi_x_output.min()=}")
 
         # Create mask to exclude self-connections (i != j)
         self_mask = torch.eye(n_particles, device=x.device).bool()
         self_mask = self_mask.unsqueeze(0).expand(batch_size, -1, -1).unsqueeze(-1)
         phi_x_output = phi_x_output * (~self_mask).float()
-        # breakpoint()
          
         # Apply edge mask (for padded particles)
         phi_x_output = phi_x_output * edge_mask.unsqueeze(-1)
-        # breakpoint()
         print(f"{phi_x_output.mean()=} {phi_x_output.std()=} {phi_x_output.max()=} {phi_x_output.min()=}")
         
         # Compute contributions: phi_x_output * x_j for each (i,j) pair
         x_expanded = x.unsqueeze(1).expand(-1, n_particles, -1, -1)  # (batch, n_particles, n_particles, particle_dim)
         contributions = phi_x_output * x_expanded  # (batch, n_particles, n_particles, particle_dim)
-        # breakpoint()
         
         # Sum over j for each i (excluding self-connections via the mask)
         particle_updates = torch.sum(contributions, dim=2)  # (batch, n_particles, particle_dim)
-        # breakpoint()
         print(f"{self.gamma=}")
         print(f"{particle_updates.mean()=} {particle_updates.std()=} {particle_updates.max()=} {particle_updates.min()=}")
         
         # Apply updates with learnable scaling
         x_updated = x + self.gamma * particle_updates
-        # breakpoint()
         
         # Apply mask to ensure padded particles remain zero
         x_updated = x_updated * mask_expanded
@@ -263,7 +249,7 @@ class LorentzEquivariantLayer(nn.Module):
         
         # Apply layer norm with residual connection
         # x_updated = self.node_norm(x_updated)
-        # # breakpoint()
+        
         
         return x_updated, g_updated
 

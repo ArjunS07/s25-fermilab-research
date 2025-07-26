@@ -27,6 +27,18 @@ def one_hot_enc_jet_type(y, num_classes=NUM_CLASSES):
     one_hot_enc =  torch.nn.functional.one_hot(y, num_classes=num_classes).float()
     return one_hot_enc
 
+def one_hot_to_type(one_hot_types):
+    """
+    Convert one-hot encoded jet types back to class labels.
+    
+    Args:
+        one_hot_types (torch.Tensor): One-hot encoded tensor of jet types.
+        
+    Returns:
+        torch.Tensor: Class labels for the jet types.
+    """
+    return torch.argmax(one_hot_types, dim=1)
+
 def generate_jets(model, device, n_jet_types, num_jets=1000, one_hot_types=None):
     """
     Use a pretrained normalizing flow model to generate jets.
