@@ -48,7 +48,7 @@ def generate_samples(
                 for j, feature in enumerate(features):
                     ax = axs[j]
                     sns.histplot(
-                        x[:, :, j].flatten().numpy(),
+                        x[:, :, j].flatten().cpu().numpy(),
                         bins=100,
                         ax=ax,
                         stat="density",
