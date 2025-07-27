@@ -39,12 +39,9 @@ if __name__ == "__main__":
 
     with open("data/x_train.pkl", "rb") as f:
         X_train = pickle.load(f)
-    with open("data/x_test.pkl", "rb") as f:
-        X_test = pickle.load(f)
 
     # Only take global jet features
     X_train = X_train[:][1]
-    X_test = X_test[:][1]
 
     # equalize the number of jets per type
     X_train_equalized = []
@@ -52,9 +49,7 @@ if __name__ == "__main__":
     for jet_type in jet_type_map.keys():
         X_train_equalized.extend(X_train[X_train[:, -1] == jet_type][:min_jets_per_type])
 
-    X_train_original = X_train.clone()
     X_train = torch.tensor(np.array(X_train_equalized), dtype=torch.float32)
-    print(X_train_original.shape, X_train.shape)
 
     os.makedirs("gen", exist_ok=True)
     os.makedirs("gen/figs", exist_ok=True)
@@ -69,7 +64,6 @@ if __name__ == "__main__":
     X_train[:, 3] = noised_particles
 
     X_train = X_train.to(device)
-    X_test = X_test.to(device)
 
     long_types = X_train[:, -1].long()
     one_hot_jets = one_hot_enc_jet_type(long_types)
