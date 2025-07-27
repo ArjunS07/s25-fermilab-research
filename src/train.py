@@ -34,11 +34,11 @@ TRAIN_SPLIT = 0.7
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    logging.getLogger().setLevel(logging.INFO)
+    logging.basicConfig(level=print)
+    logging.getLogger().setLevel(print)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logging.info(f"Using {device} device")
+    print(f"Using {device} device")
     torch.manual_seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
     random.seed(RANDOM_SEED)
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     make_clear_folder(f"{out_dir}/models")
     make_clear_folder(f"{out_dir}/logs")
     make_clear_folder(f"{out_dir}/gen")
-    logging.info(f"Output directory: {out_dir}")
+    print(f"Output directory: {out_dir}")
 
     with open("data/x_train.pkl", "rb") as f:
         X_train = pickle.load(f)
@@ -89,7 +89,7 @@ if __name__ == "__main__":
     with open(f"{out_dir}/logs/final_scale.txt", "w") as f:
         f.write(f"{final_scale}\n")
     X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
-    logging.info(f"{final_scale=}")
+    print(f"{final_scale=}")
 
     model: JetFMGenerator = JetFMGenerator(
         n_particles=data_args["num_particles"],
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     current_step = 0
 
-    logging.info(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
+    print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
     for epoch in range(args.num_epochs):
         epoch_loss = 0
         num_batches = 0
@@ -175,28 +175,28 @@ if __name__ == "__main__":
             num_batches += 1
             current_step += 1
 
-            # if i % 50 == 0:
-            if True:
+            if i % 50 == 0:
+            # if True:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 current_lr = optimizer.param_groups[0]['lr']
                 current_avg_loss = epoch_loss / num_batches
-                logging.info(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
-                logging.info(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
-                log_memory_usage()
+                print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
+                print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
+                # log_memory_usage()
                     
             del pred, loss, x_t, dx_t, x_0
 
         losses.append(epoch_loss / num_batches)
         current_lr = optimizer.param_groups[0]['lr']
-        logging.info(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {losses[-1]:.4f}, LR: {current_lr:.6f}")
+        print(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {losses[-1]:.4f}, LR: {current_lr:.6f}")
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         # Get validation metrics
         if epoch % 10 == 0:
-            logging.info(f"Generating samples for epoch {epoch+1}...")
+            print(f"Generating samples for epoch {epoch+1}...")
             model.eval()
             with torch.no_grad():
                 make_clear_folder(f"{out_dir}/gen/epoch_{epoch+1}")
@@ -215,7 +215,7 @@ if __name__ == "__main__":
                  )
                     del val_samples
                 except Exception as e:
-                    logging.info(f"Error generating samples for epoch {epoch+1}: {e}")
+                    print(f"Error generating samples for epoch {epoch+1}: {e}")
             model.train()
     
     with open(f"{out_dir}/logs/training_loss.csv", "w") as f:
@@ -254,4 +254,4 @@ if __name__ == "__main__":
             shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
         else:
             shutil.copy2(src_path, dst_path)
-    logging.info(f"Training complete. Output saved to {final_out_dir}") 
+    print(f"Training complete. Output saved to {final_out_dir}") 
