@@ -34,9 +34,8 @@ TRAIN_SPLIT = 0.7
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=print)
-    logging.getLogger().setLevel(print)
-
+    logging.basicConfig(level=logging.INFO)    
+    
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using {device} device")
     torch.manual_seed(RANDOM_SEED)
