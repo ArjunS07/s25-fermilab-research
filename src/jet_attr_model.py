@@ -110,5 +110,7 @@ if __name__ == "__main__":
         # Log loss
         loss_hist = np.append(loss_hist, loss.to('cpu').data.numpy())
     
+    # save the loss
+    np.save("gen/logs/loss_hist.npy", loss_hist)
     with open("upload/jet_attr_nf_model.pkl", "wb") as f:
         pickle.dump(model, f)
