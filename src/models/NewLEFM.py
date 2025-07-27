@@ -25,8 +25,8 @@ def minkowski_features(x, mask):
     dots = dotsq4(x_i, x_j)
     norms, dots = psi(norms), psi(dots)
 
-    print(f"{norms.mean()=} {norms.std()=} {norms.max()=} {norms.min()=}")
-    print(f"{dots.mean()=} {dots.std()=} {dots.max()=} {dots.min()=}")
+#     print(f"{norms.mean()=} {norms.std()=} {norms.max()=} {norms.min()=}")
+#     print(f"{dots.mean()=} {dots.std()=} {dots.max()=} {dots.min()=}")
     return norms, dots, x_diffs
 
 class TimeEmbedding(nn.Module):
@@ -163,13 +163,13 @@ class LorentzEquivariantLayer(nn.Module):
         # Compute messages m_ij = phi_e(psi(norms), psi(dots))
         # Stack norms and dots for phi_e input
         edge_features = torch.stack([norms, dots], dim=-1)  # (batch, n_particles, n_particles, 2)
-        print(f"{edge_features.mean()=} {edge_features.std()=} {edge_features.max()=} {edge_features.min()=}")
+    #     print(f"{edge_features.mean()=} {edge_features.std()=} {edge_features.max()=} {edge_features.min()=}")
         
         # Reshape for batch processing through phi_e
         edge_features_flat = edge_features.view(-1, 2)  # (batch * n_particles * n_particles, 2)
         messages_flat = self.phi_e(edge_features_flat)  # (batch * n_particles * n_particles, hidden_dim//2)
         messages = messages_flat.view(batch_size, n_particles, n_particles, -1)  # (batch, n_particles, n_particles, hidden_dim//2)
-        print(f"{messages.mean()=} {messages.std()=} {messages.max()=} {messages.min()=}")
+    #     print(f"{messages.mean()=} {messages.std()=} {messages.max()=} {messages.min()=}")
         # Apply edge mask to messages
         messages = messages * edge_mask.unsqueeze(-1)
         
@@ -177,7 +177,7 @@ class LorentzEquivariantLayer(nn.Module):
         phi_m_flat = self.phi_m(edge_features_flat)  # (batch * n_particles * n_particles, hidden_dim)
         phi_m_values = phi_m_flat.view(batch_size, n_particles, n_particles, -1)  # (batch, n_particles, n_particles, hidden_dim)
         phi_m_values = phi_m_values * edge_mask.unsqueeze(-1)
-        print(f"{phi_m_values.shape=} {phi_m_values.mean()=} {phi_m_values.std()=} {phi_m_values.max()=} {phi_m_values.min()=}")
+    #     print(f"{phi_m_values.shape=} {phi_m_values.mean()=} {phi_m_values.std()=} {phi_m_values.max()=} {phi_m_values.min()=}")
         
         # Global embedding update
         # Compute aggregated message features for global update
@@ -186,7 +186,7 @@ class LorentzEquivariantLayer(nn.Module):
         weighted_messages = phi_m_values
         # weighted_messages = phi_m_values
         sum_weighted_messages = torch.sum(weighted_messages, dim=(1, 2))  # (batch, hidden_dim//2)
-        print(f"{sum_weighted_messages.shape=} {sum_weighted_messages.mean()=} {sum_weighted_messages.std()=} {sum_weighted_messages.max()=} {sum_weighted_messages.min()=}")
+    #     print(f"{sum_weighted_messages.shape=} {sum_weighted_messages.mean()=} {sum_weighted_messages.std()=} {sum_weighted_messages.max()=} {sum_weighted_messages.min()=}")
 
         n_valid = torch.sum(mask, dim=1)  # (batch, 1)
         n_valid = torch.clamp(n_valid, min=1)  # Avoid division by zero - edge case, should never trigger in practice since output is clamped
@@ -205,7 +205,7 @@ class LorentzEquivariantLayer(nn.Module):
         # Expand global embeddings to match message dimensions
         g_0_expanded = g_0.unsqueeze(1).unsqueeze(2).expand(batch_size, n_particles, n_particles, -1)
         g_updated_expanded = g_updated.unsqueeze(1).unsqueeze(2).expand(batch_size, n_particles, n_particles, -1)
-        print(f"{g_0_expanded.mean()=} {g_0_expanded.std()=} {g_0_expanded.max()=} {g_0_expanded.min()=}")
+    #     print(f"{g_0_expanded.mean()=} {g_0_expanded.std()=} {g_0_expanded.max()=} {g_0_expanded.min()=}")
         
         # Create phi_x input for all pairs (i,j)
         phi_x_input = torch.cat([
@@ -219,7 +219,7 @@ class LorentzEquivariantLayer(nn.Module):
         phi_x_input_flat = phi_x_input.view(-1, phi_x_input.shape[-1])
         phi_x_output_flat = self.phi_x(phi_x_input_flat)  # (batch*n_particles*n_particles, 1)
         phi_x_output = phi_x_output_flat.view(batch_size, n_particles, n_particles, 1)
-        print(f"{phi_x_output.mean()=} {phi_x_output.std()=} {phi_x_output.max()=} {phi_x_output.min()=}")
+    #     print(f"{phi_x_output.mean()=} {phi_x_output.std()=} {phi_x_output.max()=} {phi_x_output.min()=}")
 
         # Create mask to exclude self-connections (i != j)
         self_mask = torch.eye(n_particles, device=x.device).bool()
@@ -228,7 +228,7 @@ class LorentzEquivariantLayer(nn.Module):
          
         # Apply edge mask (for padded particles)
         phi_x_output = phi_x_output * edge_mask.unsqueeze(-1)
-        print(f"{phi_x_output.mean()=} {phi_x_output.std()=} {phi_x_output.max()=} {phi_x_output.min()=}")
+    #     print(f"{phi_x_output.mean()=} {phi_x_output.std()=} {phi_x_output.max()=} {phi_x_output.min()=}")
         
         # Compute contributions: phi_x_output * x_j for each (i,j) pair
         x_expanded = x.unsqueeze(1).expand(-1, n_particles, -1, -1)  # (batch, n_particles, n_particles, particle_dim)
@@ -236,15 +236,15 @@ class LorentzEquivariantLayer(nn.Module):
         
         # Sum over j for each i (excluding self-connections via the mask)
         particle_updates = torch.sum(contributions, dim=2)  # (batch, n_particles, particle_dim)
-        print(f"{self.gamma=}")
-        print(f"{particle_updates.mean()=} {particle_updates.std()=} {particle_updates.max()=} {particle_updates.min()=}")
+    #     print(f"{self.gamma=}")
+    #     print(f"{particle_updates.mean()=} {particle_updates.std()=} {particle_updates.max()=} {particle_updates.min()=}")
         
         # Apply updates with learnable scaling
         x_updated = x + self.gamma * particle_updates
         
         # Apply mask to ensure padded particles remain zero
         x_updated = x_updated * mask_expanded
-        print(f"{x_updated.mean()=} {x_updated.std()=} {x_updated.max()=} {x_updated.min()=}")
+    #     print(f"{x_updated.mean()=} {x_updated.std()=} {x_updated.max()=} {x_updated.min()=}")
 
         
         # Apply layer norm with residual connection
@@ -342,7 +342,7 @@ class JetFMGenerator(nn.Module):
         """
         if method == 'euler':
             batch_size = x_t.shape[0]
-            print("Rank:", torch.linalg.matrix_rank(x_t, atol=1e-5))
+        #     print("Rank:", torch.linalg.matrix_rank(x_t, atol=1e-5))
             update = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
             x_next = x_t + update * (t_end - t_start)
 
@@ -368,7 +368,7 @@ if __name__ == "__main__":
 
     model = JetFMGenerator(n_layers=2, n_particles=n_particles, particle_dim=particle_dim, global_dim=global_dim, n_jet_types=n_jet_types)
     velocity = model(x, time, jet_conditions, mask)
-    print("Velocity shape:", velocity.shape)  # Should be (batch_size, n_particles, particle_dim) 
+#     print("Velocity shape:", velocity.shape)  # Should be (batch_size, n_particles, particle_dim) 
     
 # def train_model(
 #         model: JetFMGenerator,
@@ -425,15 +425,15 @@ if __name__ == "__main__":
 
 #             if i % (batch_size * 10) == 0:
 #                 current_lr = optimizer.param_groups[0]['lr']
-#                 print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(x_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
-#                 print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
+#             #     print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(x_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
+#             #     print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
 #                 if torch.cuda.is_available():
 #                     allocated = torch.cuda.memory_allocated() / 1024**2       # Tensors currently live
 #                     reserved = torch.cuda.memory_reserved() / 1024**2         # Memory reserved by PyTorch's caching allocator
 #                     max_allocated = torch.cuda.max_memory_allocated() / 1024**2  # Peak allocation during program
-#                     print(f"Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB, Peak: {max_allocated:.2f} MB")
+#                 #     print(f"Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB, Peak: {max_allocated:.2f} MB")
 
 #         losses.append(np.mean(epoch_loss))
 #         if epoch % 10 == 0:
 #             current_lr = optimizer.param_groups[0]['lr']
-#             print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {losses[-1]:.4f}, LR: {current_lr:.6f}")
+#         #     print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {losses[-1]:.4f}, LR: {current_lr:.6f}")
