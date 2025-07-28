@@ -197,7 +197,7 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
 
         # Get validation metrics
-        if epoch % 10 == 0:
+        if epoch % 50 == 0:
             print(f"Generating samples for epoch {epoch+1}...")
             model.eval()
             with torch.no_grad():
@@ -214,7 +214,8 @@ if __name__ == "__main__":
                         n_samples=max(args.n_samples // 20, 50),
                         batch_size=args.batch_size,
                         n_jet_types=len(data_args["jet_type"])
-                 )
+                    )
+                    torch.cuda.synchronize()
                     del val_samples
                 except Exception as e:
                     print(f"Error generating samples for epoch {epoch+1}: {e}")
