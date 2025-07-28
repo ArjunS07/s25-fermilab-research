@@ -108,7 +108,7 @@ if __name__ == "__main__":
     warmup_pct = 0.1
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    epoch_fraction = 0.001  # Use 1% of data per epoch
+    epoch_fraction = 0.1  # Use 10% of data per epoch
     samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
     steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
 
