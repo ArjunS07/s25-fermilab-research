@@ -4,25 +4,20 @@ import argparse
 import os
 import shutil
 import logging
-import sys
 
 import numpy as np
 import torch
 import random
 from torch import nn
-
-
 from torch.utils.data import DataLoader
 
-from jetnet.datasets import JetNet
-from jetnet.datasets.normalisations import FeaturewiseLinear
+from models.NewLEFM import LEJetGeneratorFM
+from models.FlowMatchingMLP import FlowMatchingMLP
 
-from models.NewLEFM import JetFMGenerator
-from util import jet_attributes
 from generate_samples import generate_samples
+from util import jet_attributes
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from util.file_management import make_clear_folder
-from util.memory_management import log_memory_usage
 from data import data_args
 
 RANDOM_SEED = 42
@@ -43,13 +38,13 @@ if __name__ == "__main__":
     random.seed(RANDOM_SEED)
 
     # JetNet data download args
-    parser = argparse.ArgumentParser(description="Train LorentzFMNet on JetNet dataset")
+    parser = argparse.ArgumentParser(description="Train LEJetGeneratorFM on JetNet dataset")
     parser.add_argument("--out_dir", default="/mnt/data/output")
 
     # Network hyperparameters
+    parser.add_argument("--model_type", type=str, default="LEJetGeneratorFM", choices=["LEJetGeneratorFM", "FlowMatchingMLP"], help="Type of model to use")
     parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
     parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
-    parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
     
     # Training
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
@@ -64,7 +59,7 @@ if __name__ == "__main__":
 
 
     # Make folders if they do not exist
-    out_dir = f"{args.out_dir}/{str(datetime.datetime.now()).replace(' ', '_')}-{args.num_epochs}epochs-{args.n_layers}layers-{args.integration_steps}steps"
+    out_dir = f"{args.out_dir}/{str(datetime.datetime.now()).replace(' ', '_')}-{args.model_type}-{args.num_epochs}epochs-{args.batch_size}batch-{args.n_layers}layers-{args.integration_steps}steps"
     make_clear_folder(out_dir)
     make_clear_folder(f"{out_dir}/models")
     make_clear_folder(f"{out_dir}/logs")
@@ -90,10 +85,21 @@ if __name__ == "__main__":
     X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
     print(f"{final_scale=}")
 
-    model: JetFMGenerator = JetFMGenerator(
-        n_particles=data_args["num_particles"],
-        n_layers=args.n_layers,
-    ).to(device)
+    if args.model_type == "LorentzFMNet":
+        model: LEJetGeneratorFM = LEJetGeneratorFM(
+            n_particles=data_args["num_particles"],
+            n_layers=args.n_layers,
+        ).to(device)
+    elif args.model_type == "FlowMatchingMLP":
+        model = FlowMatchingMLP(
+            n_particles=data_args["num_particles"],
+            particle_dim=NUM_PARTICLE_FEATURES,
+            global_dim=64,
+            n_layers=args.n_layers,
+            hidden_dim=args.n_hidden,
+            n_jet_types=len(data_args["jet_type"]),
+            time_embed_dim=64,
+        ).to(device)
     torch.save(model.state_dict(), f"{out_dir}/models/model_initial.pth")
 
     jet_info = X_train[:][1].to(device)
@@ -108,7 +114,7 @@ if __name__ == "__main__":
     warmup_pct = 0.1
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    epoch_fraction = 0.1  # Use 10% of data per epoch
+    epoch_fraction = 0.2  # Use 10% of data per epoch
     samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
     steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
 
@@ -160,6 +166,7 @@ if __name__ == "__main__":
             t_viewed = t.view(-1, 1, 1)
             x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
             dx_t = x_1 - x_0
+            dx_t =  true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * dx_t
 
             pred = model.forward(x_t, t, batch_jet_info, true_masks)
             # breakpoint()

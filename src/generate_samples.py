@@ -1,14 +1,14 @@
 import argparse
 import torch
 from util import jet_attributes
-from models.NewLEFM import JetFMGenerator
+from models.NewLEFM import LEJetGeneratorFM
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 
 def generate_samples(
-        model: JetFMGenerator,
+        model: LEJetGeneratorFM,
         device,
         out_dir,
         num_particles,
@@ -41,7 +41,10 @@ def generate_samples(
             )
 
             for i in range(integration_steps):
-                x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1])
+                new_x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1])
+                update = new_x - x
+                print(f"{update.mean()=} {update.std()=} {update.min()=} {update.max()=}")
+                x = new_x
                 fig, axs = plt.subplots(1, 4, figsize=(20, 10))
                 
                 for j, feature in enumerate(features):
@@ -55,7 +58,6 @@ def generate_samples(
                         label="Generated"
                     )
                     ax.set_title(feature)
-                    ax.legend()
                 plt.savefig(f"{out_dir}/samples_histogram_{start_idx//batch_size:04d}_step_{i}.png")
                 plt.close(fig)
 
@@ -87,7 +89,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     model_info = torch.load(args.model_path, map_location=args.device)
     n_layers = 1 + int(list(model_info.keys())[-71].split("layers.")[-1].split(".")[0])
-    model = JetFMGenerator(n_layers=n_layers).to(args.device)
+    model = LEJetGeneratorFM(n_layers=n_layers).to(args.device)
     model.load_state_dict(model_info)  # Load the model state dictionary
 
     model.to(args.device)

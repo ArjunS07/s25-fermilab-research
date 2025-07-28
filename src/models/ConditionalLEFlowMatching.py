@@ -219,7 +219,7 @@ class LorentzEquivariantLayer(nn.Module):
         
         return x_new, g_new
 
-class JetFMGenerator(nn.Module):
+class LEJetGeneratorFM(nn.Module):
     """Flow matching model for jet generation"""
     def __init__(self, 
                  n_particles=150,
@@ -348,7 +348,7 @@ class JetFMGenerator(nn.Module):
 
 
 def train_model(
-        model: JetFMGenerator,
+        model: LEJetGeneratorFM,
         x_train_loaded: torch.utils.data.DataLoader,
         device: torch.device,
         num_epochs: int,

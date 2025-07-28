@@ -253,7 +253,7 @@ class LorentzEquivariantLayer(nn.Module):
         
         return x_updated, g_updated
 
-class JetFMGenerator(nn.Module):
+class LEJetGeneratorFM(nn.Module):
     """Flow matching model for jet generation"""
     def __init__(self, 
                  n_particles=150,
@@ -325,7 +325,7 @@ class JetFMGenerator(nn.Module):
         x_final, _ = self.final_layer(x_current, g, g_0, mask)
         
         # Compute velocity field: v_theta(t, x) = x_final - x
-        velocity = x_final - x
+        velocity = x_final
         
         # Ensure masked particles have zero velocity
         velocity = velocity * mask.unsqueeze(-1)
@@ -366,12 +366,12 @@ if __name__ == "__main__":
     mask = generate_masks(jet_feats[:, -1], n_particles, 'cpu')
     jet_conditions = jet_feats[:, :n_jet_types + 4]  # One-hot jet types + eta + mass + pT + n_constituents
 
-    model = JetFMGenerator(n_layers=2, n_particles=n_particles, particle_dim=particle_dim, global_dim=global_dim, n_jet_types=n_jet_types)
+    model = LEJetGeneratorFM(n_layers=2, n_particles=n_particles, particle_dim=particle_dim, global_dim=global_dim, n_jet_types=n_jet_types)
     velocity = model(x, time, jet_conditions, mask)
 #     print("Velocity shape:", velocity.shape)  # Should be (batch_size, n_particles, particle_dim) 
     
 # def train_model(
-#         model: JetFMGenerator,
+#         model: LEJetGeneratorFM,
 #         x_train_loaded: torch.utils.data.DataLoader,
 #         device: torch.device,
 #         num_epochs: int,

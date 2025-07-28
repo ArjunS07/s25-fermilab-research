@@ -5,16 +5,11 @@ import torch
 from jetnet.datasets import JetNet
 from jetnet.datasets.normalisations import FeaturewiseLinear
 
-from util.file_management import make_clear_folder
-
-
 RANDOM_SEED = 42
 
 MASK = True
 NUM_PARTICLES = 150
-NUM_PARTICLE_FEATURES = 4 # E/c, px, py, pz
 TRAIN_SPLIT = 0.7
-
 
 data_args = {
     "jet_type": ["g", "q", "t", "w", "z"],
@@ -44,33 +39,35 @@ if __name__ == "__main__":
     # parser.add_argument("--split_fraction", type=float, nargs=3, default=data_args["split_fraction"],
     #                     help="Fraction of data to use for train, validation, and test splits")
 
-    
-    # check if x_train.pkl and x_test.pkl already exist
+
     if os.path.exists("data/x_train.pkl") and os.path.exists("data/x_test.pkl"):
         print("Data files already exist. Skipping data generation.")
-    else:
-        X_train = JetNet(
-            jet_type=data_args["jet_type"],
-            data_dir=data_args["data_dir"],
-            num_particles=data_args["num_particles"],
-            particle_features=data_args["particle_features"],
-            jet_features=data_args["jet_features"],
-            split_fraction=data_args["split_fraction"],
-            split="train",
-            download=True
-        )
-        X_test = JetNet(
-            jet_type=data_args["jet_type"],
-            data_dir=data_args["data_dir"],
-            num_particles=data_args["num_particles"],
-            particle_features=data_args["particle_features"],
-            jet_features=data_args["jet_features"],
-            split_fraction=data_args["split_fraction"],
-            split="valid",
-            download=True
-        )
+        exit(0)
 
-        with open("data/x_train.pkl", "wb") as f:
-            pickle.dump(X_train, f)
-        with open("data/x_test.pkl", "wb") as f:
-            pickle.dump(X_test, f)
+    X_train = JetNet(
+        jet_type=data_args["jet_type"],
+        data_dir=data_args["data_dir"],
+        num_particles=data_args["num_particles"],
+        particle_features=data_args["particle_features"],
+        jet_features=data_args["jet_features"],
+        split_fraction=data_args["split_fraction"],
+        jet_normalisation=data_args["jet_normalisation"],
+        split="train",
+        download=True
+    )
+    X_test = JetNet(
+        jet_type=data_args["jet_type"],
+        data_dir=data_args["data_dir"],
+        num_particles=data_args["num_particles"],
+        particle_features=data_args["particle_features"],
+        jet_features=data_args["jet_features"],
+        split_fraction=data_args["split_fraction"],
+        jet_normalisation=data_args["jet_normalisation"],
+        split="valid",
+        download=True
+    )
+
+    with open("data/x_train.pkl", "wb") as f:
+        pickle.dump(X_train, f)
+    with open("data/x_test.pkl", "wb") as f:
+        pickle.dump(X_test, f)

@@ -1,3 +1,4 @@
+import argparse
 import pickle
 import os
 
@@ -18,7 +19,7 @@ jet_type_map = {
 4: "Z bosons"
 }
 
-def noise_num_particles(X, noise_std=0.25):
+def noise_num_particles(X, noise_std=0.15):
     """
     Add noise to the number of particles in the jets.
     
@@ -36,6 +37,14 @@ def noise_num_particles(X, noise_std=0.25):
 
 if __name__ == "__main__":
     torch.manual_seed(RANDOM_SEED)
+
+    parser = argparse.ArgumentParser(description="Train Jet Attribute NF Model on JetNet dataset")
+    parser.add_argument("--batch_size", type=int, default=8192, help="Batch size for training")
+    parser.add_argument("--num_epochs", type=int, default=35_000, help="Number of epochs to train the model")
+    parser.add_argument("--K", type=int, default=10, help="Number of layers in the flow")
+    parser.add_argument("--hidden_units", type=int, default=128, help="Number of hidden units in the flow")
+    parser.add_argument("--hidden_layers", type=int, default=8, help="Number of hidden layers in the flow")
+    parser.add_argument("--save_model", type=bool, default=True, help="Whether to save the trained model")
 
     with open("data/x_train.pkl", "rb") as f:
         X_train = pickle.load(f)
@@ -69,12 +78,13 @@ if __name__ == "__main__":
     one_hot_jets = one_hot_enc_jet_type(long_types)
     print(one_hot_jets.shape, one_hot_jets.sum(dim=0))
 
-    K = 6
+    K = parser.parse_args().K
+    hidden_units = parser.parse_args().hidden_units
+    hidden_layers = parser.parse_args().hidden_layers
 
+    # Fixed
     latent_size = 4
     context_size = 5
-    hidden_units = 128
-    hidden_layers = 8
 
     flows = []
     for i in range(K):
@@ -85,12 +95,13 @@ if __name__ == "__main__":
     model = nf.ConditionalNormalizingFlow(q0, flows).to(device)
 
     torch.manual_seed(RANDOM_SEED)
-    max_iter = 35_000
     optimizer = torch.optim.Adam(model.parameters(), lr=3e-4, weight_decay=1e-5)
-    batch_size = 8192
+
+    epochs = parser.parse_args().num_epochs
+    batch_size = parser.parse_args().batch_size
 
     loss_hist = np.array([])
-    for it in range(max_iter):
+    for it in range(epochs):
         optimizer.zero_grad()
 
         indices = torch.randperm(len(X_train), device=device)[:batch_size]
@@ -99,18 +110,26 @@ if __name__ == "__main__":
         jet_types = jets[:, -1].long()  # Get the jet type column
         one_hot_types = one_hot_enc_jet_type(jet_types).to(device)
         
-        # Compute loss
         loss = model.forward_kld(jet_info, one_hot_types)
 
-        # Do backprop and optimizer step
         if ~(torch.isnan(loss) | torch.isinf(loss)):
             loss.backward()
             optimizer.step()
 
-        # Log loss
         loss_hist = np.append(loss_hist, loss.to('cpu').data.numpy())
     
-    # save the loss
-    np.save("gen/logs/loss_hist.npy", loss_hist)
-    with open("upload/jet_attr_nf_model.pkl", "wb") as f:
-        pickle.dump(model, f)
+    # save loss as csv
+    np.savetxt("gen/logs/loss_hist.csv", loss_hist, delimiter=",")
+    if parser.parse_args().save_model:
+        with open("upload/jet_attr_nf_model.pkl", "wb") as f:
+            pickle.dump(model, f)   
+    
+    with open("gen/logs/jet_attr_nf_fpd.txt", "w") as f:
+        f.write(f"Number of flows: {K}\n")
+        f.write(f"Hidden layers: {hidden_layers}\n")
+        f.write(f"Hidden units: {hidden_units}\n")
+        
+        f.write(f"# epochs: {epochs}\n")
+        f.write(f"Batch size: {batch_size}\n")
+
+        f.close()
