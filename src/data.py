@@ -45,31 +45,32 @@ if __name__ == "__main__":
     #                     help="Fraction of data to use for train, validation, and test splits")
 
     
-    make_clear_folder("data")
+    # check if x_train.pkl and x_test.pkl already exist
+    if os.path.exists("data/x_train.pkl") and os.path.exists("data/x_test.pkl"):
+        print("Data files already exist. Skipping data generation.")
+    else:
+        X_train = JetNet(
+            jet_type=data_args["jet_type"],
+            data_dir=data_args["data_dir"],
+            num_particles=data_args["num_particles"],
+            particle_features=data_args["particle_features"],
+            jet_features=data_args["jet_features"],
+            split_fraction=data_args["split_fraction"],
+            split="train",
+            download=True
+        )
+        X_test = JetNet(
+            jet_type=data_args["jet_type"],
+            data_dir=data_args["data_dir"],
+            num_particles=data_args["num_particles"],
+            particle_features=data_args["particle_features"],
+            jet_features=data_args["jet_features"],
+            split_fraction=data_args["split_fraction"],
+            split="valid",
+            download=True
+        )
 
-
-    X_train = JetNet(
-        jet_type=data_args["jet_type"],
-        data_dir=data_args["data_dir"],
-        num_particles=data_args["num_particles"],
-        particle_features=data_args["particle_features"],
-        jet_features=data_args["jet_features"],
-        split_fraction=data_args["split_fraction"],
-        split="train",
-        download=True
-    )
-    X_test = JetNet(
-        jet_type=data_args["jet_type"],
-        data_dir=data_args["data_dir"],
-        num_particles=data_args["num_particles"],
-        particle_features=data_args["particle_features"],
-        jet_features=data_args["jet_features"],
-        split_fraction=data_args["split_fraction"],
-        split="valid",
-        download=True
-    )
-
-    with open("data/x_train.pkl", "wb") as f:
-        pickle.dump(X_train, f)
-    with open("data/x_test.pkl", "wb") as f:
-        pickle.dump(X_test, f)
+        with open("data/x_train.pkl", "wb") as f:
+            pickle.dump(X_train, f)
+        with open("data/x_test.pkl", "wb") as f:
+            pickle.dump(X_test, f)
