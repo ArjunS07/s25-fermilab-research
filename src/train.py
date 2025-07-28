@@ -116,24 +116,24 @@ if __name__ == "__main__":
 
     epoch_fraction = 0.2  # Use 10% of data per epoch
     samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
-    steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
+    # steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
 
-    total_steps = args.num_epochs * steps_per_epoch
-    warmup_steps = int(warmup_pct * total_steps)
+    # total_steps = args.num_epochs * steps_per_epoch
+    # warmup_steps = int(warmup_pct * total_steps)
 
-    def lr_lambda(current_step):
-        if current_step < warmup_steps:
-            # Linear warm-up
-            return float(current_step) / float(max(1, warmup_steps))
-        else:
-            # Cosine annealing after warm-up
-            progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-            return 0.5 * (1.0 + np.cos(np.pi * progress))
+    # def lr_lambda(current_step):
+    #     if current_step < warmup_steps:
+    #         # Linear warm-up
+    #         return float(current_step) / float(max(1, warmup_steps))
+    #     else:
+    #         # Cosine annealing after warm-up
+    #         progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+    #         return 0.5 * (1.0 + np.cos(np.pi * progress))
 
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-    current_step = 0
+    # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    # current_step = 0
 
-    print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
+    # print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
     for epoch in range(args.num_epochs):
         epoch_loss = 0
         num_batches = 0
@@ -175,7 +175,7 @@ if __name__ == "__main__":
             loss.backward()
             model.clip_gradients()
             optimizer.step()
-            scheduler.step()
+            # scheduler.step()
             
             epoch_loss += loss.item()
             num_batches += 1
