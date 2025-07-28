@@ -174,7 +174,6 @@ if __name__ == "__main__":
             num_batches += 1
             current_step += 1
 
-            del x_1, x_0, t, t_viewed, x_t, dx_t, pred, loss
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
@@ -187,6 +186,8 @@ if __name__ == "__main__":
                 print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
                 print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
                 # log_memory_usage()
+            
+            del x_1, x_0, t, t_viewed, x_t, dx_t, pred, loss
 
         losses.append(epoch_loss / num_batches)
         current_lr = optimizer.param_groups[0]['lr']
