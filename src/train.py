@@ -211,7 +211,7 @@ if __name__ == "__main__":
                         num_particle_features=NUM_PARTICLE_FEATURES,
                         final_scale=final_scale,
                         integration_steps=16,
-                        n_samples=max(args.n_samples // 20, 50),
+                        n_samples=max(args.n_samples // 100, 50),
                         batch_size=args.batch_size,
                         n_jet_types=len(data_args["jet_type"])
                     )

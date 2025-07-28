@@ -63,8 +63,7 @@ spec:
               UNIQUE_RUN_ID="$POD_UID"
               echo "Unique Run ID: $UNIQUE_RUN_ID"
               python3 data.py
-              python3 jet_attr_model.py
-              python3 train.py --batch_size=25 --num_epochs=100 --n_samples=50000 --n_layers=6| tee -a logs_${UNIQUE_RUN_ID}.txt
+              python3 train.py --batch_size=20 --num_epochs=100 --n_samples=50000 --n_layers=6| tee -a logs_${UNIQUE_RUN_ID}.txt
           volumeMounts:
             - mountPath: /mnt/data
               name: as-train-pvc

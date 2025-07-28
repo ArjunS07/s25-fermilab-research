@@ -41,7 +41,6 @@ def generate_samples(
             )
 
             for i in range(integration_steps):
-                print(f"{times[i].item()} to {times[i + 1].item()}")
                 x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1])
                 fig, axs = plt.subplots(1, 4, figsize=(20, 10))
                 
