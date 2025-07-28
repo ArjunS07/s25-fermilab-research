@@ -179,7 +179,7 @@ if __name__ == "__main__":
             
             epoch_loss += loss.item()
             num_batches += 1
-            current_step += 1
+            # current_step += 1
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
