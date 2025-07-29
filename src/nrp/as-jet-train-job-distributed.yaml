@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-job-mlp
+  name: as-jet-train-job-aforty
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -63,35 +63,17 @@ spec:
               UNIQUE_RUN_ID="$POD_UID"
               echo "Unique Run ID: $UNIQUE_RUN_ID"
               python3 data.py
-              python3 train.py --model_type="FlowMatchingMLP" --batch_size=512 --num_epochs=100 --n_samples=50000 --n_layers=6| tee -a logs_${UNIQUE_RUN_ID}.txt
+              python3 jet_attr_model.py
+              python3 train.py --batch_size=96 --num_epochs=100 --n_samples=50000 --n_layers=6 use_distributed=True| tee -a logs_${UNIQUE_RUN_ID}.txt
           volumeMounts:
             - mountPath: /mnt/data
               name: as-train-pvc
           resources:
             limits:
-              nvidia.com/gpu: 1
+              nvidia.com/a10: 4
               memory: "16Gi"
               cpu: "2.4"
             requests:
-              nvidia.com/gpu: 1
+              nvidia.com/a10: 4
               memory: "16Gi"
               cpu: "2"
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: kubernetes.io/hostname
-                operator: NotIn
-                values:
-                      - gpn-fiona-mizzou-2.rnet.missouri.edu
-                      - rci-nrp-gpu-05.sdsu.edu
-                      - node-2-2.sdsc.optiputer.net
-              - key: nvidia.com/gpu.product
-                operator: In
-                values:
-                - NVIDIA-GeForce-RTX-4090
-                - NVIDIA-GeForce-RTX-3090
-                - NVIDIA-A10
-                - NVIDIA-TITAN-RTX
-                - NVIDIA-RTX-A5000
