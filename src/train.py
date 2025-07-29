@@ -45,7 +45,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
     
     # Training
-    parser.add_argument("--use_gpu", type=bool, default=True, help="Use GPU for training")
+    parser.add_argument("--use_distributed", type=bool, default=False, help="Use distributed for training")
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training")
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
@@ -139,7 +139,7 @@ if __name__ == "__main__":
 
     # print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
     
-    if args.use_gpu:
+    if args.use_distributed:
         model, optimizer = accelerator.prepare(model, optimizer)
     for epoch in range(args.num_epochs):
         epoch_loss = 0
@@ -183,7 +183,7 @@ if __name__ == "__main__":
             # breakpoint()
             loss = nn.MSELoss()(pred, dx_t)
         
-            if args.use_gpu:
+            if args.use_distributed:
                 accelerator.backward(loss)  # Use accelerator to handle backward pass
             else:
                 loss.backward()
