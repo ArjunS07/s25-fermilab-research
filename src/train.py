@@ -10,6 +10,7 @@ import torch
 import random
 from torch import nn
 from torch.utils.data import DataLoader
+from accelerate import Accelerator
 
 from models.NewLEFM import LEJetGeneratorFM
 from models.FlowMatchingMLP import FlowMatchingMLP
@@ -30,9 +31,6 @@ TRAIN_SPLIT = 0.7
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)    
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using {device} device")
     torch.manual_seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
     random.seed(RANDOM_SEED)
@@ -47,6 +45,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
     
     # Training
+    parser.add_argument("--use_gpu", type=bool, default=True, help="Use GPU for training")
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training")
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
@@ -85,7 +84,12 @@ if __name__ == "__main__":
     X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
     print(f"{final_scale=}")
 
-    if args.model_type == "LorentzFMNet":
+    accelerator = Accelerator()
+    device = accelerator.device
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using {device} device")
+ 
+    if args.model_type == "LEJetGeneratorFM":
         model: LEJetGeneratorFM = LEJetGeneratorFM(
             n_particles=data_args["num_particles"],
             n_layers=args.n_layers,
@@ -111,11 +115,11 @@ if __name__ == "__main__":
 
     lr = 1e-3
     weight_decay = 1e-2
-    warmup_pct = 0.1
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     epoch_fraction = 0.2  # Use 10% of data per epoch
     samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
+    # warmup_pct = 0.1
     # steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
 
     # total_steps = args.num_epochs * steps_per_epoch
@@ -134,6 +138,9 @@ if __name__ == "__main__":
     # current_step = 0
 
     # print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
+    
+    if args.use_gpu:
+        model, optimizer = accelerator.prepare(model, optimizer)
     for epoch in range(args.num_epochs):
         epoch_loss = 0
         num_batches = 0
@@ -142,15 +149,18 @@ if __name__ == "__main__":
         epoch_indices = torch.randperm(len(X_train_particle_transformed))[:samples_per_epoch]
         X_train_epoch = torch.utils.data.Subset(X_train_particle_transformed, epoch_indices)
         jet_info_epoch = jet_info[epoch_indices].to(device)  # Move to device once
-        X_train_loaded = DataLoader(
-            X_train_epoch,
-            batch_size=args.batch_size,
-            shuffle=False, 
-            # num_workers=2 if device.type == 'cuda' else 0,
-            pin_memory=True if torch.cuda.is_available() else False
+
+        train_loader = accelerator.prepare_data_loader(
+            DataLoader(
+                X_train_epoch,
+                batch_size=args.batch_size,
+                shuffle=True,  # Shuffle for each epoch
+                # num_workers=2 if device.type == 'cuda' else 0,
+                pin_memory=True if torch.cuda.is_available() else False
+            )
         )
         
-        for i, data in enumerate(X_train_loaded):
+        for i, data in enumerate(train_loader):
             optimizer.zero_grad()
 
             actual_batch_size = data.shape[0]
@@ -162,17 +172,21 @@ if __name__ == "__main__":
             if true_masks is not None:
                 x_0 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_0
 
-            t = torch.rand(x_0.shape[0], device=device)
+            t = torch.rand(x_0.shape[0]).to(device)
             t_viewed = t.view(-1, 1, 1)
             x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
             dx_t = x_1 - x_0
             dx_t =  true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * dx_t
 
+            breakpoint()
             pred = model.forward(x_t, t, batch_jet_info, true_masks)
             # breakpoint()
             loss = nn.MSELoss()(pred, dx_t)
         
-            loss.backward()
+            if args.use_gpu:
+                accelerator.backward(loss)  # Use accelerator to handle backward pass
+            else:
+                loss.backward()
             model.clip_gradients()
             optimizer.step()
             # scheduler.step()
@@ -190,7 +204,7 @@ if __name__ == "__main__":
                     torch.cuda.empty_cache()
                 current_lr = optimizer.param_groups[0]['lr']
                 current_avg_loss = epoch_loss / num_batches
-                print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(X_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
+                print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
                 print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
                 # log_memory_usage()
             

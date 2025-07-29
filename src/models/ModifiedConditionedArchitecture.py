@@ -18,10 +18,9 @@ def minkowski_features(x, mask):
     x_j = x.unsqueeze(-3)  # third-last dimension - B
     x_diffs = x_i - x_j  # (batch_size, n_particles, n_particles, 4)
 
-    edge_mask = mask.unsqueeze(-1) * mask.unsqueeze(-2)  # Valid if both particles are valid
-    edge_mask = edge_mask.unsqueeze(-1)  # Add feature dimension
-    diff_masked = x_diffs * edge_mask
-
+    masks = mask.unsqueeze(-1).expand(-1, -1, x.shape[-1])
+    expanded_mask = masks.unsqueeze(-3).expand(-1, x.shape[1], -1, -1)
+    diff_masked = x_diffs * expanded_mask
     norms = normsq4(diff_masked)
     dots = dotsq4(x_i, x_j)
     norms, dots = psi(norms), psi(dots)
@@ -191,11 +190,11 @@ class LorentzEquivariantLayer(nn.Module):
 
         n_valid = torch.sum(mask, dim=1)  # (batch, 1)
         n_valid = torch.clamp(n_valid, min=1)  # Avoid division by zero - edge case, should never trigger in practice since output is clamped
-        breakpoint()
+        # Global update input
         global_input = torch.cat([
             g_0,  # Initial global embedding
             g,  
-            (self.alpha / n_valid).unsqueeze(-1) * sum_weighted_messages
+            (self.alpha / n_valid).unsqueeze(-1) * sum_weighted_messages, 
         ], dim=-1)
         
         g_updated = self.phi_g(global_input)
@@ -223,15 +222,16 @@ class LorentzEquivariantLayer(nn.Module):
     #     print(f"{phi_x_output.mean()=} {phi_x_output.std()=} {phi_x_output.max()=} {phi_x_output.min()=}")
 
         # Create mask to exclude self-connections (i != j)
-        self_mask = torch.eye(n_particles, device=x.device).unsqueeze(0).expand(batch_size, -1, -1)  # (B, N, N)
-        phi_x_output = phi_x_output * (~self_mask.bool()).unsqueeze(-1) * edge_mask.unsqueeze(-1)         
-
+        self_mask = torch.eye(n_particles, device=x.device).bool()
+        self_mask = self_mask.unsqueeze(0).expand(batch_size, -1, -1).unsqueeze(-1)
+        phi_x_output = phi_x_output * (~self_mask).float()
+         
+        # Apply edge mask (for padded particles)
+        phi_x_output = phi_x_output * edge_mask.unsqueeze(-1)
     #     print(f"{phi_x_output.mean()=} {phi_x_output.std()=} {phi_x_output.max()=} {phi_x_output.min()=}")
         
         # Compute contributions: phi_x_output * x_j for each (i,j) pair
-        # mask x
-        x_masked = x * mask_expanded  # (B, N, D)
-        x_expanded = x_masked.unsqueeze(1).expand(-1, n_particles, -1, -1)  # (B, N, N, D)
+        x_expanded = x.unsqueeze(1).expand(-1, n_particles, -1, -1)  # (batch, n_particles, n_particles, particle_dim)
         contributions = phi_x_output * x_expanded  # (batch, n_particles, n_particles, particle_dim)
         
         # Sum over j for each i (excluding self-connections via the mask)
@@ -239,9 +239,18 @@ class LorentzEquivariantLayer(nn.Module):
     #     print(f"{self.gamma=}")
     #     print(f"{particle_updates.mean()=} {particle_updates.std()=} {particle_updates.max()=} {particle_updates.min()=}")
         
-        particle_updates = particle_updates * mask_expanded  # Mask the updates first
+        # Apply updates with learnable scaling
         x_updated = x + self.gamma * particle_updates
+        
+        # Apply mask to ensure padded particles remain zero
+        x_updated = x_updated * mask_expanded
+    #     print(f"{x_updated.mean()=} {x_updated.std()=} {x_updated.max()=} {x_updated.min()=}")
 
+        
+        # Apply layer norm with residual connection
+        # x_updated = self.node_norm(x_updated)
+        
+        
         return x_updated, g_updated
 
 class LEJetGeneratorFM(nn.Module):
@@ -360,72 +369,3 @@ if __name__ == "__main__":
 
     model = LEJetGeneratorFM(n_layers=2, n_particles=n_particles, particle_dim=particle_dim, global_dim=global_dim, n_jet_types=n_jet_types)
     velocity = model(x, time, jet_conditions, mask)
-#     print("Velocity shape:", velocity.shape)  # Should be (batch_size, n_particles, particle_dim) 
-    
-# def train_model(
-#         model: LEJetGeneratorFM,
-#         x_train_loaded: torch.utils.data.DataLoader,
-#         device: torch.device,
-#         num_epochs: int,
-#         batch_size: int,
-#         warmup_pct=0.1,
-#         lr=1e-3,
-#         weight_decay=1e-2
-# ):
-#     losses = []
-#     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-
-#     total_steps = num_epochs * len(x_train_loaded)
-#     warmup_steps = int(warmup_pct * total_steps)
-
-#     def lr_lambda(current_step):
-#         if current_step < warmup_steps:
-#             # Linear warm-up
-#             return float(current_step) / float(max(1, warmup_steps))
-#         else:
-#             # Cosine annealing after warm-up
-#             progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-#             return 0.5 * (1.0 + np.cos(np.pi * progress))
-#     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-
-#     current_step = 0
-#     for epoch in range(num_epochs):
-#         epoch_loss = []
-
-#         for i, data in enumerate(x_train_loaded):
-#             optimizer.zero_grad()
-
-#             jet_info = data[1].to(device)
-#             x_1 = data[0].to(device)[:, :, :4]
-#             x_0 = torch.randn_like(x_1, device=device)  # Sample random initial state
-
-#             t = torch.rand(x_0.shape[0], device=device)
-#             t_viewed = t.view(-1, 1, 1)
-#             x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
-#             dx_t = x_1 - x_0
-
-#             pred = model.forward(x_t, t, jet_info)
-#             loss = nn.MSELoss()(pred, dx_t)
-#             loss.backward()
-#             model.clip_gradients()
-#             optimizer.step()
-
-#             scheduler.step()
-#             current_step += 1
-
-#             epoch_loss.append(loss.item())
-
-#             if i % (batch_size * 10) == 0:
-#                 current_lr = optimizer.param_groups[0]['lr']
-#             #     print(f"Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{len(x_train_loaded)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
-#             #     print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
-#                 if torch.cuda.is_available():
-#                     allocated = torch.cuda.memory_allocated() / 1024**2       # Tensors currently live
-#                     reserved = torch.cuda.memory_reserved() / 1024**2         # Memory reserved by PyTorch's caching allocator
-#                     max_allocated = torch.cuda.max_memory_allocated() / 1024**2  # Peak allocation during program
-#                 #     print(f"Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB, Peak: {max_allocated:.2f} MB")
-
-#         losses.append(np.mean(epoch_loss))
-#         if epoch % 10 == 0:
-#             current_lr = optimizer.param_groups[0]['lr']
-#         #     print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {losses[-1]:.4f}, LR: {current_lr:.6f}")

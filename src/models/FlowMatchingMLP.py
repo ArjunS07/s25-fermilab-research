@@ -16,10 +16,10 @@ class FlowMatchingMLP(nn.Module):
                  gradient_clip_val=1.0):
         super().__init__()
         
-        self.conditioning_dim = n_jet_types + 4
-        self.time_embedding = TimeEmbedding(embed_dim=time_embed_dim)
+        self.conditioning_dim = n_jet_types
+        # self.time_embedding = TimeEmbedding(embed_dim=time_embed_dim)
         self.global_init = nn.Sequential(
-            nn.Linear(time_embed_dim + self.conditioning_dim, global_dim),
+            nn.Linear(1 + self.conditioning_dim, global_dim),
             nn.BatchNorm1d(global_dim),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Dropout(0.1)
@@ -52,10 +52,11 @@ class FlowMatchingMLP(nn.Module):
             velocity: (batch_size, n_particles, particle_dim) - velocity field v_theta(t, x)
         """
 
-        t_embed = self.time_embedding(t)  # (batch_size, time_embed_dim)
-        
+        # t_embed = self.time_embedding(t)  # (batch_size, time_embed_dim)
+        jet_conditions = jet_conditions[:, :-4]
+
         # Initial global embedding g^0
-        global_input = torch.cat([t_embed, jet_conditions], dim=-1)
+        global_input = torch.cat([t.unsqueeze(-1), jet_conditions], dim=-1)
         g_0 = self.global_init(global_input)  # (batch_size, global_dim)
 
         # TODO: Only use E/c
