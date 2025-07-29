@@ -191,7 +191,6 @@ class LorentzEquivariantLayer(nn.Module):
 
         n_valid = torch.sum(mask, dim=1)  # (batch, 1)
         n_valid = torch.clamp(n_valid, min=1)  # Avoid division by zero - edge case, should never trigger in practice since output is clamped
-        breakpoint()
         global_input = torch.cat([
             g_0,  # Initial global embedding
             g,  

@@ -178,7 +178,6 @@ if __name__ == "__main__":
             dx_t = x_1 - x_0
             dx_t =  true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * dx_t
 
-            breakpoint()
             pred = model.forward(x_t, t, batch_jet_info, true_masks)
             # breakpoint()
             loss = nn.MSELoss()(pred, dx_t)
