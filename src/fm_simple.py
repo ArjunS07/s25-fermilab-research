@@ -199,7 +199,10 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             loss = loss_fn(flow_model(t=t, x_t=x_t), dx_t)
 
-            x_0_val = torch.randn(len(x_1_val), 1) * x_0_dist_std + x_0_dist_mean
+            x_0_val = torch.randn(len(x_1_val), 1, device=device) * x_0_dist_std.to(device) + x_0_dist_mean.to(device)
+            x_1_val = x_1_val.to(device)
+            val_times_1 = val_times_1.to(device)
+            val_times_2 = val_times_2.to(device)
 
             x_t_val_1 = (1 - val_times_1) * x_0_val + val_times_1 * x_1_val
             dx_t_val_1 = x_1_val - x_0_val
@@ -221,7 +224,7 @@ if __name__ == "__main__":
         epoch_loss /= n_batches
         epoch_val_loss_1 /= n_batches
         epoch_val_loss_2 /= n_batches
-        
+
         losses.append(epoch_loss)
         val_losses_1.append(epoch_val_loss_1)
         val_losses_2.append(epoch_val_loss_2)
