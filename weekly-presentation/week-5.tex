@@ -115,6 +115,39 @@
     \end{enumerate}
 \end{frame}
 
+\begin{frame}
+    \begin{enumerate}
+    \item[1-4.] % Same as before
+    \item Now use L Lorentz-group equivariant layers:
+    \begin{enumerate}
+        \item Calculate messages: $m^l_{ij} = \phi_e^l(\psi(||x_i^l - x_j^l||), \psi(\langle x_i^l, x_j^l \rangle), g^l)$
+        \item Update global embedding: 
+        $$g^{l+1} = \phi_g^l\left(g^l, \frac{1}{N^2} \sum_{i,j \in [N]} \phi_m^l(m_{ij}^l) m_{ij}^l\right)$$
+        \item Update particle embeddings:
+        $$x_i^{l+1} = x_i^l + \frac{\gamma_l}{\sqrt{N-1}} \sum_{j \neq i} \phi_x^l(g^{l+1}, m_{ij}^l) x_j^l$$
+    \end{enumerate}
+    \item Final vector field prediction:
+    $$v_\theta(t, x^0)_i = \phi_{out}(g^L, x_i^L, x_i^0, t)$$
+\end{enumerate}
+\end{frame}
+
+
+\begin{frame}
+    
+$$
+m^l_{ij} = \phi_e^l(\text{invariants}_{ij}, g^l, t_{emb})$$ 
+
+$$
+w^l_{ij} = \text{softmax}_j(\phi_w^l(m^l_{ij}))$$ 
+
+$$
+g^{l+1} = g^l + \phi_g^l(g^l, \sum_{i,j} w^l_{ij} m^l_{ij}, t_{emb})$$ 
+
+$$
+x_i^{l+1} = x_i^l + \text{scale}_l(t) \sum_{j \neq i} \phi_x^l(g^{l+1}, m^l_{ij}, t_{emb}) x_j^l
+$$
+\end{frame}
+
 \begin{frame}{Jet conditioning implementation}
     \begin{itemize}
         \item During training, use the real features corresponding to each jet.
@@ -124,7 +157,9 @@
             \item Generate masks corresponding to the desired number of constituents
         \end{itemize}
     \end{itemize}
+
 \end{frame}
+
 
 \begin{frame}[allowframebreaks]{Preliminary results}
     100 epochs, 6 layers, gluons only. 500 generated samples with 32 steps.
