@@ -128,7 +128,7 @@ if __name__ == "__main__":
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
 
     parser = argparse.ArgumentParser(description="Train Simple MLP on flattened JetNet dataset")
-    parser.add_argument("--num_epochs", type=int, default=20000, help="Number of epochs to train the model")
+    parser.add_argument("--num_epochs", type=int, default=5000, help="Number of epochs to train the model")
     parser.add_argument("--n_train_samples", type=int, default=1_000_000, help="Number of training samples to use")
 
     args = parser.parse_args()
@@ -177,7 +177,7 @@ if __name__ == "__main__":
     val_losses_1 = []
     val_losses_2 = []
 
-    batch_size = 8192
+    batch_size = 32768
     n_batches = len(x_1_train) // batch_size
 
     for epoch in range(num_epochs):
