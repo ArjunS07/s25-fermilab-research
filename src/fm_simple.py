@@ -6,27 +6,78 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
+import argparse
 
 class Flow(nn.Module):
     """
     Simple flow model that takes in input tensor and time and outputs transformed tensor.
     Consists of 4 linear layers with ELU activations
     """
-    def __init__(self, dim: int = 1, h: int = 64): 
+    def __init__(self, 
+                 dim: int = 1, 
+                 h: int = 64, 
+                 num_layers: int = 8,
+                 dropout_rate: float = 0.1,
+                 time_embedding_dim: int = 32):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(dim + 1, h), nn.ELU(),
-            nn.Linear(h, h), nn.ELU(),
-            nn.Linear(h, h), nn.ELU(),
-            nn.Linear(h, h), nn.ELU(),
-            nn.Linear(h, h), nn.ELU(),
-            nn.Linear(h, h), nn.ELU(),
-            nn.Linear(h, h), nn.ELU(),
-            nn.Linear(h, dim))
+        
+        self.dim = dim
+        self.h = h
+        self.num_layers = num_layers
+        self.time_embedding_dim = time_embedding_dim
+        
+        # Time embedding for better temporal conditioning
+        self.time_embed = nn.Sequential(
+            nn.Linear(1, time_embedding_dim),
+            nn.SiLU(),
+            nn.Linear(time_embedding_dim, time_embedding_dim)
+        )
+        
+        self.input_proj = nn.Linear(dim + time_embedding_dim, h)
+        
+        self.layers = nn.ModuleList()
+        for i in range(num_layers):
+            layer_modules = []
+            layer_modules.append(nn.Linear(h, h))            
+            layer_modules.append(nn.BatchNorm1d(h))
+            layer_modules.append(nn.SiLU())
+            if dropout_rate > 0:
+                layer_modules.append(nn.Dropout(dropout_rate))
+            self.layers.append(nn.Sequential(*layer_modules))
+        
+        # Output projection
+        self.output_proj = nn.Linear(h, dim)
+        
+        # Initialize weights
+        self._initialize_weights()
     
+    def _initialize_weights(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
     def forward(self, t: Tensor, x_t: Tensor) -> Tensor:
-        return self.net(torch.cat((t, x_t), -1))
-    
+        batch_size = x_t.shape[0]
+        # Ensure t has the right shape
+        if t.dim() == 0:
+            t = t.unsqueeze(0).expand(batch_size)
+        elif t.dim() == 1 and t.shape[0] == 1:
+            t = t.expand(batch_size)
+        elif t.dim() == 2 and t.shape[1] == 1:
+            t = t.squeeze(-1)
+
+        t = t.unsqueeze(-1)
+        t_embed = self.time_embed(t) 
+        x = torch.cat([x_t, t_embed], dim=-1)
+        x = self.input_proj(x)
+        for layer in self.layers:
+            x = layer(x)
+        
+        output = self.output_proj(x)
+        return output
+        
     def step(self, x_t: Tensor, t_start: Tensor, t_end: Tensor, method = 'euler') -> Tensor:
         """
         Calculate the probability density at a particular time step
@@ -84,7 +135,6 @@ if __name__ == "__main__":
     num_epochs = args.num_epochs
     n_train_samples = args.n_train_samples
 
-
     particle_clouds = X_train_particle_transformed[:, :, :4]
     masks = X_train_particle_transformed[:, :, 4]
     masked_clouds = (masks.unsqueeze(-1) * particle_clouds)
@@ -104,7 +154,11 @@ if __name__ == "__main__":
     x_1 = x_1.to(device)
     flow_model = Flow(dim=4, h=256).to(device)
     x_1_train = x_1[:n_train]
+    
+    val_size = 10_000
     x_1_val = x_1[n_train:]
+    x_1_val = x_1_val[:val_size]
+
 
     val_time_1 = torch.Tensor([0.1])
     val_time_2 = torch.Tensor([0.9])
@@ -122,35 +176,58 @@ if __name__ == "__main__":
 
     val_losses_1 = []
     val_losses_2 = []
+
+    batch_size = 4096
+    n_batches = len(x_1_train) // batch_size
+
     for epoch in range(num_epochs):
-        x_0 = (torch.randn(len(x_1_train), 1) * x_0_dist_std + x_0_dist_mean).to(device)
-        t = torch.rand(len(x_1_train), 1, device=device)
-        x_t = (1 - t) * x_0 + t * x_1_train
-        dx_t = x_1_train - x_0
-        optimizer.zero_grad()
-        loss = loss_fn(flow_model(t=t, x_t=x_t), dx_t)
+        epoch_loss = 0.0
 
-        x_0_val = torch.randn(len(x_1_val), 1) * x_0_dist_std + x_0_dist_mean
+        epoch_val_loss_1 = 0.0
+        epoch_val_loss_2 = 0.0
 
-        x_t_val_1 = (1 - val_times_1) * x_0_val + val_times_1 * x_1_val
-        dx_t_val_1 = x_1_val - x_0_val
-        val_loss_1 = loss_fn(flow_model(t=val_times_1, x_t=x_t_val_1), dx_t_val_1)
 
-        x_t_val_2 = (1 - val_times_2) * x_0_val + val_times_2 * x_1_val
-        dx_t_val_2 = x_1_val - x_0_val
-        val_loss_2 = loss_fn(flow_model(t=val_times_2, x_t=x_t_val_2), dx_t_val_2)
+        # break into batches
+        for i in range(0, len(x_1_train), batch_size):
+            x_1_batch = x_1_train[i:i + batch_size]
+            if len(x_1_batch) < batch_size:
+                continue
+            x_0 = (torch.randn(len(x_1_batch), 1) * x_0_dist_std + x_0_dist_mean).to(device)
+            t = torch.rand(len(x_1_batch), 1, device=device)
+            x_t = (1 - t) * x_0 + t * x_1_batch
+            dx_t = x_1_batch - x_0
+            optimizer.zero_grad()
+            loss = loss_fn(flow_model(t=t, x_t=x_t), dx_t)
 
-        val_losses_1.append(val_loss_1.item())
-        val_losses_2.append(val_loss_2.item())
+            x_0_val = torch.randn(len(x_1_val), 1) * x_0_dist_std + x_0_dist_mean
+
+            x_t_val_1 = (1 - val_times_1) * x_0_val + val_times_1 * x_1_val
+            dx_t_val_1 = x_1_val - x_0_val
+            val_loss_1 = loss_fn(flow_model(t=val_times_1, x_t=x_t_val_1), dx_t_val_1)
+
+            x_t_val_2 = (1 - val_times_2) * x_0_val + val_times_2 * x_1_val
+            dx_t_val_2 = x_1_val - x_0_val
+            val_loss_2 = loss_fn(flow_model(t=val_times_2, x_t=x_t_val_2), dx_t_val_2)
+
+            epoch_val_loss_1 += val_loss_1.item()
+            epoch_val_loss_2 += val_loss_2.item()
+            
+            epoch_loss += loss.item()
+            loss.backward()
+            optimizer.step()
         
-        losses.append(loss.item())
-        loss.backward()
-        optimizer.step()
+            flow_model.clip_gradients(max_norm=1.0)
+
+        epoch_loss /= n_batches
+        epoch_val_loss_1 /= n_batches
+        epoch_val_loss_2 /= n_batches
         
-        flow_model.clip_gradients(max_norm=1.0)
+        losses.append(epoch_loss)
+        val_losses_1.append(epoch_val_loss_1)
+        val_losses_2.append(epoch_val_loss_2)
 
         if (epoch) % 1000 == 0:
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item():.4f}, Val loss: t=0.1 {val_loss_1.item():.4f}, t=0.9 {val_loss_2.item():.4f}")
+            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss:.4f}, Val loss: t=0.1 {epoch_val_loss_1:.4f}, t=0.9 {epoch_val_loss_2:.4f}")
 
     print("Training complete.")
     sns.lineplot(x=range(len(losses)), y=losses, label="Train loss")

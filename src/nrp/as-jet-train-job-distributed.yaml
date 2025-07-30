@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-job-aforty
+  name: as-jet-train-job-distributed
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
