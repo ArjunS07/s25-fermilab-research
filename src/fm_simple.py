@@ -75,7 +75,16 @@ if __name__ == "__main__":
         X_test = pickle.load(f)
 
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
-    
+
+    parser = argparse.ArgumentParser(description="Train Simple MLP on flattened JetNet dataset")
+    parser.add_argument("--num_epochs", type=int, default=20000, help="Number of epochs to train the model")
+    parser.add_argument("--n_train_samples", type=int, default=30447346, help="Number of training samples to use")
+
+    args = parser.parse_args()
+    num_epochs = args.num_epochs
+    n_train_samples = args.n_train_samples
+
+
     particle_clouds = X_train_particle_transformed[:, :, :4]
     masks = X_train_particle_transformed[:, :, 4]
     masked_clouds = (masks.unsqueeze(-1) * particle_clouds)
@@ -85,7 +94,10 @@ if __name__ == "__main__":
     min_std = np.min(np.std(masked_clouds_flat.numpy(), axis=0))
     masked_clouds_flat = masked_clouds_flat / min_std
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    num_samples = 5000
+    
+    num_samples = args.n_train_samples
+    if num_samples > masked_clouds_flat.shape[0]:
+        num_samples = masked_clouds_flat.shape[0]
     ratio = 0.8
     n_train = int(num_samples * ratio)
     x_1 = masked_clouds_flat[torch.randperm(num_samples)]
@@ -106,7 +118,6 @@ if __name__ == "__main__":
 
     x_0_dist_mean = torch.tensor([0.0])
     x_0_dist_std = torch.tensor([1.5])
-    num_epochs = 2000
     losses = []
 
     val_losses_1 = []
