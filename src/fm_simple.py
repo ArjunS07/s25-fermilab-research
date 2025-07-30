@@ -129,7 +129,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train Simple MLP on flattened JetNet dataset")
     parser.add_argument("--num_epochs", type=int, default=20000, help="Number of epochs to train the model")
-    parser.add_argument("--n_train_samples", type=int, default=30447346, help="Number of training samples to use")
+    parser.add_argument("--n_train_samples", type=int, default=1_000_000, help="Number of training samples to use")
 
     args = parser.parse_args()
     num_epochs = args.num_epochs
@@ -177,7 +177,7 @@ if __name__ == "__main__":
     val_losses_1 = []
     val_losses_2 = []
 
-    batch_size = 4096
+    batch_size = 8192
     n_batches = len(x_1_train) // batch_size
 
     for epoch in range(num_epochs):
@@ -185,8 +185,6 @@ if __name__ == "__main__":
 
         epoch_val_loss_1 = 0.0
         epoch_val_loss_2 = 0.0
-
-
         # break into batches
         for i in range(0, len(x_1_train), batch_size):
             x_1_batch = x_1_train[i:i + batch_size]
@@ -220,6 +218,9 @@ if __name__ == "__main__":
             optimizer.step()
         
             flow_model.clip_gradients(max_norm=1.0)
+
+            if i % 100 == 0:
+                print(f"Epoch {epoch + 1}/{num_epochs}, Batch {i // batch_size + 1}/{n_batches}, Loss: {loss.item():.4f}, Val loss: t=0.1 {val_loss_1.item():.4f}, t=0.9 {val_loss_2.item():.4f}")
 
         epoch_loss /= n_batches
         epoch_val_loss_1 /= n_batches
