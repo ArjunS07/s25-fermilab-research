@@ -14,6 +14,7 @@ from accelerate import Accelerator
 
 from models.NewLEFM import LEJetGeneratorFM
 from models.FlowMatchingMLP import FlowMatchingMLP
+from models.Week7EGNN import JetFlowMatcher
 
 from generate_samples import generate_samples
 from util import jet_attributes
@@ -46,6 +47,7 @@ if __name__ == "__main__":
     
     # Training
     parser.add_argument("--use_distributed", type=bool, default=False, help="Use distributed for training")
+    parser.add_argument("--multi_core", type=bool, default=False, help="Use multiple cores for training")
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training")
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
@@ -56,7 +58,6 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-
     # Make folders if they do not exist
     out_dir = f"{args.out_dir}/{str(datetime.datetime.now()).replace(' ', '_')}-{args.model_type}-{args.num_epochs}epochs-{args.batch_size}batch-{args.n_layers}layers-{args.integration_steps}steps"
     make_clear_folder(out_dir)
@@ -65,31 +66,35 @@ if __name__ == "__main__":
     make_clear_folder(f"{out_dir}/gen")
     print(f"Output directory: {out_dir}")
 
+
+    # Load data
     with open("data/x_train.pkl", "rb") as f:
         X_train = pickle.load(f)
     with open("data/x_test.pkl", "rb") as f:
         X_test = pickle.load(f)
-
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
-
+    
     e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
     p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
     p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
     p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
     scales = [np.std(e_c), np.std(p_x), np.std(p_y), np.std(p_z)]
     final_scale = np.mean(scales)
-    
     with open(f"{out_dir}/logs/final_scale.txt", "w") as f:
         f.write(f"{final_scale}\n")
     X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
-    print(f"{final_scale=}")
 
     accelerator = Accelerator()
     device = accelerator.device
-    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using {device} device")
  
-    if args.model_type == "LEJetGeneratorFM":
+    if args.model_type == "Week7EGNN":
+        model: JetFlowMatcher = JetFlowMatcher(
+            num_jet_types=len(data_args["jet_type"]),
+            max_particles=NUM_PARTICLES,
+            num_layers=4,
+        )
+    elif args.model_type == "LEJetGeneratorFM":
         model: LEJetGeneratorFM = LEJetGeneratorFM(
             n_particles=data_args["num_particles"],
             n_layers=args.n_layers,
@@ -155,7 +160,7 @@ if __name__ == "__main__":
                 X_train_epoch,
                 batch_size=args.batch_size,
                 shuffle=True,  # Shuffle for each epoch
-                # num_workers=2 if device.type == 'cuda' else 0,
+                num_workers=2 if args.multi_core else 1,
                 pin_memory=True if torch.cuda.is_available() else False
             )
         )
@@ -233,7 +238,7 @@ if __name__ == "__main__":
                         integration_steps=16,
                         n_samples=max(args.n_samples // 100, 50),
                         batch_size=args.batch_size,
-                        n_jet_types=len(data_args["jet_type"])
+                        n_jet_types=3
                     )
                     torch.cuda.synchronize()
                     del val_samples
