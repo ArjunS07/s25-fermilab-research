@@ -251,4 +251,5 @@ if __name__ == "__main__":
         sns.histplot(final_samples.detach().numpy()[:, i], alpha=0.7, label='Generated', ax=axs[i])
         axs[i].legend()
         axs[i].set_ylabel('Density')
-    plt.savefig("feature_distributions.png", )
+    fig.savefig("generated_samples.png")
+    plt.close(fig)
