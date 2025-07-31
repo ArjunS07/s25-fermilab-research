@@ -123,6 +123,8 @@ if __name__ == "__main__":
     if parser.parse_args().save_model:
         with open("upload/jet_attr_nf_model.pkl", "wb") as f:
             pickle.dump(model, f)   
+        with open("upload/jet_attr_nf_model.pth", "wb") as f:
+            torch.save(model, f)
     
     with open("gen/logs/jet_attr_nf_fpd.txt", "w") as f:
         f.write(f"Number of flows: {K}\n")

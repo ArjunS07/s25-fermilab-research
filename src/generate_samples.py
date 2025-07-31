@@ -8,7 +8,7 @@ import seaborn as sns
 features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 
 def generate_samples(
-        model: LEJetGeneratorFM,
+        model,
         device,
         out_dir,
         num_particles,
@@ -34,11 +34,18 @@ def generate_samples(
                 device=device
             )
             generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_generator, device, n_jet_types=n_jet_types, num_jets=x.shape[0])
+            jet_one_hot_enc = generated_jet_attrs[:, :5].to(device)
+            n_particles = generated_jet_attrs[:, -1].long().to(device)
+
             masks = jet_attributes.generate_masks(
-                generated_jet_attrs[:, -1],
+                n_particles,
                 max_n_particles=num_particles,
                 device=device
             )
+            generated_jet_attrs = torch.cat([
+                jet_one_hot_enc,
+                n_particles.unsqueeze(-1).float()
+            ], dim=-1)
 
             for i in range(integration_steps):
                 new_x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1])

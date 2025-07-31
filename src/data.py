@@ -12,7 +12,7 @@ NUM_PARTICLES = 150
 TRAIN_SPLIT = 0.7
 
 data_args = {
-    "jet_type": ["g", "q", "t", "w", "z"],
+    "jet_type": ["g", "q", "t"],
     "data_dir": "datasets/jetnet",
     "num_particles": NUM_PARTICLES, 
     "particle_features": (

@@ -305,12 +305,9 @@ class LEJetGeneratorFM(nn.Module):
         """
         if method == 'euler':
             batch_size = x_t.shape[0]
-        #     print("Rank:", torch.linalg.matrix_rank(x_t, atol=1e-5))
             update = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
             x_next = x_t + update * (t_end - t_start)
-
             return x_next
-
         else:
             raise NotImplementedError(f"Method {method} not implemented")
 

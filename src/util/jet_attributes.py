@@ -4,11 +4,10 @@ import torch
 NUM_CLASSES = 5  # Number of jet types
 MAX_N_PARTICLES = 150  # Maximum number of particles in a jet
 MIN_N_PARTICLES = 4  # Minimum number of particles in a jet
-MODEL_PATH = "upload/jet_attr_nf_model.pkl"
+MODEL_PATH = "upload/jet_attr_nf_model.pth"
 
-def load_model(model_path=MODEL_PATH):
-    with open(model_path, "rb") as f:
-        model = pickle.load(f)
+def load_model(model_path=MODEL_PATH, device=torch.device("cpu")):
+    model = torch.load(model_path, map_location=device, weights_only=False)
     return model
 
 def one_hot_enc_jet_type(y, num_classes=NUM_CLASSES):
@@ -56,7 +55,7 @@ def generate_jets(model, device, n_jet_types, num_jets=1000, one_hot_types=None)
         one_hot_types = one_hot_enc_jet_type(sample_jet_types)
     jets, jet_logprobs = model.sample(num_jets, context=one_hot_types)
     jets[:, -1] = torch.round(jets[:, -1])
-    jets[:, -1] = torch.clamp(jets[:, -1], MIN_N_PARTICLES, MAX_N_PARTICLES) 
+    jets[:, -1] = torch.clamp(jets[:, -1], min=MIN_N_PARTICLES, max=MAX_N_PARTICLES) 
     jets = torch.cat([
         one_hot_types,  # Add one-hot encoded jet types
         jets,

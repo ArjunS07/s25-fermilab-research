@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser.add_argument("--out_dir", default="/mnt/data/output")
 
     # Network hyperparameters
-    parser.add_argument("--model_type", type=str, default="LEJetGeneratorFM", choices=["LEJetGeneratorFM", "FlowMatchingMLP"], help="Type of model to use")
+    parser.add_argument("--model_type", type=str, default="Week7EGNN", choices=["LEJetGeneratorFM", "FlowMatchingMLP", "Week7EGNN"], help="Type of model to use")
     parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
     parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
     
@@ -73,6 +73,7 @@ if __name__ == "__main__":
     with open("data/x_test.pkl", "rb") as f:
         X_test = pickle.load(f)
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
+    X_train_particle_transformed = X_train_particle_transformed[:args.n_train_samples]
     
     e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
     p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
@@ -84,15 +85,19 @@ if __name__ == "__main__":
         f.write(f"{final_scale}\n")
     X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
 
-    accelerator = Accelerator()
-    device = accelerator.device
+    if args.use_distributed:
+        accelerator = Accelerator()
+        device = accelerator.device
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using {device} device")
  
     if args.model_type == "Week7EGNN":
         model: JetFlowMatcher = JetFlowMatcher(
-            num_jet_types=len(data_args["jet_type"]),
+            max_num_jet_types=5,
             max_particles=NUM_PARTICLES,
-            num_layers=4,
+            num_layers=args.n_layers,
+            hidden_dim=args.n_hidden,
         )
     elif args.model_type == "LEJetGeneratorFM":
         model: LEJetGeneratorFM = LEJetGeneratorFM(
@@ -110,42 +115,49 @@ if __name__ == "__main__":
             time_embed_dim=64,
         ).to(device)
     torch.save(model.state_dict(), f"{out_dir}/models/model_initial.pth")
-
-    jet_info = X_train[:][1].to(device)
-    encoded_jet_types = jet_attributes.one_hot_enc_jet_type(jet_info[:, 4].long()).to(device)
-    jet_info_cropped = jet_info[:, :4]  # Keep only the first 4 features (eta, p_t, mass, num_particles)
-    jet_info = torch.cat([encoded_jet_types, jet_info_cropped], dim=-1).to(device)
-
+    train_jet_info = X_train[:][1].to(device)
+    encoded_jet_types = jet_attributes.one_hot_enc_jet_type(train_jet_info[:, 4].long()).to(device)
+    if args.model_type == "Week7EGNN":
+        train_jet_n_particles = train_jet_info[:, 3]
+        train_jet_info = torch.cat([
+            encoded_jet_types, train_jet_n_particles.unsqueeze(-1)
+        ], dim=-1).to(device)
+    else:
+        jet_info_cropped = train_jet_info[:, :4]  # Keep only the first 4 features (eta, p_t, mass, num_particles)
+        train_jet_info = torch.cat([encoded_jet_types, jet_info_cropped], dim=-1).to(device)
+    train_jet_info = train_jet_info[:args.n_train_samples]
     losses = []
 
-    lr = 1e-3
+    lr = 1e-4
     weight_decay = 1e-2
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    epoch_fraction = 0.2  # Use 10% of data per epoch
+    epoch_fraction = 0.2 
     samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
-    # warmup_pct = 0.1
-    # steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
 
-    # total_steps = args.num_epochs * steps_per_epoch
-    # warmup_steps = int(warmup_pct * total_steps)
+    warmup_pct = 0.1
+    steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
 
-    # def lr_lambda(current_step):
-    #     if current_step < warmup_steps:
-    #         # Linear warm-up
-    #         return float(current_step) / float(max(1, warmup_steps))
-    #     else:
-    #         # Cosine annealing after warm-up
-    #         progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-    #         return 0.5 * (1.0 + np.cos(np.pi * progress))
+    total_steps = args.num_epochs * steps_per_epoch
+    warmup_steps = int(warmup_pct * total_steps)
 
-    # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-    # current_step = 0
+    def lr_lambda(current_step):
+        if current_step < warmup_steps:
+            # Linear warm-up
+            return float(current_step) / float(max(1, warmup_steps))
+        else:
+            # Cosine annealing after warm-up
+            progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return 0.5 * (1.0 + np.cos(np.pi * progress))
 
-    # print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    current_step = 0
+
+    print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
     
     if args.use_distributed:
         model, optimizer = accelerator.prepare(model, optimizer)
+    
     for epoch in range(args.num_epochs):
         epoch_loss = 0
         num_batches = 0
@@ -153,27 +165,37 @@ if __name__ == "__main__":
         # Generate random indices for this epoch
         epoch_indices = torch.randperm(len(X_train_particle_transformed))[:samples_per_epoch]
         X_train_epoch = torch.utils.data.Subset(X_train_particle_transformed, epoch_indices)
-        jet_info_epoch = jet_info[epoch_indices].to(device)  # Move to device once
+        train_jet_info_epoch = train_jet_info[epoch_indices].to(device)  # Move to device once
 
-        train_loader = accelerator.prepare_data_loader(
-            DataLoader(
+        if args.use_distributed:
+            train_loader = accelerator.prepare_data_loader(
+                DataLoader(
+                    X_train_epoch,
+                    batch_size=args.batch_size,
+                    shuffle=True,
+                    # num_workers=2 if args.use_distributed else 1,
+                    pin_memory=True if torch.cuda.is_available() else False
+                )
+            )
+        else:
+            train_loader = DataLoader(
                 X_train_epoch,
                 batch_size=args.batch_size,
                 shuffle=True,  # Shuffle for each epoch
-                num_workers=2 if args.multi_core else 1,
+                # num_workers=2 if args.multi_core else 1,
                 pin_memory=True if torch.cuda.is_available() else False
             )
-        )
-        
+
         for i, data in enumerate(train_loader):
             optimizer.zero_grad()
 
             actual_batch_size = data.shape[0]
-            batch_jet_info = jet_info_epoch[i * args.batch_size:i * args.batch_size + actual_batch_size]
+            batch_jet_info = train_jet_info_epoch[i * args.batch_size:i * args.batch_size + actual_batch_size]
             
             x_1 = data.to(device)[:, :, :4]
             true_masks = data.to(device)[:, :, 4] if MASK else None
-            x_0 = torch.randn_like(x_1, device=device)  # Sample random initial state
+            x_0 = torch.randn_like(x_1, device=device)
+            x_0 = 0.5 + x_0
             if true_masks is not None:
                 x_0 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_0
 
@@ -182,25 +204,37 @@ if __name__ == "__main__":
             x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
             dx_t = x_1 - x_0
             dx_t =  true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * dx_t
-
-            pred = model.forward(x_t, t, batch_jet_info, true_masks)
-            # breakpoint()
-            loss = nn.MSELoss()(pred, dx_t)
+            print(f"{x_t.mean()=} {x_t.std()=} {x_t.min()=} {x_t.max()=}")
+            print(f"{dx_t.mean()=} {dx_t.std()=} {dx_t.min()=} {dx_t.max()=}")
+            print(f"{x_0.mean()=} {x_0.std()=} {x_0.min()=} {x_0.max()=}")
+            print(f"{x_1.mean()=} {x_1.std()=} {x_1.min()=} {x_1.max()=}")
+            pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info, mask=true_masks)
+            # only take loss over unmasked parts
+            if true_masks is not None:
+                pred = pred * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+                dx_t = dx_t * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+            loss = (pred - dx_t).square()
+            loss = (loss.sum() / torch.sum(true_masks)) if true_masks is not None else loss.mean()
         
             if args.use_distributed:
                 accelerator.backward(loss)  # Use accelerator to handle backward pass
             else:
                 loss.backward()
+            for name, param in model.named_parameters():
+                if param.grad is not None:
+                    print(name, param.grad.abs().mean())
             model.clip_gradients()
             optimizer.step()
-            # scheduler.step()
+            scheduler.step()
             
             epoch_loss += loss.item()
             num_batches += 1
-            # current_step += 1
+            current_step += 1
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            
+
 
             if i % 50 == 0:
             # if True:
