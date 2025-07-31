@@ -244,6 +244,7 @@ if __name__ == "__main__":
     num_plot_samples = 5000
 
     initial_gaussian_samples = torch.randn(num_plot_samples, 4) * x_0_dist_std + x_0_dist_mean
+    initial_gaussian_samples = initial_gaussian_samples.to(device)
     final_samples = simulate_trajectory(flow_model, initial_gaussian_samples, 0, 1.0, num_steps=64)
     fig, axs = plt.subplots(1, 4, figsize=(16, 4))
     for i in range(4):
