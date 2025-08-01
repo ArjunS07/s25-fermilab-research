@@ -23,9 +23,7 @@ from util.file_management import make_clear_folder
 from data import data_args
 
 RANDOM_SEED = 42
-
-MASK = True
-NUM_PARTICLES = 150
+MAX_N_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4 # E/c, px, py, pz
 TRAIN_SPLIT = 0.7
 class PairedDataset(torch.utils.data.Dataset):
@@ -50,6 +48,10 @@ if __name__ == "__main__":
     parser.add_argument("--out_dir", default="/mnt/data/output")
     parser.add_argument("--process_id", type=str, default="abcd", help="Process ID for distributed training")
 
+    # Data
+    parser.add_argument("--num_particles", type=int, default=data_args["num_particles"], help="Number of particles in each jet")
+    parser.add_argument("--mask", type=bool, default=True, help="Use mask for particles")
+
     # Network hyperparameters
     parser.add_argument("--model_type", type=str, default="Week7EGNN", choices=["LEJetGeneratorFM", "FlowMatchingMLP", "Week7EGNN"], help="Type of model to use")
     parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
@@ -62,6 +64,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training")
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
+    parser.add_argument("--epoch_frac", type=float, default=0.2, help="Fraction of training dataset to use per epoch")
 
     # Integration
     parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
@@ -94,6 +97,9 @@ if __name__ == "__main__":
         X_test = pickle.load(f)
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
     X_train_particle_transformed = X_train_particle_transformed[:args.n_train_samples]
+    if args.num_particles < MAX_N_PARTICLES:
+        # Particles are, by default, ordered by p_t. take the n highest pt particles in each jet
+        X_train_particle_transformed = X_train_particle_transformed[:, :args.num_particles, :]
     
     e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
     p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
@@ -109,14 +115,14 @@ if __name__ == "__main__":
     if args.model_type == "Week7EGNN":
         model: JetFlowMatcher = JetFlowMatcher(
             max_num_jet_types=5,
-            max_particles=NUM_PARTICLES,
+            max_particles=args.num_particles,
             num_layers=args.n_layers,
             hidden_dim=args.n_hidden,
         )
     elif args.model_type == "LEJetGeneratorFM":
         model: LEJetGeneratorFM = LEJetGeneratorFM(
-            n_particles=data_args["num_particles"],
             n_layers=args.n_layers,
+            n_particles=args.num_particles
         ).to(device)
     elif args.model_type == "FlowMatchingMLP":
         model = FlowMatchingMLP(
@@ -144,6 +150,10 @@ if __name__ == "__main__":
     else:
         jet_info_cropped = train_jet_info[:, :4]  # Keep only the first 4 features (eta, p_t, mass, num_particles)
         train_jet_info = torch.cat([encoded_jet_types, jet_info_cropped], dim=-1).to(device)
+    if args.num_particles < MAX_N_PARTICLES:
+        # clamp the number of particles to args.num_particles
+        train_jet_info[:, 3] = train_jet_info[:, 3].clamp(max=args.num_particles)
+        breakpoint()
     train_jet_info = train_jet_info[:args.n_train_samples]
     losses = []
 
@@ -151,7 +161,7 @@ if __name__ == "__main__":
     weight_decay = 1e-2
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    epoch_fraction = 0.2 
+    epoch_fraction = args.epoch_frac
     samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
 
     warmup_pct = 0.1
@@ -191,7 +201,7 @@ if __name__ == "__main__":
             paired_dataset,
             batch_size=args.batch_size,
             shuffle=True,
-            pin_memory=True if torch.cuda.is_available() else False
+            pin_memory=False
         )
         if args.use_distributed:
             train_loader = accelerator.prepare_data_loader(train_loader)
@@ -204,7 +214,7 @@ if __name__ == "__main__":
                 batch_particle_info = batch_particle_info.to(device)
 
             x_1 = batch_particle_info[:, :, :4]
-            true_masks = batch_particle_info[:, :, 4] if MASK else None
+            true_masks = batch_particle_info[:, :, 4] if args.mask else None
             x_0 = torch.randn_like(x_1, device=device)
             x_0 = 0.5 + x_0
             
