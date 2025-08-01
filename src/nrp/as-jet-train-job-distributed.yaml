@@ -53,6 +53,9 @@ spec:
                 else
                   echo "No requirements.txt found, skipping pip install"
                 fi
+                pip install accelerate
+                python3 -c "from accelerate.utils import write_basic_config; write_basic_config(mixed_precision='fp16')"
+                accelerate env
               fi
 
               echo "=== Environment setup complete, starting training ==="
@@ -64,16 +67,16 @@ spec:
               echo "Unique Run ID: $UNIQUE_RUN_ID"
               python3 data.py
               python3 jet_attr_model.py
-              python3 train.py --batch_size=96 --num_epochs=100 --n_samples=50000 --n_layers=6 use_distributed=True| tee -a logs_${UNIQUE_RUN_ID}.txt
+              accelerate launch train.py --batch_size=32 --num_epochs=100 --n_samples=50000 --n_layers=5 --use_distributed=True --process_id=${UNIQUE_RUN_ID}| tee -a logs_${UNIQUE_RUN_ID}.txt
           volumeMounts:
             - mountPath: /mnt/data
               name: as-train-pvc
           resources:
             limits:
-              nvidia.com/a10: 4
+              nvidia.com/a10: 8
               memory: "16Gi"
               cpu: "2.4"
             requests:
-              nvidia.com/a10: 4
+              nvidia.com/a10: 8
               memory: "16Gi"
               cpu: "2"
