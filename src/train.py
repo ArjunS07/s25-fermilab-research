@@ -48,6 +48,7 @@ if __name__ == "__main__":
     # JetNet data download args
     parser = argparse.ArgumentParser(description="Train LEJetGeneratorFM on JetNet dataset")
     parser.add_argument("--out_dir", default="/mnt/data/output")
+    parser.add_argument("--process_id", type=str, default="abcd", help="Process ID for distributed training")
 
     # Network hyperparameters
     parser.add_argument("--model_type", type=str, default="Week7EGNN", choices=["LEJetGeneratorFM", "FlowMatchingMLP", "Week7EGNN"], help="Type of model to use")
@@ -68,15 +69,24 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
+    if args.use_distributed:
+        accelerator = Accelerator()
+        device = accelerator.device
+    else:
+        accelerator = None
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using {device} device")
+
     # Make folders if they do not exist
-    out_dir = f"{args.out_dir}/{str(datetime.datetime.now()).replace(' ', '_')}-{args.model_type}-{args.num_epochs}epochs-{args.batch_size}batch-{args.n_layers}layers-{args.integration_steps}steps"
-    make_clear_folder(out_dir)
-    make_clear_folder(f"{out_dir}/models")
-    make_clear_folder(f"{out_dir}/logs")
-    make_clear_folder(f"{out_dir}/gen")
-    print(f"Output directory: {out_dir}")
-
-
+    out_dir = f"{args.out_dir}/{args.model_type}-{args.num_epochs}epochs-{args.batch_size}batch-{args.n_layers}layers-{args.integration_steps}steps"
+    if not args.use_distributed or (accelerator is not None and accelerator.is_main_process):
+        make_clear_folder(out_dir)
+        make_clear_folder(f"{out_dir}/models")
+        make_clear_folder(f"{out_dir}/logs")
+        make_clear_folder(f"{out_dir}/gen")
+        print(f"Output directory: {out_dir}")
+    if args.use_distributed:
+        accelerator.wait_for_everyone()
     # Load data
     with open("data/x_train.pkl", "rb") as f:
         X_train = pickle.load(f)
@@ -91,17 +101,11 @@ if __name__ == "__main__":
     p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
     scales = [np.std(e_c), np.std(p_x), np.std(p_y), np.std(p_z)]
     final_scale = np.mean(scales)
-    with open(f"{out_dir}/logs/final_scale.txt", "w") as f:
-        f.write(f"{final_scale}\n")
+    if not args.use_distributed or (accelerator is not None and accelerator.is_main_process):
+        with open(f"{out_dir}/logs/final_scale.txt", "w") as f:
+            f.write(f"{final_scale}\n")
     X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
-
-    if args.use_distributed:
-        accelerator = Accelerator()
-        device = accelerator.device
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using {device} device")
- 
+    
     if args.model_type == "Week7EGNN":
         model: JetFlowMatcher = JetFlowMatcher(
             max_num_jet_types=5,
@@ -126,7 +130,8 @@ if __name__ == "__main__":
         ).to(device)
     
     if args.use_distributed:
-        accelerator.save_model(model, f"{out_dir}/models/model_initial.pth")
+        if accelerator.is_main_process:
+            accelerator.save_model(model, f"{out_dir}/models/model_initial.pth")
     else:
         torch.save(model.state_dict(), f"{out_dir}/models/model_initial.pth")
     train_jet_info = X_train[:][1].to(device)
@@ -245,8 +250,7 @@ if __name__ == "__main__":
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            if i % 50 == 0:
-            # if True:
+            if i % 50 == 0 and (not args.use_distributed or accelerator.is_main_process):            # if True:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 current_lr = optimizer.param_groups[0]['lr']
@@ -267,7 +271,7 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
 
         # Get validation metrics
-        if epoch % 50 == 0:
+        if epoch % 50 == 0 and (not args.use_distributed or accelerator.is_main_process):
             print(f"Generating samples for epoch {epoch+1}...")
             model.eval()
             with torch.no_grad():
@@ -285,50 +289,55 @@ if __name__ == "__main__":
                         batch_size=args.batch_size,
                         n_jet_types=3
                     )
-                    torch.cuda.synchronize()
+                    if torch.cuda.is_available():
+                        torch.cuda.synchronize()
                     del val_samples
                 except Exception as e:
                     print(f"Error generating samples for epoch {epoch+1}: {e}")
             model.train()
     
-    with open(f"{out_dir}/logs/training_loss.csv", "w") as f:
-        f.write("epoch,loss\n")
-        for epoch, loss in enumerate(losses):
-            f.write(f"{epoch},{loss}\n")
+    if not args.use_distributed or accelerator.is_main_process:
+        with open(f"{out_dir}/logs/training_loss.csv", "w") as f:
+            f.write("epoch,loss\n")
+            for epoch, loss in enumerate(losses):
+                f.write(f"{epoch},{loss}\n")
 
     if args.use_distributed:
         accelerator.wait_for_everyone()
-        accelerator.save_model(model, f"{out_dir}/models/final_model.pth")
+        if accelerator.is_main_process:
+            accelerator.save_model(model, f"{out_dir}/models/final_model.pth")
     else:
         torch.save(model.state_dict(), f"{out_dir}/models/final_model.pth")
-    with open(f"{out_dir}/logs/args.txt", "w") as f:
-        f.write(f"CLI args:\n")
-        for arg in vars(args):
-            f.write(f"{arg}: {getattr(args, arg)}\n")
-        f.close()
     
-    make_clear_folder(f"{out_dir}/gen/samples")
-    generate_samples(
-        model=model,
-        device=device,
-        out_dir=f"{out_dir}/gen/samples",
-        num_particles=data_args["num_particles"],
-        num_particle_features=NUM_PARTICLE_FEATURES,
-        final_scale=final_scale,
-        integration_steps=args.integration_steps,
-        n_samples=args.n_samples,
-        batch_size=args.batch_size,
-        n_jet_types=len(data_args["jet_type"])
-    )
+    if not args.use_distributed or accelerator.is_main_process:
+        with open(f"{out_dir}/logs/args.txt", "w") as f:
+            f.write(f"CLI args:\n")
+            for arg in vars(args):
+                f.write(f"{arg}: {getattr(args, arg)}\n")
+            f.close()
+    
+        make_clear_folder(f"{out_dir}/gen/samples")
+        generate_samples(
+            model=model,
+            device=device,
+            out_dir=f"{out_dir}/gen/samples",
+            num_particles=data_args["num_particles"],
+            num_particle_features=NUM_PARTICLE_FEATURES,
+            final_scale=final_scale,
+            integration_steps=args.integration_steps,
+            n_samples=args.n_samples,
+            batch_size=args.batch_size,
+            n_jet_types=len(data_args["jet_type"])
+        )
 
-    # move everything in out/ to final_out/
-    final_out_dir = f"{args.out_dir}/final_out"
-    make_clear_folder(final_out_dir)
-    for item in os.listdir(out_dir):
-        src_path = os.path.join(out_dir, item)
-        dst_path = os.path.join(final_out_dir, item)
-        if os.path.isdir(src_path):
-            shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
-        else:
-            shutil.copy2(src_path, dst_path)
-    print(f"Training complete. Output saved to {final_out_dir}") 
+        # move everything in out/ to final_out/
+        final_out_dir = f"{args.out_dir}/final_out"
+        make_clear_folder(final_out_dir)
+        for item in os.listdir(out_dir):
+            src_path = os.path.join(out_dir, item)
+            dst_path = os.path.join(final_out_dir, item)
+            if os.path.isdir(src_path):
+                shutil.copytree(src_path, dst_path, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src_path, dst_path)
+        print(f"Training complete. Output saved to {final_out_dir}") 
