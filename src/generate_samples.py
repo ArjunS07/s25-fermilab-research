@@ -50,7 +50,6 @@ def generate_samples(
             for i in range(integration_steps):
                 new_x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1])
                 update = new_x - x
-                print(f"{update.mean()=} {update.std()=} {update.min()=} {update.max()=}")
                 x = new_x
                 fig, axs = plt.subplots(1, 4, figsize=(20, 10))
                 

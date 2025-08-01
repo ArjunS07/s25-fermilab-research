@@ -295,9 +295,6 @@ class LEJetGeneratorFM(nn.Module):
         
         return velocity
     
-    def clip_gradients(self):
-        """Clip gradients for training stability"""
-        torch.nn.utils.clip_grad_norm_(self.parameters(), self.gradient_clip_val)
     
     def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler'):
         """

@@ -223,7 +223,7 @@ class LorentzEquivariantLayer(nn.Module):
         # Compute message scalings: φ_m^l  
         message_scalings = self.phi_m(messages).squeeze(-1)  # (batch_size, max_particles, max_particles)
         message_scalings = message_scalings * pair_mask
-        print(f"{message_scalings.mean()=} {message_scalings.std()=} {message_scalings.min()=} {message_scalings.max()=}")
+        # print(f"{message_scalings.mean()=} {message_scalings.std()=} {message_scalings.min()=} {message_scalings.max()=}")
         
         # Cache message aggregation for global update
         scaled_messages = message_scalings.unsqueeze(-1) * messages  # (batch_size, max_particles, max_particles, message_dim)
@@ -247,7 +247,7 @@ class LorentzEquivariantLayer(nn.Module):
         reweight_input = torch.cat([t_emb.unsqueeze(1).expand(-1, max_particles, -1), 
                                    particle_message_normalized], dim=-1)
         reweight_factors = self.phi_w(reweight_input).squeeze(-1)  # (batch_size, max_particles)
-        print(f"{reweight_factors.mean()=} {reweight_factors.std()=} {reweight_factors.min()=} {reweight_factors.max()=}")
+        # print(f"{reweight_factors.mean()=} {reweight_factors.std()=} {reweight_factors.min()=} {reweight_factors.max()=}")
         
         # Apply mask to reweight factors
         reweight_factors = reweight_factors * mask
@@ -363,8 +363,8 @@ class JetFlowMatcher(nn.Module):
         if method == 'euler':
             batch_size = x_t.shape[0]
             update = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
-            print(f"ORIGINAL: {x_t.mean()=} {x_t.std()=} {x_t.min()=} {x_t.max()=}")
-            print(f"FINAL: {update.mean()=} {update.std()=} {update.min()=} {update.max()=}")
+            # print(f"ORIGINAL: {x_t.mean()=} {x_t.std()=} {x_t.min()=} {x_t.max()=}")
+            # print(f"FINAL: {update.mean()=} {update.std()=} {update.min()=} {update.max()=}")
             x_next = x_t + update * (t_end - t_start)
             return x_next
         else:
@@ -373,50 +373,3 @@ class JetFlowMatcher(nn.Module):
     def clip_gradients(self):
         """Clip gradients for training stability"""
         torch.nn.utils.clip_grad_norm_(self.parameters(), self.gradient_clip_val)
-    
-
-
-# Example usage and testing
-def test_model():
-    """Test the model with dummy data."""
-    batch_size = 4
-    max_particles = 150
-    num_jet_types = 3
-    
-    # Create dummy data
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    # Random times
-    t = torch.rand(batch_size, device=device)
-    
-    # Random initial particles (Gaussian noise)
-    x0 = torch.randn(batch_size, max_particles, 4, device=device)
-    
-    # Random jet types (one-hot)
-    jet_types = torch.randint(0, num_jet_types, (batch_size,))
-    jet_type_onehot = torch.zeros(batch_size, num_jet_types, device=device)
-    jet_type_onehot.scatter_(1, jet_types.unsqueeze(1).to(device), 1)
-    
-    # Random number of constituents
-    n_constituents = torch.randint(4, 31, (batch_size,), device=device)
-    
-    # Create model
-    model = JetFlowMatcher(num_jet_types=num_jet_types, max_particles=max_particles).to(device)
-    
-    # Forward pass
-    with torch.no_grad():
-        v_theta = model(t, x0, jet_type_onehot, n_constituents)
-        
-    print(f"Input shape: {x0.shape}")
-    print(f"Output shape: {v_theta.shape}")
-    print(f"Number of parameters: {sum(p.numel() for p in model.parameters())}")
-
-    # Check that masked particles have zero velocity
-    mask = model.create_mask(n_constituents)
-    masked_velocities = v_theta * (1 - mask.unsqueeze(-1))
-    print(f"Velocity in masked region: max={masked_velocities.abs().max().item()} min={masked_velocities.abs().min().item()}")
-    
-    return model
-
-if __name__ == "__main__":
-    model = test_model()

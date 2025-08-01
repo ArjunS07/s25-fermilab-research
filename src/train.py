@@ -28,7 +28,16 @@ MASK = True
 NUM_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4 # E/c, px, py, pz
 TRAIN_SPLIT = 0.7
-
+class PairedDataset(torch.utils.data.Dataset):
+    def __init__(self, jet_info, particle_data):
+        self.jet_info = jet_info
+        self.particle_data = particle_data
+    
+    def __len__(self):
+        return len(self.particle_data)
+    
+    def __getitem__(self, idx):
+        return self.jet_info[idx], self.particle_data[idx]
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)    
@@ -48,6 +57,7 @@ if __name__ == "__main__":
     # Training
     parser.add_argument("--use_distributed", type=bool, default=False, help="Use distributed for training")
     parser.add_argument("--multi_core", type=bool, default=False, help="Use multiple cores for training")
+    parser.add_argument("--accumulate_gradients", type=bool, default=False, help="Accumulate gradients over multiple batches" )
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training")
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
@@ -114,7 +124,11 @@ if __name__ == "__main__":
             n_jet_types=len(data_args["jet_type"]),
             time_embed_dim=64,
         ).to(device)
-    torch.save(model.state_dict(), f"{out_dir}/models/model_initial.pth")
+    
+    if args.use_distributed:
+        accelerator.save_model(model, f"{out_dir}/models/model_initial.pth")
+    else:
+        torch.save(model.state_dict(), f"{out_dir}/models/model_initial.pth")
     train_jet_info = X_train[:][1].to(device)
     encoded_jet_types = jet_attributes.one_hot_enc_jet_type(train_jet_info[:, 4].long()).to(device)
     if args.model_type == "Week7EGNN":
@@ -128,7 +142,7 @@ if __name__ == "__main__":
     train_jet_info = train_jet_info[:args.n_train_samples]
     losses = []
 
-    lr = 1e-4
+    lr = 5e-3
     weight_decay = 1e-2
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -165,49 +179,41 @@ if __name__ == "__main__":
         # Generate random indices for this epoch
         epoch_indices = torch.randperm(len(X_train_particle_transformed))[:samples_per_epoch]
         X_train_epoch = torch.utils.data.Subset(X_train_particle_transformed, epoch_indices)
-        train_jet_info_epoch = train_jet_info[epoch_indices].to(device)  # Move to device once
+        train_jet_info_epoch = train_jet_info[epoch_indices]
 
+        paired_dataset = PairedDataset(train_jet_info_epoch, X_train_epoch)
+        train_loader = DataLoader(
+            paired_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            pin_memory=True if torch.cuda.is_available() else False
+        )
         if args.use_distributed:
-            train_loader = accelerator.prepare_data_loader(
-                DataLoader(
-                    X_train_epoch,
-                    batch_size=args.batch_size,
-                    shuffle=True,
-                    # num_workers=2 if args.use_distributed else 1,
-                    pin_memory=True if torch.cuda.is_available() else False
-                )
-            )
-        else:
-            train_loader = DataLoader(
-                X_train_epoch,
-                batch_size=args.batch_size,
-                shuffle=True,  # Shuffle for each epoch
-                # num_workers=2 if args.multi_core else 1,
-                pin_memory=True if torch.cuda.is_available() else False
-            )
+            train_loader = accelerator.prepare_data_loader(train_loader)
 
-        for i, data in enumerate(train_loader):
+        for i, (batch_jet_info, batch_particle_info) in enumerate(train_loader):
             optimizer.zero_grad()
 
-            actual_batch_size = data.shape[0]
-            batch_jet_info = train_jet_info_epoch[i * args.batch_size:i * args.batch_size + actual_batch_size]
-            
-            x_1 = data.to(device)[:, :, :4]
-            true_masks = data.to(device)[:, :, 4] if MASK else None
+            if not args.use_distributed:
+                batch_jet_info = batch_jet_info.to(device)
+                batch_particle_info = batch_particle_info.to(device)
+
+            x_1 = batch_particle_info[:, :, :4]
+            true_masks = batch_particle_info[:, :, 4] if MASK else None
             x_0 = torch.randn_like(x_1, device=device)
             x_0 = 0.5 + x_0
+            
             if true_masks is not None:
                 x_0 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_0
 
-            t = torch.rand(x_0.shape[0]).to(device)
+            t = torch.rand(x_0.shape[0])
+            if not args.use_distributed:
+                t = t.to(device)
             t_viewed = t.view(-1, 1, 1)
             x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
             dx_t = x_1 - x_0
-            dx_t =  true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * dx_t
-            print(f"{x_t.mean()=} {x_t.std()=} {x_t.min()=} {x_t.max()=}")
-            print(f"{dx_t.mean()=} {dx_t.std()=} {dx_t.min()=} {dx_t.max()=}")
-            print(f"{x_0.mean()=} {x_0.std()=} {x_0.min()=} {x_0.max()=}")
-            print(f"{x_1.mean()=} {x_1.std()=} {x_1.min()=} {x_1.max()=}")
+            if true_masks is not None:
+                dx_t = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * dx_t
             pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info, mask=true_masks)
             # only take loss over unmasked parts
             if true_masks is not None:
@@ -220,10 +226,15 @@ if __name__ == "__main__":
                 accelerator.backward(loss)  # Use accelerator to handle backward pass
             else:
                 loss.backward()
-            for name, param in model.named_parameters():
-                if param.grad is not None:
-                    print(name, param.grad.abs().mean())
-            model.clip_gradients()
+            # for name, param in model.named_parameters():
+                # if param.grad is not None:
+                    # print(name, param.grad.abs().mean())
+
+            if args.use_distributed:
+                accelerator.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            else:
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                            
             optimizer.step()
             scheduler.step()
             
@@ -234,16 +245,16 @@ if __name__ == "__main__":
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-
-
             if i % 50 == 0:
             # if True:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 current_lr = optimizer.param_groups[0]['lr']
                 current_avg_loss = epoch_loss / num_batches
+                print(f"{x_t.mean()=} {x_t.std()=} {x_t.min()=} {x_t.max()=}")
+                print(f"{dx_t.mean()=} {dx_t.std()=} {dx_t.min()=} {dx_t.max()=}")
+                print(f"{x_1.mean()=} {x_1.std()=} {x_1.min()=} {x_1.max()=}")
                 print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
-                print(f"dx_t: mean={dx_t.abs().mean()}, std={dx_t.abs().std()}")
                 # log_memory_usage()
             
             del x_1, x_0, t, t_viewed, x_t, dx_t, pred, loss
@@ -285,7 +296,11 @@ if __name__ == "__main__":
         for epoch, loss in enumerate(losses):
             f.write(f"{epoch},{loss}\n")
 
-    torch.save(model.state_dict(), f"{out_dir}/models/final_model.pth")
+    if args.use_distributed:
+        accelerator.wait_for_everyone()
+        accelerator.save_model(model, f"{out_dir}/models/final_model.pth")
+    else:
+        torch.save(model.state_dict(), f"{out_dir}/models/final_model.pth")
     with open(f"{out_dir}/logs/args.txt", "w") as f:
         f.write(f"CLI args:\n")
         for arg in vars(args):
