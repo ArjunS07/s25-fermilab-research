@@ -11,7 +11,7 @@ RANDOM_SEED = 42
 TRAIN_SPLIT = 0.7
 MASK = True
 data_args = {
-    "jet_type": ["g"],
+    "jet_type": ["g", "q", "t"],
     "data_dir": "datasets/jetnet",
     "num_particles": 150, 
     "particle_features": (
