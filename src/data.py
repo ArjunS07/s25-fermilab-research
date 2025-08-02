@@ -23,7 +23,6 @@ data_args = {
     "download": True
 }
 
-
 if __name__ == "__main__":
     torch.manual_seed(RANDOM_SEED)
     torch.cuda.manual_seed_all(RANDOM_SEED)

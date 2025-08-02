@@ -11,13 +11,7 @@ from util.jet_attributes import one_hot_enc_jet_type, one_hot_to_type
 
 RANDOM_SEED = 42
 
-jet_type_map = {
-0: "Gluons",
-1: "Light quarks",
-2: "Top quarks",
-3: "W bosons",
-4: "Z bosons"
-}
+from data import data_args
 
 def noise_num_particles(X, noise_std=0.15):
     """
@@ -54,10 +48,10 @@ if __name__ == "__main__":
 
     # equalize the number of jets per type
     X_train_equalized = []
-    min_jets_per_type = min(len(X_train[X_train[:, -1] == jet_type]) for jet_type in jet_type_map.keys())
-    for jet_type in jet_type_map.keys():
+    jet_types_ints = set(X_train[:, -1].long().tolist())
+    min_jets_per_type = min(len(X_train[X_train[:, -1] == jet_type]) for jet_type in jet_types_ints)
+    for jet_type in jet_types_ints:
         X_train_equalized.extend(X_train[X_train[:, -1] == jet_type][:min_jets_per_type])
-
     X_train = torch.tensor(np.array(X_train_equalized), dtype=torch.float32)
 
     os.makedirs("gen", exist_ok=True)
