@@ -183,6 +183,7 @@ if __name__ == "__main__":
     current_step = 0
 
     print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
+    print(f"Current date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     if args.use_distributed:
         model, optimizer = accelerator.prepare(model, optimizer)
