@@ -118,7 +118,7 @@ if __name__ == "__main__":
             max_particles=args.num_particles,
             num_layers=args.n_layers,
             hidden_dim=args.n_hidden,
-        )
+        ).to(device)
     elif args.model_type == "LEJetGeneratorFM":
         model: LEJetGeneratorFM = LEJetGeneratorFM(
             n_layers=args.n_layers,
