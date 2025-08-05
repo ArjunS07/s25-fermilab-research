@@ -46,7 +46,7 @@ def generate_jets(model, device, n_jet_types, num_jets=1000, one_hot_types=None)
     Args:
         model: Pretrained normalizing flow model.
         device: Device to run the model on (e.g., 'cpu' or 'cuda').
-        n_jet_types: Desired number of jet types (<= 5)
+        n_jet_types: Desired number of jet types for one-hot encoding (<= 5)
         num_jets: Number of jets to generate.
         one_hot_types: Optional one-hot encoded tensor of desired jet types. If None, random types
     """

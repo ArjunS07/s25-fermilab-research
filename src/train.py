@@ -15,6 +15,7 @@ from accelerate import Accelerator
 from models.NewLEFM import LEJetGeneratorFM
 from models.FlowMatchingMLP import FlowMatchingMLP
 from models.Week7EGNN import JetFlowMatcher
+from util.jet_attributes import NUM_CLASSES
 
 from generate_samples import generate_samples
 from util import jet_attributes
@@ -49,6 +50,7 @@ if __name__ == "__main__":
     parser.add_argument("--process_id", type=str, default="abcd", help="Process ID for distributed training")
 
     # Data
+    parser.add_argument("--jet_types", type=str, nargs="+", default=data_args["jet_type"])
     parser.add_argument("--num_particles", type=int, default=data_args["num_particles"], help="Number of particles in each jet")
     parser.add_argument("--mask", type=bool, default=True, help="Use mask for particles")
 
@@ -81,7 +83,7 @@ if __name__ == "__main__":
     print(f"Using {device} device")
 
     # Make folders if they do not exist
-    out_dir = f"{args.out_dir}/{args.model_type}-{args.num_epochs}epochs-{args.batch_size}batch-{args.n_layers}layers-{args.integration_steps}steps"
+    out_dir = f"{args.out_dir}/{args.process_id}-{args.model_type}-{args.num_epochs}epochs-{args.batch_size}batch-{args.n_layers}layers-{args.integration_steps}steps"
     if not args.use_distributed or (accelerator is not None and accelerator.is_main_process):
         make_clear_folder(out_dir)
         make_clear_folder(f"{out_dir}/models")
@@ -114,7 +116,7 @@ if __name__ == "__main__":
     
     if args.model_type == "Week7EGNN":
         model: JetFlowMatcher = JetFlowMatcher(
-            max_num_jet_types=5,
+            max_num_jet_types=NUM_CLASSES,
             max_particles=args.num_particles,
             num_layers=args.n_layers,
             hidden_dim=args.n_hidden,
@@ -153,7 +155,6 @@ if __name__ == "__main__":
     if args.num_particles < MAX_N_PARTICLES:
         # clamp the number of particles to args.num_particles
         train_jet_info[:, 3] = train_jet_info[:, 3].clamp(max=args.num_particles)
-        breakpoint()
     train_jet_info = train_jet_info[:args.n_train_samples]
     losses = []
 
@@ -196,6 +197,8 @@ if __name__ == "__main__":
         epoch_indices = torch.randperm(len(X_train_particle_transformed))[:samples_per_epoch]
         X_train_epoch = torch.utils.data.Subset(X_train_particle_transformed, epoch_indices)
         train_jet_info_epoch = train_jet_info[epoch_indices]
+
+        print(torch.sum(train_jet_info_epoch, dim=0))
 
         paired_dataset = PairedDataset(train_jet_info_epoch, X_train_epoch)
         train_loader = DataLoader(
@@ -298,7 +301,7 @@ if __name__ == "__main__":
                         integration_steps=16,
                         n_samples=max(args.n_samples // 100, 50),
                         batch_size=args.batch_size,
-                        n_jet_types=3
+                        n_jet_types=len(args.jet_types)
                     )
                     if torch.cuda.is_available():
                         torch.cuda.synchronize()
@@ -338,7 +341,7 @@ if __name__ == "__main__":
             integration_steps=args.integration_steps,
             n_samples=args.n_samples,
             batch_size=args.batch_size,
-            n_jet_types=len(data_args["jet_type"])
+            n_jet_types=len(args.jet_types)
         )
 
         # move everything in out/ to final_out/

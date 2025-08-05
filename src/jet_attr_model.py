@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import normflows as nf
 from jetnet.datasets import JetNet
-from util.jet_attributes import one_hot_enc_jet_type, one_hot_to_type
+from util.jet_attributes import one_hot_enc_jet_type, one_hot_to_type, NUM_CLASSES
 
 RANDOM_SEED = 42
 
@@ -78,7 +78,7 @@ if __name__ == "__main__":
 
     # Fixed
     latent_size = 4
-    context_size = 5
+    context_size = NUM_CLASSES
 
     flows = []
     for i in range(K):

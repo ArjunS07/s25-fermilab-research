@@ -44,6 +44,8 @@ if __name__ == "__main__":
         # print("Data files already exist. Skipping data generation.")
         # exit(0)
 
+    print(args.jet_types)
+
     X_train = JetNet(
         jet_type=args.jet_types,
         data_dir=data_args["data_dir"],
