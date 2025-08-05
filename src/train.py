@@ -68,6 +68,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
     parser.add_argument("--epoch_frac", type=float, default=0.2, help="Fraction of training dataset to use per epoch")
 
+    parser.add_argument("--x_1_translation", type=float, default=0.0, help="Translation to apply to x_1 during training")
+
     # Integration
     parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
     parser.add_argument("--integration_steps", type=int, default=16, help="Number of integration steps for ODE solver")
@@ -218,17 +220,25 @@ if __name__ == "__main__":
                 batch_particle_info = batch_particle_info.to(device)
 
             x_1 = batch_particle_info[:, :, :4]
+            # translate every value in x_1 by +10 
+            x_1 += args.x_1_translation
             true_masks = batch_particle_info[:, :, 4] if args.mask else None
             x_0 = torch.randn_like(x_1, device=device)
             x_0 = 0.5 + x_0
             
             if true_masks is not None:
+                # multiply x_1 for redundancy, training data should have it masked by default
+                x_1 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_1
+
+                # important - x0 is a noisy normal distribution by default
                 x_0 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_0
 
             t = torch.rand(x_0.shape[0])
             if not args.use_distributed:
                 t = t.to(device)
             t_viewed = t.view(-1, 1, 1)
+
+            # Should already be 0 in masked regions due to x0 and x1 being masked
             x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
             dx_t = x_1 - x_0
             if true_masks is not None:
@@ -239,8 +249,12 @@ if __name__ == "__main__":
                 pred = pred * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
                 dx_t = dx_t * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
             loss = (pred - dx_t).square()
-            loss = (loss.sum() / torch.sum(true_masks)) if true_masks is not None else loss.mean()
-        
+            if true_masks is not None:
+                loss = loss * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+                loss = loss.sum(dim=-1) / torch.sum(true_masks)
+            else:
+                loss = loss.mean(dim=-1)
+
             if args.use_distributed:
                 accelerator.backward(loss)  # Use accelerator to handle backward pass
             else:
@@ -273,7 +287,6 @@ if __name__ == "__main__":
                 print(f"{dx_t.mean()=} {dx_t.std()=} {dx_t.min()=} {dx_t.max()=}")
                 print(f"{x_1.mean()=} {x_1.std()=} {x_1.min()=} {x_1.max()=}")
                 print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
-                # log_memory_usage()
             
             del x_1, x_0, t, t_viewed, x_t, dx_t, pred, loss
 

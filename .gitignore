@@ -22,3 +22,6 @@ summer-prep/diffusion-emoji/dataset
 
 *.xml
 */downloaded_output/*
+src/debugging
+src/downloaded-data
+src/old-data
