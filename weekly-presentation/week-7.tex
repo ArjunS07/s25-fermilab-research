@@ -46,7 +46,8 @@
 %----------------------------------------------------------------------------------------
 
 % References from references.bib
-\usepackage[backend=bibtex,sorting=none]{biblatex}
+
+\usepackage[backend=bibtex,sorting=none, style=authoryear]{biblatex}
 \addbibresource{references.bib}
 
 
@@ -54,11 +55,20 @@
 
 \section{Week 7 Updates}
 
-\begin{frame}[allowframebreaks]{New architecture}
+\begin{frame}{New architecture}
+    \begin{itemize}
+        \item Maximally transmit time embedding by keeping separate from the global jet feature embedding
+        \item Only use lorentz-invariant jet features (\# constituents, one-hot encoded type) to produce the global embedding
+        \item Allow reweighting of current particle in linear combination based on messages
+        \item Follow convention of E(3) GNNs \parencite{satorrasEquivariantGraphNeural2022a} for scaling of particles in linear combination 
+    \end{itemize}
+\end{frame}
+
+\begin{frame}[allowframebreaks]{New architecture details}
     $x$ = Cartesian particle 4-momenta, $\phi_\cdot$ = learnable functions, $\psi(\cdot) = \text{sgn}(\cdot) \log(|\cdot| + 1)$,$N = \#$ particles, $|| \cdot ||, \langle \cdot \rangle$ = Minkowski norm and inner product
     \begin{enumerate}
         \item Embed scalar time value to random Fourier features through two fully cnnected layers with 32 and 64 nodes to producd $t_\text{emb}$
-        \item Pass one-hot encded jet type $j_t$ and number of constituents $N$ through two fully-connected layers with 32 and 64 nodes to produce global embedding $g^0$
+        \item Pass one-hot encoded jet type $j_t$ and number of constituents $N$ through two fully-connected layers with 32 and 64 nodes to produce global embedding $g^0$
         \item Initialize particle cloud $x_1 \dots x_N$, and zero-pad up to 150 if necessary
         \item Stack $L$ Lorentz-group equivariant layers \begin{enumerate}
             \item Input to the $l+1$-th layer is $t_\text{emb}$, $g^0$, $g^L, x_1 \cdots x_N$
@@ -66,13 +76,82 @@
             \item Cache the message aggregation $$\sum\limits_{i, j \in N} \phi_m^l(m_{ij}^l) m_{ij} $$
             \item Update the global embedding $$g^{l+1} = \phi_g^l \left(g^0, g^l, t_\text{emb} \frac{\alpha_l}{N^2} \sum\limits_{i, j \in N} \phi_m^l(m_{ij}^l) m_{ij}  \right)$$ where $\phi_m^l$ outputs a scalar and $\alpha_l$ is a scalar
             \item Apply a linear combination to update the 4-vectors $$x_i^{l+1} = \phi_w^l\left(t_\text{emb}, \frac{\beta^l}{N} \sum\limits_{i, j \in N} \phi_m^l(m_{ij}^l) m_{ij}  \right) x_i^l + \gamma^l \sum\limits_{j \neq i} \phi_x^l (g^0, g^l, t_\text{emb}, m_{ij}) \frac{x_i^l - x_j^l}{1 + ||x_i^l - x_j^l||} $$  where $\phi_w^l$ and $\phi_x^l$ output scalars
-            \item Final output $v_\theta(t, x^0)_i = x_i^L - x_i^0$
+            \item Final output $v_\theta(t, x^0)_i = x_i^L$
         \end{enumerate}
     \end{enumerate}
 \end{frame}
 
+\begin{frame}
+    \begin{center}
+        \textit{Video of output}
+    \end{center}
+\end{frame}
+
+\begin{frame}{Training loss}
+    \begin{figure}
+        \includegraphics[height=0.6\textheight]{figs/training_loss.png}
+    \end{figure}
+    Plot suggests probably need $\geq 500$ epochs for FM convergence
+\end{frame}
+
+\begin{frame}{Conclusions}
+    \textbf{Positives:}
+    \begin{itemize}
+        \item Time dependence is clearly present
+        \item LorentzNet seems sufficiently expressive: the output of the model is nonzero (even if it \textit{points} to $\mathbf{0}$)
+        \item Outliers most likely stem from insufficient training data coverage - seems fixable
+    \end{itemize}
+    \vspace{0.5cm}
+    \textbf{Hypotheses for performance:}
+    \begin{enumerate}
+        \item \textbf{Bug in zero padding leading to collapse to $\mathbf{0}$}
+        \item Diffusion collapse to approximate centre of data space $\mathbf{0}$
+    \end{enumerate}
+\end{frame}
+
+\begin{frame}{Experiments for debugging}
+    \begin{enumerate}
+        \item Train on gluons only (ongoing, 44/50 epochs)
+        \item Artificially translate training data away from $\mathbf{0}$ to $(a, a, a, a)$ where $a \approx \mathcal{O}(10)$ \begin{enumerate}
+            \item If the model still maps to $\mathbf{0}$: likely a zero padding issue
+            \item If the model maps to $(a, a, a, a)$: likely a diffusion collapse issue
+        \end{enumerate}
+    \end{enumerate}
+\end{frame}
+
+\begin{frame}{Remaining work (if the collapse issue is resolved)}
+    
+    Core experimental work:
+    \begin{enumerate}
+        \item Ablation over training objectives (FM OT, variance preserving, variance exploding)
+        \item Likelihood estimation of output - boilerplate implementation
+    \end{enumerate}
+
+    \vspace{0.5cm}
+
+    Potentially achievable novel contributions (to jet generation) in 2 weeks:
+    \begin{enumerate}
+        \item Classifier-free guidance on jet type and constituents \parencite{hoClassifierFreeDiffusionGuidance2022,fanCFGZeroImprovedClassifierFree2025}
+        \item Mean flows for one-shot generation \parencite{gengMeanFlowsOnestep2025}
+        \item Interval conditioning for `cuts' during inference \parencite{bansalUniversalGuidanceDiffusion2023, gloecklerAllinoneSimulationbasedInference2024}
+    \end{enumerate}    
+\end{frame}
 
 \begin{frame}[allowframebreaks]{References}
 \printbibliography
+\end{frame}
+
+\section{Appendices}
+\begin{frame}{Interval conditioning}
+    \begin{itemize}
+        \item Guided diffusion: with context $\mathbf{y}$, $s(\mathbf{\hat{x}}_t, t | \mathbf{y}) \approx (\mathbf{\hat{x}}_t, t) + \nabla_{\mathbf{\hat{x}}_t} \log p_t (\mathbf{y} | \mathbf{\hat{x}}_t)$
+        \item \cite{bansalUniversalGuidanceDiffusion2023} show diffusion models can be guided by arbitrary functions
+        \item \cite{gloecklerAllinoneSimulationbasedInference2024} propose using $s_\phi(\mathbf{\hat{x}}_t, t | c) \approx s_\phi(\mathbf{\hat{x}}_t, t) + \nabla_{\mathbf{\hat{x}}_t} \log \sigma(-s(t) c(\mathbf{\hat{x}}_t))$ where \begin{itemize}
+            \item $\sigma$ is the sigmoid function
+            \item $s(t)$ is a scalar function s.t. $s(t) \to \infty$ as $t \to 1$ (where $t = 1$ is data)
+            \item $c$ is a constraint function, e.g., to enforce $\mathbf{\hat{x}} < u$, let $c(\mathbf{\hat{x}}) = \mathbf{\hat{x}} - u$
+        \end{itemize}
+    \end{itemize}
+    Will need to do semi-original work on checking if applicable to / generalizing this to flow matching
 \end{frame}
 \end{document}
