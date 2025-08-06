@@ -251,7 +251,7 @@ if __name__ == "__main__":
             loss = (pred - dx_t).square()
             if true_masks is not None:
                 loss = loss * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-                loss = loss.sum(dim=-1) / torch.sum(true_masks)
+                loss = loss.sum() / true_masks.sum()
             else:
                 loss = loss.mean(dim=-1)
 
