@@ -130,7 +130,7 @@ if __name__ == "__main__":
         ).to(device)
     elif args.model_type == "FlowMatchingMLP":
         model = FlowMatchingMLP(
-            n_particles=data_args["num_particles"],
+            n_particles=args.num_particles,
             particle_dim=NUM_PARTICLE_FEATURES,
             global_dim=64,
             n_layers=args.n_layers,
@@ -308,7 +308,7 @@ if __name__ == "__main__":
                         model=model,
                         device=device,
                         out_dir=f"{out_dir}/gen/epoch_{epoch+1}",
-                        num_particles=data_args["num_particles"],
+                        num_particles=args.num_particles,
                         num_particle_features=NUM_PARTICLE_FEATURES,
                         final_scale=final_scale,
                         integration_steps=16,
@@ -348,7 +348,7 @@ if __name__ == "__main__":
             model=model,
             device=device,
             out_dir=f"{out_dir}/gen/samples",
-            num_particles=data_args["num_particles"],
+            num_particles=args.num_particles,
             num_particle_features=NUM_PARTICLE_FEATURES,
             final_scale=final_scale,
             integration_steps=args.integration_steps,

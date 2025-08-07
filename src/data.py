@@ -33,8 +33,8 @@ if __name__ == "__main__":
 
     # parser.add_argument("--data_dir", type=str, default=data_args["data_dir"],
     #                     help="Directory to store the JetNet dataset")
-    # parser.add_argument("--num_particles", type=int, default=data_args["num_particles"],
-    #                     help="Number of particles to consider in each jet")
+    parser.add_argument("--num_particles", type=int, default=data_args["num_particles"],
+                        help="Number of particles to consider in each jet")
     # parser.add_argument("--split_fraction", type=float, nargs=3, default=data_args["split_fraction"],
     #                     help="Fraction of data to use for train, validation, and test splits")
 
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     X_train = JetNet(
         jet_type=args.jet_types,
         data_dir=data_args["data_dir"],
-        num_particles=data_args["num_particles"],
+        num_particles=args.num_particles,
         particle_features=data_args["particle_features"],
         jet_features=data_args["jet_features"],
         split_fraction=data_args["split_fraction"],
@@ -60,7 +60,7 @@ if __name__ == "__main__":
     X_test = JetNet(
         jet_type=data_args["jet_type"],
         data_dir=data_args["data_dir"],
-        num_particles=data_args["num_particles"],
+        num_particles=args.num_particles,
         particle_features=data_args["particle_features"],
         jet_features=data_args["jet_features"],
         split_fraction=data_args["split_fraction"],
