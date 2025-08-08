@@ -46,7 +46,7 @@ def generate_samples(
 
             masks = jet_attributes.generate_masks(
                 n_particles,
-                max_n_particles=num_particles,
+                max_particles_per_jet=num_particles,
                 device=device
             )
             generated_jet_attrs = torch.cat([

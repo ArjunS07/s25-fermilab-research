@@ -62,7 +62,7 @@ def generate_jets(model, device, n_jet_types, num_jets=1000, one_hot_types=None)
     ], dim=-1).to(device)  # Concatenate along the last dimension
     return jets, jet_logprobs
 
-def generate_masks(num_particles, max_n_particles, device):
+def generate_masks(num_particles, max_particles_per_jet, device):
     """
     Generate random masks for the particles in each jet.
     
@@ -75,11 +75,11 @@ def generate_masks(num_particles, max_n_particles, device):
         torch.Tensor: Random masks for the particles in each jet.
     """
     num_particles = num_particles.to(torch.int64)
-    assert (num_particles <= max_n_particles).all()
+    assert (num_particles <= max_particles_per_jet).all()
     masks = [
         torch.concat((
             torch.ones(int(n_ones), device=device),
-            torch.zeros(max_n_particles - int(n_ones), device=device)
+            torch.zeros(max_particles_per_jet - int(n_ones), device=device)
         ))
         for n_ones in num_particles
     ]
