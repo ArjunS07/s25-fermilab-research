@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-def gen_initial_distribution(x_1 = None, current_batch_size = None, num_particles=None, num_particle_features=None, std=0.1, clamp_min=None, clamp_max=None):
+def gen_initial_distribution(x_1 = None, current_batch_size = None, num_particles=None, num_particle_features=None, std=0.1, clamp_stddevs=None):
 
     if x_1 is not None:
         dist = torch.randn_like(x_1) * std
@@ -10,11 +10,8 @@ def gen_initial_distribution(x_1 = None, current_batch_size = None, num_particle
     else:
         raise ValueError("Either x_1 or current_batch_size, num_particles, and num_particle_features must be provided.")
 
-    if clamp_min is not None:
-        dist = torch.clamp(dist, min=clamp_min)
-    if clamp_max is not None:
-        dist = torch.clamp(dist, max=clamp_max)
-
+    if clamp_stddevs is not None:
+        dist = torch.clamp(dist, -clamp_stddevs * std, clamp_stddevs * std)
     return dist
 
 def sample_massless_4momentum_clouds(n_clouds, cloud_size):

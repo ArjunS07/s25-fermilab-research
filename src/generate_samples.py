@@ -35,8 +35,8 @@ def generate_samples(
                 current_batch_size=current_batch_size,
                 num_particles=num_particles,
                 num_particle_features=num_particle_features,
-                clamp_min=-0.5,
-                clamp_max=0.5,
+                # clamp within stddevs of mean
+                clamp_stddevs=1.5
                 )
             x = x.to(device)
             
