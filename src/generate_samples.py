@@ -34,7 +34,10 @@ def generate_samples(
             x = gen_initial_distribution(
                 current_batch_size=current_batch_size,
                 num_particles=num_particles,
-                num_particle_features=num_particle_features,)
+                num_particle_features=num_particle_features,
+                clamp_min=-0.5,
+                clamp_max=0.5,
+                )
             x = x.to(device)
             
             generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_generator, device, n_jet_types=n_jet_types, num_jets=x.shape[0])
