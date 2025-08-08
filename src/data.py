@@ -23,6 +23,9 @@ data_args = {
     "download": True
 }
 
+def get_data_path(process_id):
+    return f"data/{process_id}"
+
 if __name__ == "__main__":
     torch.manual_seed(RANDOM_SEED)
     torch.cuda.manual_seed_all(RANDOM_SEED)
@@ -30,6 +33,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download dataset")
     parser.add_argument("--jet_types", type=str, nargs="+", default=data_args["jet_type"],
                         help="List of jet types to train on (e.g., 'g', 'q', 't')")
+    parser.add_argument("--process_id", type=str, default="abcd", help="Process ID for distributed training")
 
     # parser.add_argument("--data_dir", type=str, default=data_args["data_dir"],
     #                     help="Directory to store the JetNet dataset")
@@ -39,10 +43,6 @@ if __name__ == "__main__":
     #                     help="Fraction of data to use for train, validation, and test splits")
 
     args = parser.parse_args()
-
-    # if os.path.exists("data/x_train.pkl") and os.path.exists("data/x_test.pkl"):
-        # print("Data files already exist. Skipping data generation.")
-        # exit(0)
 
     print(args.jet_types)
 
@@ -69,7 +69,10 @@ if __name__ == "__main__":
         download=True
     )
 
-    with open("data/x_train.pkl", "wb") as f:
+    data_path = get_data_path(args.process_id)
+    os.makedirs(data_path, exist_ok=True)
+
+    with open(f"{data_path}/x_train.pkl", "wb") as f:
         pickle.dump(X_train, f)
-    with open("data/x_test.pkl", "wb") as f:
+    with open(f"{data_path}/x_test.pkl", "wb") as f:
         pickle.dump(X_test, f)

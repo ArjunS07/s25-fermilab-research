@@ -22,7 +22,7 @@ from util.distributions import gen_initial_distribution
 from util import jet_attributes
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from util.file_management import make_clear_folder
-from data import data_args
+from data import data_args, get_data_path
 
 RANDOM_SEED = 42
 MAX_N_PARTICLES = 150
@@ -40,6 +40,7 @@ class PairedDataset(torch.utils.data.Dataset):
         return self.jet_info[idx], self.particle_data[idx]
 
 if __name__ == "__main__":
+    init_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     logging.basicConfig(level=logging.INFO)    
     torch.manual_seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
@@ -48,7 +49,7 @@ if __name__ == "__main__":
     # JetNet data download args
     parser = argparse.ArgumentParser(description="Train LEJetGeneratorFM on JetNet dataset")
     parser.add_argument("--out_dir", default="/mnt/data/output")
-    parser.add_argument("--process_id", type=str, default="abcd", help="Process ID for distributed training")
+    parser.add_argument("--process_id", type=str, default=init_time, help="Process ID for distributed training")
 
     # Data
     parser.add_argument("--jet_types", type=str, nargs="+", default=data_args["jet_type"])
@@ -86,7 +87,8 @@ if __name__ == "__main__":
     print(f"Using {device} device")
 
     # Make folders if they do not exist
-    out_dir = f"{args.out_dir}/{args.process_id}-{args.model_type}-{args.num_epochs}epochs-{args.batch_size}batch-{args.n_layers}layers-{args.integration_steps}steps"
+    day = datetime.datetime.now().strftime('%Y-%m-%d')
+    out_dir = f"{args.out_dir}/{day}-{args.process_id}-{args.model_type}-{args.num_epochs}epochs-{args.n_layers}layers-{args.integration_steps}steps"
     if not args.use_distributed or (accelerator is not None and accelerator.is_main_process):
         make_clear_folder(out_dir)
         make_clear_folder(f"{out_dir}/models")
@@ -95,11 +97,13 @@ if __name__ == "__main__":
         print(f"Output directory: {out_dir}")
     if args.use_distributed:
         accelerator.wait_for_everyone()
-    # Load data
-    with open("data/x_train.pkl", "rb") as f:
+
+    data_path = get_data_path(args.process_id)
+    with open(f"{data_path}/x_train.pkl", "rb") as f:
         X_train = pickle.load(f)
-    with open("data/x_test.pkl", "rb") as f:
+    with open(f"{data_path}/x_test.pkl", "rb") as f:
         X_test = pickle.load(f)
+
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
     X_train_particle_transformed = X_train_particle_transformed[:args.n_train_samples]
     if args.num_particles < MAX_N_PARTICLES:
@@ -191,7 +195,6 @@ if __name__ == "__main__":
         model, optimizer = accelerator.prepare(model, optimizer)
     
     print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
-    print(f"Current date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     for epoch in range(args.num_epochs):
         epoch_loss = 0
         num_batches = 0
