@@ -161,19 +161,16 @@ if __name__ == "__main__":
     train_jet_info = train_jet_info[:args.n_train_samples]
     losses = []
 
+    # Annealed cosine learning rate with warmup
     lr = 5e-3
     weight_decay = 1e-2
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-
     epoch_fraction = args.epoch_frac
     samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
-
     warmup_pct = 0.1
     steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
-
     total_steps = args.num_epochs * steps_per_epoch
     warmup_steps = int(warmup_pct * total_steps)
-
     def lr_lambda(current_step):
         if current_step < warmup_steps:
             # Linear warm-up
@@ -181,17 +178,20 @@ if __name__ == "__main__":
         else:
             # Cosine annealing after warm-up
             progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-            return 0.5 * (1.0 + np.cos(np.pi * progress))
-
+            lr = 0.5 * (1.0 + np.cos(np.pi * progress))
+            return max(lr, 1e-6) # Ensure nonzero
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     current_step = 0
 
-    print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
-    print(f"Current date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+    # For OT objective
+    sigma_min = 1e-4
+    x_0_coeff = (1 - sigma_min)
+
     if args.use_distributed:
         model, optimizer = accelerator.prepare(model, optimizer)
     
+    print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
+    print(f"Current date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     for epoch in range(args.num_epochs):
         epoch_loss = 0
         num_batches = 0
@@ -234,22 +234,25 @@ if __name__ == "__main__":
                 # important - x0 is a noisy normal distribution by default
                 x_0 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_0
 
-            t = torch.rand(x_0.shape[0])
+            # Logit-normal samplign of t to focus around t=0.5 which is hardest
+            # https://github.com/UNITES-Lab/FlowTS
+            t = torch.sigmoid(torch.randn(x_0.shape[0]))
+            # t = torch.rand(x_0.shape[0])
             if not args.use_distributed:
                 t = t.to(device)
             t_viewed = t.view(-1, 1, 1)
 
             # Should already be 0 in masked regions due to x0 and x1 being masked
             x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
-            dx_t = x_1 - x_0
-            if true_masks is not None:
-                dx_t = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * dx_t
             pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info, mask=true_masks)
-            # only take loss over unmasked parts
+
+            conditional_u_t = x_1 - (x_0_coeff * x_0)
             if true_masks is not None:
+                conditional_u_t = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * conditional_u_t
                 pred = pred * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-                dx_t = dx_t * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-            loss = (pred - dx_t).square()
+                conditional_u_t = conditional_u_t * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+            
+            loss = (pred - conditional_u_t).square()
             if true_masks is not None:
                 loss = loss * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
                 loss = loss.sum() / true_masks.sum()
@@ -285,11 +288,11 @@ if __name__ == "__main__":
                 current_lr = optimizer.param_groups[0]['lr']
                 current_avg_loss = epoch_loss / num_batches
                 print(f"{x_t.mean()=} {x_t.std()=} {x_t.min()=} {x_t.max()=}")
-                print(f"{dx_t.mean()=} {dx_t.std()=} {dx_t.min()=} {dx_t.max()=}")
+                print(f"{conditional_u_t.mean()=} {conditional_u_t.std()=} {conditional_u_t.min()=} {conditional_u_t.max()=}")
                 print(f"{x_1.mean()=} {x_1.std()=} {x_1.min()=} {x_1.max()=}")
                 print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
             
-            del x_1, x_0, t, t_viewed, x_t, dx_t, pred, loss
+            del x_1, x_0, t, t_viewed, x_t, conditional_u_t, pred, loss
 
         losses.append(epoch_loss / num_batches)
         current_lr = optimizer.param_groups[0]['lr']
