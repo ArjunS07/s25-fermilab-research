@@ -1,9 +1,11 @@
 import argparse
+import seaborn as sns
 import torch
+import matplotlib.pyplot as plt
+
 from util import jet_attributes
 from models.NewLEFM import LEJetGeneratorFM
-import matplotlib.pyplot as plt
-import seaborn as sns
+from util.distributions import gen_initial_distribution
 
 features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 
@@ -29,10 +31,12 @@ def generate_samples(
 
         for start_idx in range(0, n_samples, batch_size):
             current_batch_size = min(batch_size, n_samples - start_idx)
-            x = torch.randn(
-                (current_batch_size, num_particles, num_particle_features),
-                device=device
-            )
+            x = gen_initial_distribution(
+                current_batch_size=current_batch_size,
+                num_particles=num_particles,
+                num_particle_features=num_particle_features,)
+            x = x.to(device)
+            
             generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_generator, device, n_jet_types=n_jet_types, num_jets=x.shape[0])
             jet_one_hot_enc = generated_jet_attrs[:, :5].to(device)
             n_particles = generated_jet_attrs[:, -1].long().to(device)

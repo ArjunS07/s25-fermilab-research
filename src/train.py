@@ -18,6 +18,7 @@ from models.Week7EGNN import JetFlowMatcher
 from util.jet_attributes import NUM_CLASSES
 
 from generate_samples import generate_samples
+from util.distributions import gen_initial_distribution
 from util import jet_attributes
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from util.file_management import make_clear_folder
@@ -223,8 +224,8 @@ if __name__ == "__main__":
             # translate every value in x_1 by +10 
             x_1 += args.x_1_translation
             true_masks = batch_particle_info[:, :, 4] if args.mask else None
-            x_0 = torch.randn_like(x_1, device=device)
-            x_0 = 0.5 + x_0
+            x_0 = gen_initial_distribution(x_1=x_1)
+            x_0 = x_0.to(device)
             
             if true_masks is not None:
                 # multiply x_1 for redundancy, training data should have it masked by default
