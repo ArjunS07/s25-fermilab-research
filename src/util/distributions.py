@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-def gen_initial_distribution(x_1 = None, current_batch_size = None, num_particles=None, num_particle_features=None, std=0.1, clamp_stddevs=None):
+def gen_initial_distribution(x_1 = None, current_batch_size = None, num_particles=None, num_particle_features=None, std=1, clamp_stddevs=None):
 
     if x_1 is not None:
         dist = torch.randn_like(x_1) * std
