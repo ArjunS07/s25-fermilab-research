@@ -23,8 +23,11 @@ data_args = {
     "download": True
 }
 
-def get_data_path(process_id):
-    return f"data/{process_id}"
+def get_data_path(output_path):
+    """
+    {output_path}/data
+    """
+    return f"{output_path}/data"
 
 if __name__ == "__main__":
     torch.manual_seed(RANDOM_SEED)
@@ -33,14 +36,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download dataset")
     parser.add_argument("--jet_types", type=str, nargs="+", default=data_args["jet_type"],
                         help="List of jet types to train on (e.g., 'g', 'q', 't')")
-    parser.add_argument("--process_id", type=str, default="abcd", help="Process ID for distributed training")
-
-    # parser.add_argument("--data_dir", type=str, default=data_args["data_dir"],
-    #                     help="Directory to store the JetNet dataset")
+    parser.add_argument("--output_path", type=str, default="/mnt/data/output", help="Path to save the output files")
     parser.add_argument("--num_particles", type=int, default=data_args["num_particles"],
                         help="Number of particles to consider in each jet")
-    # parser.add_argument("--split_fraction", type=float, nargs=3, default=data_args["split_fraction"],
-    #                     help="Fraction of data to use for train, validation, and test splits")
 
     args = parser.parse_args()
 
@@ -69,7 +67,7 @@ if __name__ == "__main__":
         download=True
     )
 
-    data_path = get_data_path(args.process_id)
+    data_path = get_data_path(args.output_path)
     os.makedirs(data_path, exist_ok=True)
 
     with open(f"{data_path}/x_train.pkl", "wb") as f:

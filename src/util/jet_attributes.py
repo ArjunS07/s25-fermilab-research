@@ -4,9 +4,8 @@ import torch
 NUM_CLASSES = 5  # Number of jet types
 MAX_N_PARTICLES = 150  # Maximum number of particles in a jet
 MIN_N_PARTICLES = 4  # Minimum number of particles in a jet
-MODEL_PATH = "upload/jet_attr_nf_model.pth"
 
-def load_model(model_path=MODEL_PATH, device=torch.device("cpu")):
+def load_model(model_path, device=torch.device("cpu")):
     model = torch.load(model_path, map_location=device, weights_only=False)
     return model
 

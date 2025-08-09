@@ -4,6 +4,8 @@ import torch
 import matplotlib.pyplot as plt
 
 from util import jet_attributes
+from util.file_management import make_clear_folder
+from jet_attr_model import get_model_pth_path
 from models.NewLEFM import LEJetGeneratorFM
 from util.distributions import gen_initial_distribution
 
@@ -12,7 +14,7 @@ features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 def generate_samples(
         model,
         device,
-        out_dir,
+        root_output_path,
         num_particles,
         num_particle_features,
         final_scale,
@@ -21,8 +23,12 @@ def generate_samples(
         batch_size,
         n_jet_types=3,
 ):
+    jet_attr_path = get_model_pth_path(root_output_path)
+    jet_attr_generator = jet_attributes.load_model(model_path=jet_attr_path).to(device)
 
-    jet_attr_generator = jet_attributes.load_model().to(device)
+    # make folder
+    make_clear_folder(f"{root_output_path}/samples")
+
     with torch.no_grad():
         model.eval()
         jet_attr_generator.eval()
@@ -36,7 +42,7 @@ def generate_samples(
                 num_particles=num_particles,
                 num_particle_features=num_particle_features,
                 # clamp within stddevs of mean
-                clamp_stddevs=1.5
+                clamp_stddevs=3
                 )
             x = x.to(device)
             
@@ -70,10 +76,10 @@ def generate_samples(
                         label="Generated"
                     )
                     ax.set_title(feature)
-                plt.savefig(f"{out_dir}/samples_histogram_{start_idx//batch_size:04d}_step_{i}.png")
+                plt.savefig(f"{root_output_path}/samples/histogram_{start_idx//batch_size:04d}_step_{i}.png")
                 plt.close(fig)
 
-            torch.save(final_scale * x, f"{out_dir}/samples_batch_{start_idx//batch_size:04d}.pt")
+            torch.save(final_scale * x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
 
             if start_idx % (batch_size * 10) == 0:
                 print(f"Generated {start_idx + batch_size} samples so far")
