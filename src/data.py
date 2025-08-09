@@ -56,7 +56,7 @@ if __name__ == "__main__":
         download=True
     )
     X_test = JetNet(
-        jet_type=data_args["jet_type"],
+        jet_type=args.jet_types,
         data_dir=data_args["data_dir"],
         num_particles=args.num_particles,
         particle_features=data_args["particle_features"],
