@@ -84,9 +84,9 @@ class PhiMLP(nn.Module):
         # Xavier initialization
         for layer in self.net:
             if isinstance(layer, nn.Linear):
-                nn.init.xavier_uniform_(layer.weight, gain=0.05)
+                nn.init.xavier_uniform_(layer.weight, gain=0.1)
                 if layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0.05)
+                    nn.init.constant_(layer.bias, 0.1)
 
     def forward(self, x):
         return self.net(x)
