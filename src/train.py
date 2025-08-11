@@ -1,8 +1,5 @@
 import pickle
-import datetime
 import argparse
-import os
-import shutil
 import logging
 
 import numpy as np
@@ -184,8 +181,8 @@ if __name__ == "__main__":
     current_step = 0
 
     # For OT objective
-    sigma_min = 1e-4
-    x_0_coeff = (1 - sigma_min)
+    # sigma_min = 1e-4
+    # x_0_coeff = (1 - sigma_min)
 
     if args.use_distributed:
         model, optimizer = accelerator.prepare(model, optimizer)
@@ -235,8 +232,8 @@ if __name__ == "__main__":
 
             # Logit-normal samplign of t to focus around t=0.5 which is hardest
             # https://github.com/UNITES-Lab/FlowTS
-            t = torch.sigmoid(torch.randn(x_0.shape[0]))
-            # t = torch.rand(x_0.shape[0])
+            # t = torch.sigmoid(torch.randn(x_0.shape[0]))
+            t = torch.rand(x_0.shape[0])
             if not args.use_distributed:
                 t = t.to(device)
             t_viewed = t.view(-1, 1, 1)
@@ -245,7 +242,7 @@ if __name__ == "__main__":
             x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
             pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info, mask=true_masks)
 
-            conditional_u_t = x_1 - (x_0_coeff * x_0)
+            conditional_u_t = x_1 - x_0
             if true_masks is not None:
                 conditional_u_t = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * conditional_u_t
                 pred = pred * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
