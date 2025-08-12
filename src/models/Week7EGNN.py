@@ -290,6 +290,7 @@ class LorentzEquivariantLayer(nn.Module):
         # Apply mask to ensure padded particles remain zero
         x_new = x_new * mask.unsqueeze(-1)
 
+
         # print(f"{update.mean()=} {update.std()=} {update.min()=} {update.max()=}")
         return x_new, g_new
     
@@ -345,7 +346,11 @@ class JetFlowMatcher(nn.Module):
             x, g = layer(x, g0, g, t_emb, mask)
         
         x = x * mask.unsqueeze(-1)
-        return x
+
+        update = x - x0  # Calculate the update as the difference from initial state
+        # multiply by mask to be sure
+        update = update * mask.unsqueeze(-1)
+        return update
 
     def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler'):
         """
