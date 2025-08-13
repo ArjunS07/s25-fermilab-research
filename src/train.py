@@ -8,17 +8,18 @@ import random
 from torch import nn
 from torch.utils.data import DataLoader
 from accelerate import Accelerator
+from jetnet.utils import cartesian_to_EtaPhiPtE
 
 from models.NewLEFM import LEJetGeneratorFM
 from models.FlowMatchingMLP import FlowMatchingMLP
 from models.Week7EGNN import JetFlowMatcher
-from util.jet_attributes import NUM_CLASSES
-
-from generate_samples import generate_samples
-from util.distributions import gen_initial_distribution
 from util import jet_attributes
-from util.coordinates import transform_rel_particle_coordinates_to_cartesian
+from util.jet_attributes import NUM_CLASSES
+from jet_attr_model import get_model_pth_path
+from util.distributions import gen_initial_distribution
+from util.coordinates import transform_rel_particle_coordinates_to_cartesian, jacobian_epp_etaphipte
 from util.file_management import make_clear_folder
+from util.viz import generate_model_vector_field
 from data import data_args, get_data_path
 
 RANDOM_SEED = 42
@@ -53,6 +54,7 @@ if __name__ == "__main__":
 
     # Network hyperparameters
     parser.add_argument("--model_type", type=str, default="Week7EGNN", choices=["LEJetGeneratorFM", "FlowMatchingMLP", "Week7EGNN"], help="Type of model to use")
+    parser.add_argument("--use_residual_update", type=bool, default=False, help="Use residual update in model forward pass")
     parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
     parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
     
@@ -72,6 +74,7 @@ if __name__ == "__main__":
     parser.add_argument("--integration_steps", type=int, default=16, help="Number of integration steps for ODE solver")
     
     args = parser.parse_args()
+
 
     if args.use_distributed:
         accelerator = Accelerator()
@@ -94,6 +97,14 @@ if __name__ == "__main__":
 
     model_output_path = f"{args.output_path}/train"
     make_clear_folder(model_output_path)
+
+    if not args.use_distributed or accelerator.is_main_process:
+        with open(f"{model_output_path}/args.txt", "w") as f:
+            f.write(f"CLI args:\n")
+            for arg in vars(args):
+                f.write(f"{arg}: {getattr(args, arg)}\n")
+            f.close()
+
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
     X_train_particle_transformed = X_train_particle_transformed[:args.n_train_samples]
     if args.num_particles < MAX_N_PARTICLES:
@@ -117,6 +128,7 @@ if __name__ == "__main__":
             max_particles=args.num_particles,
             num_layers=args.n_layers,
             hidden_dim=args.n_hidden,
+            use_residual_update=args.use_residual_update,
         ).to(device)
     elif args.model_type == "LEJetGeneratorFM":
         model: LEJetGeneratorFM = LEJetGeneratorFM(
@@ -217,7 +229,6 @@ if __name__ == "__main__":
                 batch_particle_info = batch_particle_info.to(device)
 
             x_1 = batch_particle_info[:, :, :4]
-            # translate every value in x_1 by +10 
             x_1 += args.x_1_translation
             true_masks = batch_particle_info[:, :, 4] if args.mask else None
             x_0 = gen_initial_distribution(x_1=x_1)
@@ -226,7 +237,6 @@ if __name__ == "__main__":
             if true_masks is not None:
                 # multiply x_1 for redundancy, training data should have it masked by default
                 x_1 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_1
-
                 # important - x0 is a noisy normal distribution by default
                 x_0 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_0
 
@@ -238,17 +248,23 @@ if __name__ == "__main__":
                 t = t.to(device)
             t_viewed = t.view(-1, 1, 1)
 
-            # Should already be 0 in masked regions due to x0 and x1 being masked
-            x_t = (1 - t_viewed) * x_0 + t_viewed * x_1  # Linear interpolation
-            pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info, mask=true_masks)
+            # The model takes in Cartesian coordinates, and x_t is in Cartesian coordinates
+            x_t = (1 - t_viewed) * x_0 + t_viewed * x_1
+            Jacobian_x_t = jacobian_epp_etaphipte(x_t)
 
-            conditional_u_t = x_1 - x_0
+            conditional_u_t_cartesian = x_1 - x_0
+            conditional_u_t_polar = torch.einsum('...ij, ...j->...i', Jacobian_x_t, conditional_u_t_cartesian)
+
+            pred_cartesian = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info, mask=true_masks)
+
+            # result[..., i] = \sum_j Jacobian[..., i, j] * vector[..., j]
+            pred_polar = torch.einsum('...ij, ...j->...i', Jacobian_x_t, pred_cartesian)
+
             if true_masks is not None:
-                conditional_u_t = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * conditional_u_t
-                pred = pred * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-                conditional_u_t = conditional_u_t * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-            
-            loss = (pred - conditional_u_t).square()
+                conditional_u_t_polar = conditional_u_t_polar * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+                pred_polar = pred_polar * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+
+            loss = (conditional_u_t_polar - pred_polar).square()
             if true_masks is not None:
                 loss = loss * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
                 loss = loss.sum() / true_masks.sum()
@@ -259,9 +275,6 @@ if __name__ == "__main__":
                 accelerator.backward(loss)  # Use accelerator to handle backward pass
             else:
                 loss.backward()
-            # for name, param in model.named_parameters():
-                # if param.grad is not None:
-                    # print(name, param.grad.abs().mean())
 
             if args.use_distributed:
                 accelerator.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -284,19 +297,17 @@ if __name__ == "__main__":
                 current_lr = optimizer.param_groups[0]['lr']
                 current_avg_loss = epoch_loss / num_batches
                 print(f"{x_t.mean()=} {x_t.std()=} {x_t.min()=} {x_t.max()=}")
-                print(f"{conditional_u_t.mean()=} {conditional_u_t.std()=} {conditional_u_t.min()=} {conditional_u_t.max()=}")
                 print(f"{x_1.mean()=} {x_1.std()=} {x_1.min()=} {x_1.max()=}")
                 print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
             
-            del x_1, x_0, t, t_viewed, x_t, conditional_u_t, pred, loss
+            del x_1, x_0, t, t_viewed, x_t, conditional_u_t_cartesian, conditional_u_t_polar, pred_cartesian, pred_polar, loss
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         losses.append(epoch_loss / num_batches)
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Epoch [{epoch+1}/{args.num_epochs}], Loss: {losses[-1]:.4f}, LR: {current_lr:.6f}")
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            
     if not args.use_distributed or accelerator.is_main_process:
         with open(f"{model_output_path}/training_loss.csv", "w") as f:
             f.write("epoch,loss\n")
@@ -311,21 +322,29 @@ if __name__ == "__main__":
         torch.save(model.state_dict(), f"{model_output_path}/models/final_model.pth")
     
     if not args.use_distributed or accelerator.is_main_process:
-        with open(f"{model_output_path}/args.txt", "w") as f:
-            f.write(f"CLI args:\n")
-            for arg in vars(args):
-                f.write(f"{arg}: {getattr(args, arg)}\n")
-            f.close()
-    
-        generate_samples(
-            model=model,
-            device=device,
-            root_output_path=args.output_path,
-            num_particles=args.num_particles,
-            num_particle_features=NUM_PARTICLE_FEATURES,
-            final_scale=final_scale,
-            integration_steps=args.integration_steps,
-            n_samples=args.n_samples,
-            batch_size=args.batch_size,
-            n_jet_types=len(args.jet_types)
-        )
+
+        with torch.no_grad():
+            generate_model_vector_field(
+                out_dir=model_output_path,
+                final_model=model,
+                jet_attr_model=jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device),
+                X_test=X_test,
+                scale=final_scale,
+                n_jet_types=len(args.jet_types),
+                n_particles_per_jet=args.num_particles,
+                n_features_per_particle=NUM_PARTICLE_FEATURES,
+                n_viz_samples=500
+            )
+        
+        # generate_samples(
+        #     model=model,
+        #     device=device,
+        #     root_output_path=args.output_path,
+        #     num_particles=args.num_particles,
+        #     num_particle_features=NUM_PARTICLE_FEATURES,
+        #     final_scale=final_scale,
+        #     integration_steps=args.integration_steps,
+        #     n_samples=args.n_samples,
+        #     batch_size=args.batch_size,
+        #     n_jet_types=len(args.jet_types)
+        # )
