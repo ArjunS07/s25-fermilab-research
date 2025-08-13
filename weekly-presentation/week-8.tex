@@ -87,7 +87,7 @@
 \begin{frame}{Boost invariance}
     \begin{itemize}
         \item \cite{songEquivariantFlowMatching2023} achieve translation invariance by projecting $x_0$ to zero COM space during training, and projecting $x_t$ to zero COM at every step of the ODE solver
-        \item We have the target jet's 4-momenta, so we can boost the noisy particles $x_0$ from their own reference frame to the reference frme of the jet at initialization, and similarly boost 
+        \item We have the target jet's 4-momenta, so we can boost the noisy particles $x_0$ from their own reference frame to the reference frme of the jet at initialization
     \end{itemize}
 \end{frame}
 
@@ -99,6 +99,19 @@
         \item Loss is calculated in terms of polar coordinates
         \item Should mitigate the zero-collapse issue
     \end{itemize}
+\end{frame}
+
+\begin{frame}
+    \begin{align*}
+        \left[
+        \begin{matrix}
+            0 & -\frac{px\, pz}{\left(px^{2} + py^{2}\right)^{\frac{3}{2}} \sqrt{\frac{pz^{2}}{px^{2} + py^{2}} + 1}} & -\frac{py\, pz}{\left(px^{2} + py^{2}\right)^{\frac{3}{2}} \sqrt{\frac{pz^{2}}{px^{2} + py^{2}} + 1}} & \frac{1}{\sqrt{px^{2} + py^{2}} \sqrt{\frac{pz^{2}}{px^{2} + py^{2}} + 1}} \\
+            0 & -\frac{py}{px^{2} + py^{2}} & \frac{px}{px^{2} + py^{2}} & 0 \\
+            0 & \frac{px}{\sqrt{px^{2} + py^{2}}} & \frac{py}{\sqrt{px^{2} + py^{2}}} & 0 \\
+            1 & 0 & 0 & 0
+        \end{matrix}
+        \right]
+    \end{align*}
 \end{frame}
 
 

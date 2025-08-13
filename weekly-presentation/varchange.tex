@@ -1,0 +1,43 @@
+\documentclass{article}
+\usepackage{graphicx} 
+\usepackage{amsmath}
+\usepackage{amssymb}
+\begin{document}
+
+
+Cartesian coordinates \begin{align*}
+    c = E, p_x, p_y, p_z
+\end{align*}
+
+Polar cooordinates \begin{align*}
+    p &= \eta, \phi, p_T, E
+\end{align*}
+
+where \begin{align*}
+    \eta &= \text{arcsinh}\left(\frac{p_z}{\sqrt{p_x^2 + p_y^2}}\right) = \text{arcsinh} \left(\frac{p_z}{p_T} \right) = \ln \left[ \frac{p_z}{p_T} + \sqrt{\left(\frac{p_z}{p_T}\right)^2 + 1}\right]\\
+    \phi &= \text{arctan2} (p_y, p_x)\\
+    p_T &= \sqrt{p_x^2 + p_y^2}\\
+    E &= E
+\end{align*}
+
+
+\begin{align*}
+    &\left[
+    \begin{matrix}
+        0 & -\frac{p_x\, p_z}{\left(p_x^{2} + p_y^{2}\right)^{\frac{3}{2}} \sqrt{\frac{p_z^{2}}{p_x^{2} + p_y^{2}} + 1}} & -\frac{p_y\, p_z}{\left(p_x^{2} + p_y^{2}\right)^{\frac{3}{2}} \sqrt{\frac{p_z^{2}}{p_x^{2} + p_y^{2}} + 1}} & \frac{1}{\sqrt{p_x^{2} + p_y^{2}} \sqrt{\frac{p_z^{2}}{p_x^{2} + p_y^{2}} + 1}} \\
+        0 & -\frac{p_y}{p_x^{2} + p_y^{2}} & \frac{p_x}{p_x^{2} + p_y^{2}} & 0 \\
+        0 & \frac{p_x}{\sqrt{p_x^{2} + p_y^{2}}} & \frac{p_y}{\sqrt{p_x^{2} + p_y^{2}}} & 0 \\
+        1 & 0 & 0 & 0
+    \end{matrix}
+    \right]\\
+    =&\left[
+    \begin{matrix}
+        0 & -\frac{p_x\, p_z}{p_T^3 \sqrt{\frac{p_z^{2}}{p_T^2} + 1}} & -\frac{p_y\, p_z}{p_T^3 \sqrt{\frac{p_z^{2}}{p_T^2} + 1}} & \frac{1}{p_T \sqrt{\frac{p_z^{2}}{p_T^2} + 1}} \\
+        0 & -\frac{p_y}{p_T^2} & \frac{p_x}{p_T^2} & 0 \\
+        0 & \frac{p_x}{p_T} & \frac{p_y}{p_T} & 0 \\
+        1 & 0 & 0 & 0
+    \end{matrix}
+    \right]\\
+\end{align*}
+
+\end{document}
