@@ -297,12 +297,13 @@ class LorentzEquivariantLayer(nn.Module):
 class JetFlowMatcher(nn.Module):
     """Complete flow matching model for jet generation."""
     def __init__(self, max_num_jet_types, max_particles=150, embed_dim=64, 
-                 num_layers=6, message_dim=128, hidden_dim=64, gradient_clip_val=1.0):
+                 num_layers=6, message_dim=128, hidden_dim=64, use_residual_update=False,):
         super().__init__()
         self.max_particles = max_particles
         self.embed_dim = embed_dim
         self.num_layers = num_layers
-        self.gradient_clip_val = gradient_clip_val
+
+        self.use_residual_update = use_residual_update
 
         # Time embedding
         self.time_embedding = TimeEmbedding(embed_dim=embed_dim)
@@ -347,10 +348,12 @@ class JetFlowMatcher(nn.Module):
         
         x = x * mask.unsqueeze(-1)
 
-        update = x - x0  # Calculate the update as the difference from initial state
-        # multiply by mask to be sure
-        update = update * mask.unsqueeze(-1)
-        return update
+        if self.use_residual_update:
+            update = x - x0  # Calculate the update as the difference from initial state
+            update = update * mask.unsqueeze(-1)
+            return update
+        else:
+            return x
 
     def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler'):
         """
@@ -365,7 +368,3 @@ class JetFlowMatcher(nn.Module):
             return x_next
         else:
             raise NotImplementedError(f"Method {method} not implemented")
-
-    def clip_gradients(self):
-        """Clip gradients for training stability"""
-        torch.nn.utils.clip_grad_norm_(self.parameters(), self.gradient_clip_val)
