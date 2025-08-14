@@ -68,7 +68,7 @@ spec:
               
               python3 data.py --num_particles=30 --output_path=${OUTPUT_PATH}
               python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
-              python3 train.py --batch_size=32 --num_epochs=50 --n_samples=50000 --n_layers=3 --num_particles=30 --output_path=${OUTPUT_PATH} | tee -a ${OUTPUT_PATH}/logs.txt
+              python3 train.py --batch_size=32 --num_epochs=50 --n_samples=50000 --n_layers=5 --num_particles=30 --output_path=${OUTPUT_PATH}  --use_residual_update=False | tee -a ${OUTPUT_PATH}/logs.txt
           
           volumeMounts:
             - mountPath: /mnt/data
@@ -76,9 +76,9 @@ spec:
           resources:
             limits:
               nvidia.com/a40: 1
-              memory: "16Gi"
+              memory: "12Gi"
               cpu: "2.4"
             requests:
               nvidia.com/a40: 1
-              memory: "16Gi"
+              memory: "12Gi"
               cpu: "2"

@@ -65,7 +65,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training")
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
-    parser.add_argument("--epoch_frac", type=float, default=0.2, help="Fraction of training dataset to use per epoch")
+    parser.add_argument("--epoch_frac", type=float, default=1.0, help="Fraction of training dataset to use per epoch")
 
     parser.add_argument("--x_1_translation", type=float, default=0.0, help="Translation to apply to x_1 during training")
 
