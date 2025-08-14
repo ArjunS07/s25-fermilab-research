@@ -36,6 +36,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
             max_particles_per_jet=n_particles_per_jet,
             device=device
         )
+        masks = masks.to(device)
         generated_jet_attrs = torch.cat([
             jet_one_hot_enc,
             n_gen_particles.unsqueeze(-1).float()
@@ -46,7 +47,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
             num_particles=n_particles_per_jet,
             num_particle_features=n_features_per_particle,
             clamp_stddevs=clamp_stddevs
-    )
+        )
         x = x.to(device)
 
         x = x * masks.unsqueeze(-1).expand(-1, -1, n_features_per_particle)
@@ -58,35 +59,41 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
             t = times[i].unsqueeze(0).repeat(n_viz_samples).to(device)
             final_field = final_model.forward(x_model_final, t, generated_jet_attrs, masks)
             print(f"{i=}, {times[i]=}, {times[i+1]=}, {final_field.mean()=}, {final_field.std()=}")
+            plt.close()
             plt.clf()
+            plt.figure(figsize=(10, 10))
 
-            final_field_flat = final_field[:, :, :2].flatten(start_dim=0, end_dim=1)[:1000]
+            final_field_flat = final_field[:, :, :2].flatten(start_dim=0, end_dim=1)
             final_field_flat = final_field_flat * (times[i+1] - times[i])
 
             sns.scatterplot(
-                x=X_test_samples[:, :, 0].cpu().numpy().flatten(),
-                y=X_test_samples[:, :, 1].cpu().numpy().flatten(),
+                x=X_test_samples[:, :, 0].detach().cpu().numpy().flatten(),
+                y=X_test_samples[:, :, 1].detach().cpu().numpy().flatten(),
                 label="Test data",
                 alpha=0.75,
                 color=colors[2],
                 s=0.2
             )
             plt.scatter(
-                x_model_final[:, :, 0].flatten()[:1000].cpu().numpy(),
-                x_model_final[:, :, 1].flatten()[:1000].cpu().numpy(),
+                x_model_final[:, :, 0].flatten().detach().cpu().numpy(),
+                x_model_final[:, :, 1].flatten().detach().cpu().numpy(),
                 label="Current data distribution",
                 alpha=0.75,
                 color=colors[3],
                 s=0.5
             )
+
             plt.quiver(
-                x_model_final[:, :, 0].flatten()[:1000].cpu().numpy(),
-                x_model_final[:, :, 1].flatten()[:1000].cpu().numpy(),
-                final_field_flat[:, 0],
-                final_field_flat[:, 1],
+                x_model_final[:, :, 0].flatten().detach().cpu().numpy(),
+                x_model_final[:, :, 1].flatten().detach().cpu().numpy(),
+                final_field_flat.detach().cpu().numpy()[:, 0],
+                final_field_flat.detach().cpu().numpy()[:, 1],
                 label="Final model vector field",
                 alpha=0.75,
-                color=colors[0]
+                color=colors[0],
+                angles='xy',  # interpret vector components in data coordinates
+                scale_units='xy',  # scale arrows in the same units as x/y
+                scale=1           # no automatic rescaling
             )
 
             plt.xlabel(r"$E/c$ ")
@@ -101,9 +108,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
                 plt.ylim(-1, 1)
                 plt.savefig(f"{output_path}/field_vectors_zoomed_{i}.png", bbox_inches='tight', dpi=300)
             
-            print(f"{x_model_final.mean()=}, {x_model_final.std()=}")
-            x_model_final = x_model_final + (final_field * (times[i+1] - times[i]))
-            print(f"{x_model_final.mean()=}, {x_model_final.std()=}")
+            x_model_final = x_model_final.detach() + (final_field.detach() * (times[i+1] - times[i]))
 
             plt.clf()
             plt.close()
@@ -113,62 +118,56 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
 
     # Final status
     sns.scatterplot(
-        x=X_test_samples[:, :, 0].cpu().numpy().flatten(),
-        y=X_test_samples[:, :, 1].cpu().numpy().flatten(),
+        x=X_test_samples[:, :, 0].detach().cpu().numpy().flatten(),
+        y=X_test_samples[:, :, 1].detach().cpu().numpy().flatten(),
         label="Test data",
         alpha=0.75,
         color=colors[2],
         s=0.2
     )
     plt.scatter(
-        x_model_final[:, :, 0].flatten()[:1000].cpu().numpy(),
-        x_model_final[:, :, 1].flatten()[:1000].cpu().numpy(),
+        x_model_final[:, :, 0].flatten().detach().cpu().numpy(),
+        x_model_final[:, :, 1].flatten().detach().cpu().numpy(),
         label="Current data distribution",
         alpha=0.75,
         color=colors[3],
         s=0.5
-    )        
+    )
+    plt.xlabel(r"$E/c$ ")
+    plt.ylabel(r"$p_x$")
+    plt.title(r"$t=%.2f \rightarrow t=%.2f$" % (times[i].item(), times[i+1].item()))
+    plt.legend(loc='upper right', bbox_to_anchor=(1.25, 1))
+    plt.savefig(f"{output_path}/field_vectors_{i+1}.png", bbox_inches='tight', dpi=300)
+    if zoom_in:
+        plt.xlim(-1, 1)
+        plt.ylim(-1, 1)
+        plt.savefig(f"{output_path}/field_vectors_zoomed_{i+1}.png", bbox_inches='tight', dpi=300)
+    
     if save_videos:
-        os.system(f"ffmpeg -r 7 -i {output_path}/field_vectors_zoomed_%01d.png -vcodec mpeg4 -y debugging/movie_zoomed_in.mp4")
-        os.system(f"ffmpeg -r 7 -i {output_path}/field_vectors_%01d.png -vcodec mpeg4 -y debugging/movie_zoomed_out.mp4")
+        os.system(f"ffmpeg -r 7 -i {output_path}/field_vectors_zoomed_%01d.png -vcodec mpeg4 -y  {output_path}/movie_zoomed_in.mp4")
+        os.system(f"ffmpeg -r 7 -i {output_path}/field_vectors_%01d.png -vcodec mpeg4 -y  {output_path}/movie_zoomed_out.mp4")
 
+    fig, axs = plt.subplots(4, figsize=(10, 10))
+    feature_names = [r"$E/c$", r"$p_x$", r"$p_y$", r"$p_z$"]
+    for i in range(4):
+        sns.histplot(
+            x=X_test_samples[:, :, i].detach().cpu().numpy().flatten(),
+            ax=axs[i],
+            label="Test data",
+            alpha=0.75,
+            color=colors[2],
+            bins=100
+        )
+        sns.histplot(
+            x=x_model_final[:, :, i].detach().cpu().numpy().flatten(),
+            ax=axs[i],
+            label="Current data distribution",
+            alpha=0.75,
+            color=colors[3],
+            bins=100
+        )
+        axs[i].set_title(f"{feature_names[i]}")
+        axs[i].legend()
 
-if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    parser = argparse.ArgumentParser(description="Generate vector field visualizations for the final model.")
-    parser.add_argument("--path", type=str, required=True, help="Path to the downloaded output directory.")
-    parser.add_argument("--n_samples", type=int, default=1000, help="Number of samples to visualize.")
-    parser.add_argument("--n_jet_types", type=int, default=3)
-
-    args = parser.parse_args()
-
-    jet_attr_generator = load_model(f"{args.path}/jet_attr_model.pth").to(device)
-
-    n_particles = 150
-    n_features = 4
-
-    scale = open(f"{args.path}/train/scale.txt").read().strip()
-    scale = float(scale)
-
-    with open(f"{args.path}/data/x_test.pkl", "rb") as f:
-        X_test = pickle.load(f)
-
-
-    final_model_info = torch.load(f"{args.path}/train/models/final_model.pth", map_location=device, weights_only=False)
-    final_model = JetFlowMatcher(
-        max_num_jet_types=5, 
-        num_layers=3,
-        hidden_dim=128
-    )
-
-    generate_model_vector_field(
-        final_model=final_model,
-        jet_attr_model=jet_attr_generator,
-        X_test=X_test,
-        scale=scale,
-        n_jet_types=args.n_jet_types,
-        n_particles_per_jet=n_particles,
-        n_features_per_particle=n_features,
-        n_viz_samples=args.n_samples
-    )
+    plt.tight_layout()
+    plt.savefig(f"{output_path}/feature_histograms.png", bbox_inches='tight', dpi=300)
