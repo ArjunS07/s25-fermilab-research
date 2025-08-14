@@ -55,7 +55,7 @@ if __name__ == "__main__":
     # Network hyperparameters
     parser.add_argument("--model_type", type=str, default="Week7EGNN", choices=["LEJetGeneratorFM", "FlowMatchingMLP", "Week7EGNN"], help="Type of model to use")
     parser.add_argument("--use_residual_update", type=bool, default=False, help="Use residual update in model forward pass")
-    parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
+    parser.add_argument("--n_hidden", type=int, default=64, help="Number of hidden units in the network")
     parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
     
     # Training
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     parser.add_argument("--x_1_translation", type=float, default=0.0, help="Translation to apply to x_1 during training")
 
     # Integration
-    parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
+    parser.add_argument("--n_samples", type=int, default=5_000, help="Number of samples to generate during inference")
     parser.add_argument("--integration_steps", type=int, default=16, help="Number of integration steps for ODE solver")
     
     args = parser.parse_args()
@@ -171,35 +171,35 @@ if __name__ == "__main__":
     losses = []
 
     # Annealed cosine learning rate with warmup
-    lr = 5e-3
+    lr = 1e-3
     weight_decay = 1e-2
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     epoch_fraction = args.epoch_frac
     samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
-    warmup_pct = 0.1
-    steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
-    total_steps = args.num_epochs * steps_per_epoch
-    warmup_steps = int(warmup_pct * total_steps)
-    def lr_lambda(current_step):
-        if current_step < warmup_steps:
-            # Linear warm-up
-            return float(current_step) / float(max(1, warmup_steps))
-        else:
-            # Cosine annealing after warm-up
-            progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-            lr = 0.5 * (1.0 + np.cos(np.pi * progress))
-            return max(lr, 1e-6) # Ensure nonzero
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-    current_step = 0
+    
+    # warmup_pct = 0.1
+    # steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
+    # total_steps = args.num_epochs * steps_per_epoch
+    # warmup_steps = int(warmup_pct * total_steps)
+    # def lr_lambda(current_step):
+    #     if current_step < warmup_steps:
+    #         # Linear warm-up
+    #         return float(current_step) / float(max(1, warmup_steps))
+    #     else:
+    #         # Cosine annealing after warm-up
+    #         progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+    #         lr = 0.5 * (1.0 + np.cos(np.pi * progress))
+    #         return max(lr, 1e-6) # Ensure nonzero
+    # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    # current_step = 0
 
     # For OT objective
-    # sigma_min = 1e-4
-    # x_0_coeff = (1 - sigma_min)
+    sigma_min = 1e-4
 
     if args.use_distributed:
         model, optimizer = accelerator.prepare(model, optimizer)
     
-    print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
+    # print(f"Starting training for {args.num_epochs} epochs with {steps_per_epoch} steps per epoch")
     for epoch in range(args.num_epochs):
         epoch_loss = 0
         num_batches = 0
@@ -249,10 +249,10 @@ if __name__ == "__main__":
             t_viewed = t.view(-1, 1, 1)
 
             # The model takes in Cartesian coordinates, and x_t is in Cartesian coordinates
-            x_t = (1 - t_viewed) * x_0 + t_viewed * x_1
+            x_t = (1 - (1-sigma_min)*t_viewed)*x_0 + t_viewed * x_1
             Jacobian_x_t = jacobian_epp_etaphipte(x_t)
 
-            conditional_u_t_cartesian = x_1 - x_0
+            conditional_u_t_cartesian = x_1 - ((1-sigma_min)*x_0)
             conditional_u_t_polar = torch.einsum('...ij, ...j->...i', Jacobian_x_t, conditional_u_t_cartesian)
 
             pred_cartesian = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info, mask=true_masks)
@@ -264,12 +264,15 @@ if __name__ == "__main__":
                 conditional_u_t_polar = conditional_u_t_polar * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
                 pred_polar = pred_polar * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
 
-            loss = (conditional_u_t_polar - pred_polar).square()
+            cartesian_loss = (conditional_u_t_cartesian - pred_cartesian).square()
+            polar_loss = (conditional_u_t_polar - pred_polar).square()
             if true_masks is not None:
-                loss = loss * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-                loss = loss.sum() / true_masks.sum()
+                cartesian_loss = cartesian_loss * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+                polar_loss = polar_loss * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+                loss = (0.5 * cartesian_loss) + (0.5 * polar_loss)
+                loss = loss.sum() / (true_masks.sum() * NUM_PARTICLE_FEATURES)
             else:
-                loss = loss.mean(dim=-1)
+                loss = loss.mean()
 
             if args.use_distributed:
                 accelerator.backward(loss)  # Use accelerator to handle backward pass
@@ -277,16 +280,16 @@ if __name__ == "__main__":
                 loss.backward()
 
             if args.use_distributed:
-                accelerator.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                accelerator.clip_grad_norm_(model.parameters(), max_norm=10.0)
             else:
-                nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
                             
             optimizer.step()
-            scheduler.step()
+            # scheduler.step()
             
             epoch_loss += loss.item()
             num_batches += 1
-            current_step += 1
+            # current_step += 1
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -299,6 +302,11 @@ if __name__ == "__main__":
                 print(f"{x_t.mean()=} {x_t.std()=} {x_t.min()=} {x_t.max()=}")
                 print(f"{x_1.mean()=} {x_1.std()=} {x_1.min()=} {x_1.max()=}")
                 print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
+
+                with torch.no_grad():
+                    zero_input = torch.zeros_like(x_t)
+                    pred_at_zero = model.forward(x=zero_input, t=t, jet_conditions=batch_jet_info, mask=true_masks)
+                    print(f"Model prediction at origin: mean={pred_at_zero.mean():.6f}, std={pred_at_zero.std():.6f}")
             
             del x_1, x_0, t, t_viewed, x_t, conditional_u_t_cartesian, conditional_u_t_polar, pred_cartesian, pred_polar, loss
             if torch.cuda.is_available():
@@ -322,29 +330,14 @@ if __name__ == "__main__":
         torch.save(model.state_dict(), f"{model_output_path}/models/final_model.pth")
     
     if not args.use_distributed or accelerator.is_main_process:
-
-        with torch.no_grad():
-            generate_model_vector_field(
-                out_dir=model_output_path,
-                final_model=model,
-                jet_attr_model=jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device),
-                X_test=X_test,
-                scale=final_scale,
-                n_jet_types=len(args.jet_types),
-                n_particles_per_jet=args.num_particles,
-                n_features_per_particle=NUM_PARTICLE_FEATURES,
-                n_viz_samples=500
-            )
-        
-        # generate_samples(
-        #     model=model,
-        #     device=device,
-        #     root_output_path=args.output_path,
-        #     num_particles=args.num_particles,
-        #     num_particle_features=NUM_PARTICLE_FEATURES,
-        #     final_scale=final_scale,
-        #     integration_steps=args.integration_steps,
-        #     n_samples=args.n_samples,
-        #     batch_size=args.batch_size,
-        #     n_jet_types=len(args.jet_types)
-        # )
+        generate_model_vector_field(
+            out_dir=model_output_path,
+            final_model=model,
+            jet_attr_model=jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device),
+            X_test=X_test,
+            scale=final_scale,
+            n_jet_types=len(args.jet_types),
+            n_particles_per_jet=args.num_particles,
+            n_features_per_particle=NUM_PARTICLE_FEATURES,
+            n_viz_samples=(args.n_samples)
+        )
