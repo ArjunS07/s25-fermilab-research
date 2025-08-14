@@ -337,11 +337,11 @@ class JetFlowMatcher(nn.Module):
         
         # Apply layers
         for i, layer in enumerate(self.layers):
-            print(f"Layer {i}: x mean {x.mean().item():.4f}, std {x.std().item():.4f}")
+            # print(f"Layer {i}: x mean {x.mean().item():.4f}, std {x.std().item():.4f}")
             x, g = layer(x, g0, g, t_emb, mask)
         
         x = x * mask.unsqueeze(-1)
-        print(f"Final: {x.mean().item():.4f}, {x.std().item():.4f}")
+        # print(f"Final: {x.mean().item():.4f}, {x.std().item():.4f}")
 
         if self.use_residual_update:
             update = x - x0  # Calculate the update as the difference from initial state
