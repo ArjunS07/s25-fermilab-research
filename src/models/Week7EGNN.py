@@ -223,7 +223,6 @@ class LorentzEquivariantLayer(nn.Module):
         # Compute message scalings: φ_m^l  
         message_scalings = self.phi_m(messages).squeeze(-1)  # (batch_size, max_particles, max_particles)
         message_scalings = message_scalings * pair_mask
-        # print(f"{message_scalings.mean()=} {message_scalings.std()=} {message_scalings.min()=} {message_scalings.max()=}")
         
         # Cache message aggregation for global update
         scaled_messages = message_scalings.unsqueeze(-1) * messages  # (batch_size, max_particles, max_particles, message_dim)
@@ -244,13 +243,12 @@ class LorentzEquivariantLayer(nn.Module):
         particle_message_normalized = self.beta / N_actual.unsqueeze(-1) * particle_message_sum
         
         # Compute reweighting factors: φ_w^l
-        reweight_input = torch.cat([t_emb.unsqueeze(1).expand(-1, max_particles, -1), 
-                                   particle_message_normalized], dim=-1)
-        reweight_factors = self.phi_w(reweight_input).squeeze(-1)  # (batch_size, max_particles)
-        # print(f"{reweight_factors.mean()=} {reweight_factors.std()=} {reweight_factors.min()=} {reweight_factors.max()=}")
+        # reweight_input = torch.cat([t_emb.unsqueeze(1).expand(-1, max_particles, -1), 
+        #                            particle_message_normalized], dim=-1)
+        # reweight_factors = self.phi_w(reweight_input).squeeze(-1)  # (batch_size, max_particles)
         
         # Apply mask to reweight factors
-        reweight_factors = reweight_factors * mask
+        # reweight_factors = reweight_factors * mask
         
         # Prepare inputs for φ_x^l for all pairs
         g0_exp = g0.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
@@ -279,19 +277,14 @@ class LorentzEquivariantLayer(nn.Module):
         # Sum over j for each i to get displacement for each particle
         displacement_sum = scaled_displacements.sum(dim=2)  # (batch_size, max_particles, 4)
 
-        reweight_term = reweight_factors.unsqueeze(-1) * x  # (batch_size, max_particles, 4)
+        # reweight_term = reweight_factors.unsqueeze(-1) * x  # (batch_size, max_particles, 4)
+        reweight_term = x
         displacement_term = self.gamma * displacement_sum   # (batch_size, max_particles, 4)
-
-        # TODO
-        # displacement_term = torch.clamp(displacement_term, -10.0, 10.0)
         
         x_new = reweight_term + displacement_term
         
         # Apply mask to ensure padded particles remain zero
         x_new = x_new * mask.unsqueeze(-1)
-
-
-        # print(f"{update.mean()=} {update.std()=} {update.min()=} {update.max()=}")
         return x_new, g_new
     
 class JetFlowMatcher(nn.Module):
@@ -343,10 +336,12 @@ class JetFlowMatcher(nn.Module):
         g = g0.clone()
         
         # Apply layers
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
+            print(f"Layer {i}: x mean {x.mean().item():.4f}, std {x.std().item():.4f}")
             x, g = layer(x, g0, g, t_emb, mask)
         
         x = x * mask.unsqueeze(-1)
+        print(f"Final: {x.mean().item():.4f}, {x.std().item():.4f}")
 
         if self.use_residual_update:
             update = x - x0  # Calculate the update as the difference from initial state
@@ -362,8 +357,6 @@ class JetFlowMatcher(nn.Module):
         if method == 'euler':
             batch_size = x_t.shape[0]
             update = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
-            # print(f"ORIGINAL: {x_t.mean()=} {x_t.std()=} {x_t.min()=} {x_t.max()=}")
-            # print(f"FINAL: {update.mean()=} {update.std()=} {update.min()=} {update.max()=}")
             x_next = x_t + update * (t_end - t_start)
             return x_next
         else:
