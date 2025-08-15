@@ -324,31 +324,24 @@ class JetFlowMatcher(nn.Module):
         Returns:
             v_theta: (batch_size, max_particles, 4) velocity field
         """
+    
+        t_emb = self.time_embedding(t) 
+        g0 = self.global_embedding(jet_conditions)  
         
-        # Time embedding
-        t_emb = self.time_embedding(t)  # (batch_size, embed_dim)
-        
-        # Global embedding (g^0)
-        g0 = self.global_embedding(jet_conditions)  # (batch_size, embed_dim)
-        
-        # Initialize
         x0 = x.clone()
         g = g0.clone()
         
-        # Apply layers
         for i, layer in enumerate(self.layers):
-            # print(f"Layer {i}: x mean {x.mean().item():.4f}, std {x.std().item():.4f}")
-            x, g = layer(x, g0, g, t_emb, mask)
-        
-        x = x * mask.unsqueeze(-1)
-        # print(f"Final: {x.mean().item():.4f}, {x.std().item():.4f}")
+            x_new, g = layer(x, g0, g, t_emb, mask)
+            alpha = 0.1 + i * 0.03
+            x = ((1 - alpha) * x) + (alpha * x_new)
+            x = x * mask.unsqueeze(-1)
 
         if self.use_residual_update:
-            update = x - x0  # Calculate the update as the difference from initial state
-            update = update * mask.unsqueeze(-1)
-            return update
+            velocity = x - x0
+            return velocity * mask.unsqueeze(-1)
         else:
-            return x
+            return x * mask.unsqueeze(-1)
 
     def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler'):
         """
