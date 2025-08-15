@@ -304,7 +304,7 @@ if __name__ == "__main__":
                 print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {loss.item():.4f}, LR: {current_lr:.6f}")
 
                 with torch.no_grad():
-                    zero_input = torch.zeros_like(x_t)
+                    zero_input = torch.randn_like(x_t) * 0.01
                     pred_at_zero = model.forward(x=zero_input, t=t, jet_conditions=batch_jet_info, mask=true_masks)
                     print(f"Model prediction at origin: mean={pred_at_zero.mean():.6f}, std={pred_at_zero.std():.6f}")
             
