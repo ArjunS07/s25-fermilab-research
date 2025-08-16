@@ -185,7 +185,6 @@ if __name__ == "__main__":
         X_train_epoch = torch.utils.data.Subset(X_train_particle_transformed, epoch_indices)
         train_jet_info_epoch = train_jet_info[epoch_indices]
 
-        print(torch.sum(train_jet_info_epoch, dim=0))
 
         paired_dataset = PairedDataset(train_jet_info_epoch, X_train_epoch)
         train_loader = DataLoader(
@@ -196,7 +195,7 @@ if __name__ == "__main__":
         )
 
         optimizer.zero_grad()
-        accumulation_steps = 8
+        accumulation_steps = min(8, args.n_train_samples // args.batch_size - 1)
         accumulated_loss = 0
         total_n_accumulations = 0
 
