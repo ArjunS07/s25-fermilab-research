@@ -12,6 +12,9 @@ def gen_initial_distribution(x_1 = None, current_batch_size = None, num_particle
 
     if clamp_stddevs is not None:
         dist = torch.clamp(dist, -clamp_stddevs * std, clamp_stddevs * std)
+    
+    # First column is energy, generate physical particles
+    dist[:, :, 0] = torch.abs(dist[:, :, 0])  # Ensure energy is non-negative
     return dist
 
 def sample_massless_4momentum_clouds(n_clouds, cloud_size):
