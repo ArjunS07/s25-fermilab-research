@@ -60,6 +60,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
     
     # Training
+    parser.add_argument('--prior_dist', type=str, choices=['isotropic_lognorm', 'jet_ref_frame'], default='isotropic_lognorm', help='Distribution to sample initial particles from')
     parser.add_argument("--multi_core", type=bool, default=False, help="Use multiple cores for training")
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training")
@@ -208,7 +209,7 @@ if __name__ == "__main__":
             x_1 = batch_particle_info[:, :, :4]
             x_1 += args.x_1_translation
             true_masks = batch_particle_info[:, :, 4] if args.mask else None
-            x_0 = gen_initial_distribution(x_1=x_1)
+            x_0 = gen_initial_distribution(x_1=x_1, prior_dist=args.prior_dist)
             x_0 = x_0.to(device)
             
             if true_masks is not None:
@@ -299,5 +300,6 @@ if __name__ == "__main__":
         n_jet_types=len(args.jet_types),
         n_particles_per_jet=args.num_particles,
         n_features_per_particle=NUM_PARTICLE_FEATURES,
-        n_viz_samples=(args.n_samples)
+        n_viz_samples=(args.n_samples),
+        initial_dist_method=args.prior_dist,
     )

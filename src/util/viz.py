@@ -17,7 +17,7 @@ from util import jet_attributes
 from util.distributions import gen_initial_distribution
 
 from util.file_management import make_clear_folder
-def plot_hist(X_test_samples, x_model, filename):
+def plot_hist(X_test_samples, x_model, output_path, filename):
     fig, axs = plt.subplots(4, figsize=(10, 10))
     feature_names = [r"$E/c$", r"$p_x$", r"$p_y$", r"$p_z$"]
     for i in range(4):
@@ -44,7 +44,7 @@ def plot_hist(X_test_samples, x_model, filename):
     plt.savefig(f"{output_path}/{filename}.png", bbox_inches='tight', dpi=300)
 
 
-def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, scale, n_jet_types, n_particles_per_jet, n_features_per_particle=4, n_viz_samples=1000, zoom_in=True, save_videos=True, clamp_stddevs=3, integration_steps=16):
+def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, scale, n_jet_types, n_particles_per_jet, initial_dist_method='isotropic_lognorm', n_features_per_particle=4, n_viz_samples=1000, zoom_in=True, save_videos=True, clamp_stddevs=3, integration_steps=16):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     output_path = f"{out_dir}/vf_viz"
     make_clear_folder(output_path)
@@ -79,6 +79,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         x = gen_initial_distribution(
             batch_size=n_viz_samples,
             num_particles=n_particles_per_jet,
+            method=initial_dist_method
         )
         x = x.to(device)
         x_0 = x.clone()
@@ -182,7 +183,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         os.system(f"ffmpeg -r 7 -i {output_path}/field_vectors_zoomed_%01d.png -vcodec mpeg4 -y  {output_path}/movie_zoomed_in.mp4")
         os.system(f"ffmpeg -r 7 -i {output_path}/field_vectors_%01d.png -vcodec mpeg4 -y  {output_path}/movie_zoomed_out.mp4")
 
-    
-    plot_hist(X_test_samples, x_model_final, filename="final_hist")
-    plot_hist(X_test_samples, x_0, filename="initial_hist")
+
+    plot_hist(X_test_samples, x_model_final, output_path=output_path, filename="final_hist")
+    plot_hist(X_test_samples, x_0, output_path=output_path, filename="initial_hist")
     return x_0, x_model_final, masks
