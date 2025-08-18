@@ -142,10 +142,6 @@ class LorentzEquivariantLayer(nn.Module):
         global_input_dim = embed_dim + embed_dim + embed_dim + message_dim  # g^0, g^l, t_emb, aggregated_msg
         self.phi_g = PhiMLP(global_input_dim, [hidden_dim, hidden_dim], embed_dim)
         
-        # Particle reweighting: φ_w^l
-        reweight_input_dim = embed_dim + message_dim  # t_emb, aggregated_msg
-        self.phi_w = PhiMLP(reweight_input_dim, [hidden_dim, hidden_dim], 1, output_activation=nn.LeakyReLU())
-        
         # Displacement scaling: φ_x^l  
         displacement_input_dim = embed_dim + embed_dim + embed_dim + message_dim  # g^0, g^l, t_emb, m_ij
         self.phi_x = PhiMLP(displacement_input_dim, [hidden_dim, hidden_dim], 1, output_activation=nn.Tanh())
@@ -242,14 +238,6 @@ class LorentzEquivariantLayer(nn.Module):
         particle_message_sum = scaled_messages.sum(dim=2)  # (batch_size, max_particles, message_dim)  
         particle_message_normalized = self.beta / N_actual.unsqueeze(-1) * particle_message_sum
         
-        # Compute reweighting factors: φ_w^l
-        # reweight_input = torch.cat([t_emb.unsqueeze(1).expand(-1, max_particles, -1), 
-        #                            particle_message_normalized], dim=-1)
-        # reweight_factors = self.phi_w(reweight_input).squeeze(-1)  # (batch_size, max_particles)
-        
-        # Apply mask to reweight factors
-        # reweight_factors = reweight_factors * mask
-        
         # Prepare inputs for φ_x^l for all pairs
         g0_exp = g0.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
         g_prev_exp = g_prev.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
@@ -277,11 +265,9 @@ class LorentzEquivariantLayer(nn.Module):
         # Sum over j for each i to get displacement for each particle
         displacement_sum = scaled_displacements.sum(dim=2)  # (batch_size, max_particles, 4)
 
-        # reweight_term = reweight_factors.unsqueeze(-1) * x  # (batch_size, max_particles, 4)
-        reweight_term = x
         displacement_term = self.gamma * displacement_sum   # (batch_size, max_particles, 4)
         
-        x_new = reweight_term + displacement_term
+        x_new = x + displacement_term
         
         # Apply mask to ensure padded particles remain zero
         x_new = x_new * mask.unsqueeze(-1)
