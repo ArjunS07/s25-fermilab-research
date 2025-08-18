@@ -228,24 +228,27 @@ if __name__ == "__main__":
             conditional_u_t_cartesian = x_1 - ((1-SIGMA_MIN)*x_0)
             pred_cartesian = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info, mask=true_masks)
 
+            Jacobian_x_t = jacobian_epp_etaphipte(x_t)
+            conditional_u_t_polar = torch.einsum('...ij, ...j->...i', Jacobian_x_t, conditional_u_t_cartesian)
+            pred_polar = torch.einsum('...ij, ...j->...i', Jacobian_x_t, pred_cartesian)
+
             if true_masks is not None:
                 conditional_u_t_cartesian = conditional_u_t_cartesian * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+                conditional_u_t_polar = conditional_u_t_polar * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
 
+                pred_cartesian = pred_cartesian * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+                pred_polar = pred_polar * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+
+            polar_loss = (conditional_u_t_polar - pred_polar).square()
             cartesian_loss = (conditional_u_t_cartesian - pred_cartesian).square()
-            loss = cartesian_loss
+            loss = (0.5 * cartesian_loss) + (0.5 * polar_loss)
+
             if true_masks is not None:
                 loss = cartesian_loss * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
                 loss = loss.sum() / (true_masks.sum() * NUM_PARTICLE_FEATURES)
             else:
                 loss = loss.mean()
 
-            # Jacobian_x_t = jacobian_epp_etaphipte(x_t)
-            # conditional_u_t_polar = torch.einsum('...ij, ...j->...i', Jacobian_x_t, conditional_u_t_cartesian)
-            # result[..., i] = \sum_j Jacobian[..., i, j] * vector[..., j]
-            # pred_polar = torch.einsum('...ij, ...j->...i', Jacobian_x_t, pred_cartesian)
-                # pred_polar = pred_polar * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-            # polar_loss = (conditional_u_t_polar - pred_polar).square()
-                # loss = (0.5 * cartesian_loss) + (0.5 * polar_loss)
 
             loss.backward()
             accumulated_loss += loss.item()
