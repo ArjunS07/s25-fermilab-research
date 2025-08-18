@@ -152,7 +152,7 @@ if __name__ == "__main__":
     losses = []
 
     # Annealed cosine learning rate with warmup
-    lr = 1e-3
+    lr = 5e-4
     weight_decay = 1e-2
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     epoch_fraction = args.epoch_frac
@@ -174,6 +174,7 @@ if __name__ == "__main__":
     #         return max(lr, 1e-6) # Ensure nonzero
     # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     # current_step = 0
+
 
     
     for epoch in range(args.num_epochs):
