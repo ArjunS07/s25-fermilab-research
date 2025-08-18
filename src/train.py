@@ -55,7 +55,7 @@ if __name__ == "__main__":
 
     # Network hyperparameters
     parser.add_argument("--model_type", type=str, default="Week7EGNN", choices=["LEJetGeneratorFM", "FlowMatchingMLP", "Week7EGNN"], help="Type of model to use")
-    parser.add_argument("--use_residual_update", type=bool, default=False, help="Use residual update in model forward pass")
+    parser.add_argument("--use_residual_update", type=bool, default=True, help="Use residual update in model forward pass")
     parser.add_argument("--n_hidden", type=int, default=64, help="Number of hidden units in the network")
     parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
     
@@ -135,17 +135,6 @@ if __name__ == "__main__":
     make_clear_folder(f"{model_output_path}/models")
     torch.save(model.state_dict(), f"{model_output_path}/models/initial_model.pth")
     train_jet_info = X_train[:][1].to(device)
-    encoded_jet_types = jet_attributes.one_hot_enc_jet_type(train_jet_info[:, 4].long()).to(device)
-    if args.model_type == "Week7EGNN":
-        train_jet_n_particles = train_jet_info[:, 3]
-        train_jet_pt_mass = train_jet_info[:, 1:3]
-        # Model will leave pt and mass as scalars
-        train_jet_info = torch.cat([
-            encoded_jet_types, train_jet_n_particles.unsqueeze(-1)
-        ], dim=-1).to(device)
-    else:
-        jet_info_cropped = train_jet_info[:, :4]  # Keep only the first 4 features (eta, p_t, mass, num_particles)
-        train_jet_info = torch.cat([encoded_jet_types, jet_info_cropped], dim=-1).to(device)
     if args.num_particles < MAX_N_PARTICLES:
         # clamp the number of particles to args.num_particles
         train_jet_info[:, 3] = train_jet_info[:, 3].clamp(max=args.num_particles)
@@ -204,12 +193,25 @@ if __name__ == "__main__":
         for i, (batch_jet_info, batch_particle_info) in enumerate(train_loader):
 
             batch_jet_info = batch_jet_info.to(device)
+            print(batch_jet_info.shape)
+            breakpoint()
             batch_particle_info = batch_particle_info.to(device)
+
+            if args.model_type == "Week7EGNN":
+                batch_jet_n_particles = batch_jet_info[:, 3]
+                batch_jet_pt_mass = batch_jet_info[:, 1:3]
+                encoded_jet_types = jet_attributes.one_hot_enc_jet_type(batch_jet_info[:, 4].long()).to(device)
+                batch_jet_info_cropped = torch.cat([
+                    encoded_jet_types, batch_jet_n_particles.unsqueeze(-1)
+                ], dim=-1).to(device)
 
             x_1 = batch_particle_info[:, :, :4]
             x_1 += args.x_1_translation
             true_masks = batch_particle_info[:, :, 4] if args.mask else None
-            x_0 = gen_initial_distribution(x_1=x_1, prior_dist=args.prior_dist)
+            if args.prior_dist == 'jet_ref_frame':
+                x_0 = gen_initial_distribution(x_1=x_1, prior_dist=args.prior_dist, jet_features=batch_jet_info)
+            else:
+                x_0 = gen_initial_distribution(x_1=x_1, prior_dist=args.prior_dist)
             x_0 = x_0.to(device)
             
             if true_masks is not None:
@@ -228,7 +230,7 @@ if __name__ == "__main__":
             # The model takes in Cartesian coordinates, and x_t is in Cartesian coordinates
             x_t = (1 - (1-SIGMA_MIN)*t_viewed)*x_0 + t_viewed * x_1
             conditional_u_t_cartesian = x_1 - ((1-SIGMA_MIN)*x_0)
-            pred_cartesian = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info, mask=true_masks)
+            pred_cartesian = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
 
             Jacobian_x_t = jacobian_epp_etaphipte(x_t)
             conditional_u_t_polar = torch.einsum('...ij, ...j->...i', Jacobian_x_t, conditional_u_t_cartesian)
@@ -276,7 +278,7 @@ if __name__ == "__main__":
                     print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {(epoch_loss / total_n_accumulations):.4f}")
                     with torch.no_grad():
                         zero_input = torch.randn_like(x_t) * 0.01
-                        pred_at_zero = model.forward(x=zero_input, t=t, jet_conditions=batch_jet_info, mask=true_masks)
+                        pred_at_zero = model.forward(x=zero_input, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
                         print(f"Model prediction around origin: mean={pred_at_zero.mean():.6f}, std={pred_at_zero.std():.6f}")
                 
             

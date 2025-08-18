@@ -22,10 +22,10 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         # sample pt_rel log-normally
         pt_rel = torch.exp(torch.randn(batch_size, num_particles))
 
-        # jet features need to be in the order pt, eta, mass
-        jet_eta = jet_features[:, 1].unsqueeze(1)
+        # jet features are ["eta", "pt", "mass", "num_particles", "type"],
+        jet_eta = jet_features[:, 0].unsqueeze(1)
         jet_phi = (2 * torch.pi) * torch.rand(batch_size).unsqueeze(1)
-        jet_pt = jet_features[:, 0].unsqueeze(1)
+        jet_pt = jet_features[:, 1].unsqueeze(1)
         jet_mass = jet_features[:, 2].unsqueeze(1)
 
         relEtaPhiPt = torch.stack([eta_rel, phi_rel, pt_rel], dim=2)
