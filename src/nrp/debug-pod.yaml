@@ -43,6 +43,7 @@ spec:
         
         
         echo "Run: kubectl port-forward as-jet-debug-pod 8888:8888"
+        apt update -y && apt install ffmpeg -y
         
         # Start Jupyter
         cd /mnt/data/src
