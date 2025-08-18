@@ -1,0 +1,75 @@
+%----------------------------------------------------------------------------------------
+%    PACKAGES AND THEMES
+%----------------------------------------------------------------------------------------
+\documentclass[handout, aspectratio=169,xcolor=dvipsnames]{beamer}
+\makeatletter
+\def\input@path{{theme/}}
+\makeatother
+\usetheme{CleanEasy}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+% \usepackage[brazil]{babel}
+\usepackage{fix-cm}
+\usepackage{amsmath}
+\usepackage{mathtools}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{graphicx} % Allows including images
+\usepackage{booktabs} % Allows the use of \toprule, \midrule and \bottomrule in tables
+\usepackage{tikz}
+\usetikzlibrary{positioning, shapes, arrows, calc, decorations.pathreplacing, arrows.meta, backgrounds, patterns, overlay-beamer-styles}
+\usepackage{etoolbox}
+\usepackage{animate}
+\usepackage{multimedia}
+\usepackage{media9}
+
+\usepackage{subfiles}
+\usepackage[normalem]{ulem}
+\usepackage{cancel}
+\usepackage{xmpmulti}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\by}{\mathbf{y}}
+\newcommand{\pd}{p_\text{data}}
+\newcommand{\pt}{p_\theta}
+\newcommand{\nbx}{\nabla_{\bx}}
+
+\newcommand{\btx}{\mathbf{\tilde{x}}}
+\newcommand{\qs}{q_{\sigma}}
+\newcommand{\nbtx}{\nabla_{\btx}}
+
+%----------------------------------------------------------------------------------------
+%    LAYOUT CONFIGURATION
+%----------------------------------------------------------------------------------------
+\input{configs/configs}
+%----------------------------------------------------------------------------------------
+
+% References from references.bib
+
+\usepackage[backend=bibtex,sorting=none, style=authoryear]{biblatex}
+\addbibresource{references.bib}
+
+
+\begin{document}
+\section{Week 9 updates}
+
+\begin{frame}{Promising updates}
+    \begin{itemize}
+        \item Sampling from a physically-motivated prior results in far better performance
+        \item Residual connections in the moodel result in better performance across layers
+        \item 
+    \end{itemize}
+\end{frame}
+\begin{frame}
+    \begin{itemize}
+        \item Added RK-2 solver
+    \end{itemize}
+\end{frame}
+\begin{frame}{Updates on previous week}
+    \begin{itemize}
+        \item Polar loss did not help
+    \end{itemize}
+\end{frame}
+
+\end{document}
