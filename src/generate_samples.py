@@ -38,11 +38,8 @@ def generate_samples(
         for start_idx in range(0, n_samples, batch_size):
             current_batch_size = min(batch_size, n_samples - start_idx)
             x = gen_initial_distribution(
-                current_batch_size=current_batch_size,
+                batch_size=current_batch_size,
                 num_particles=num_particles,
-                num_particle_features=num_particle_features,
-                # clamp within stddevs of mean
-                clamp_stddevs=3
                 )
             x = x.to(device)
             

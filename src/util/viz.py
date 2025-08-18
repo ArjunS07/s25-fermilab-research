@@ -77,10 +77,8 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         print("generated jet attributes shape:", generated_jet_attrs.shape)
 
         x = gen_initial_distribution(
-            current_batch_size=n_viz_samples,
+            batch_size=n_viz_samples,
             num_particles=n_particles_per_jet,
-            num_particle_features=n_features_per_particle,
-            clamp_stddevs=clamp_stddevs
         )
         x = x.to(device)
         x_0 = x.clone()
