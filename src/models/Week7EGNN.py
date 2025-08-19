@@ -319,7 +319,7 @@ class JetFlowMatcher(nn.Module):
         
         for i, layer in enumerate(self.layers):
             x_new, g = layer(x, g0, g, t_emb, mask)
-            alpha = 0.1 + i * 0.03
+            alpha = 0.5 + i * 0.03
             x = ((1 - alpha) * x) + (alpha * x_new)
             x = x * mask.unsqueeze(-1)
 
