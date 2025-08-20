@@ -59,7 +59,6 @@ if __name__ == "__main__":
     parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
     
     # Training
-    parser.add_argument('--prior_dist', type=str, choices=['isotropic_lognorm', 'jet_ref_frame'], default='isotropic_lognorm', help='Distribution to sample initial particles from')
     parser.add_argument('--cfg_null_dropout_rate', type=float, default=0.2, help='Probability of dropping out jet information and using null vector')
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
@@ -175,10 +174,7 @@ if __name__ == "__main__":
             x_1 = batch_particle_info[:, :, :4]
             x_1 += args.x_1_translation
             true_masks = batch_particle_info[:, :, 4] if args.mask else None
-            if args.prior_dist == 'jet_ref_frame':
-                x_0 = gen_initial_distribution(x_1=x_1, prior_dist=args.prior_dist, jet_features=batch_jet_info)
-            else:
-                x_0 = gen_initial_distribution(x_1=x_1, prior_dist=args.prior_dist)
+            x_0 = gen_initial_distribution(x_1=x_1)
             x_0 = x_0.to(device)
             
             if true_masks is not None:
@@ -196,6 +192,7 @@ if __name__ == "__main__":
 
             # The model takes in Cartesian coordinates, and x_t is in Cartesian coordinates
             x_t = (1 - (1-SIGMA_MIN)*t_viewed)*x_0 + t_viewed * x_1
+            x_t = x_t.to(device)
             conditional_u_t_cartesian = x_1 - ((1-SIGMA_MIN)*x_0)
             pred_cartesian = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
 
@@ -276,7 +273,6 @@ if __name__ == "__main__":
             n_particles_per_jet=args.num_particles,
             n_features_per_particle=NUM_PARTICLE_FEATURES,
             n_viz_samples=args.n_viz_samples,
-            initial_dist_method=args.prior_dist,
             integration_steps=args.integration_steps,
             use_cfg=True,
             cfg_guidance_weight=1
@@ -291,7 +287,6 @@ if __name__ == "__main__":
             n_particles_per_jet=args.num_particles,
             n_features_per_particle=NUM_PARTICLE_FEATURES,
             n_viz_samples=args.n_viz_samples,
-            initial_dist_method=args.prior_dist,
             integration_steps=args.integration_steps,
             use_cfg=False,
         )
