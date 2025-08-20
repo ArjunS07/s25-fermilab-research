@@ -295,19 +295,22 @@ if __name__ == "__main__":
 
     jet_attr_model_loaded = jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device)
 
-    generate_model_vector_field(
-        out_dir=model_output_path,
-        final_model=model,
-        jet_attr_model=jet_attr_model_loaded,
-        X_test=X_test,
-        scale=final_scale,
-        n_jet_types=len(args.jet_types),
-        n_particles_per_jet=args.num_particles,
-        n_features_per_particle=NUM_PARTICLE_FEATURES,
-        n_viz_samples=args.n_viz_samples,
-        initial_dist_method=args.prior_dist,
-        integration_steps=args.integration_steps
-    )
+    try:
+        generate_model_vector_field(
+            out_dir=model_output_path,
+            final_model=model,
+            jet_attr_model=jet_attr_model_loaded,
+            X_test=X_test,
+            scale=final_scale,
+            n_jet_types=len(args.jet_types),
+            n_particles_per_jet=args.num_particles,
+            n_features_per_particle=NUM_PARTICLE_FEATURES,
+            n_viz_samples=args.n_viz_samples,
+            initial_dist_method=args.prior_dist,
+            integration_steps=args.integration_steps
+        )
+    except Exception as e:
+        print(f"Error occurred while generating model vector field: {e}")
 
     samples = generate_samples(
         model=model,
