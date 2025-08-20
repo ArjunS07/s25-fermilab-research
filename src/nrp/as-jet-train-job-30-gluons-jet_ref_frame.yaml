@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-job-30-gluons
+  name: as-jet-train-job-30-gluons-jet-ref-frame
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -68,7 +68,7 @@ spec:
               
               python3 data.py --jet_types g --num_particles=30 --output_path=${OUTPUT_PATH}
               python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
-              python3 train.py --batch_size=32 --num_epochs=200 --n_samples=50000 --n_layers=5 --jet_types g --num_particles=30 --output_path=${OUTPUT_PATH}  --use_residual --prior_dist='jet_ref_frame' | tee -a ${OUTPUT_PATH}/logs.txt
+              python3 train.py --batch_size=32 --num_epochs=200 --n_samples=50000 --n_layers=5 --jet_types g --num_particles=30 --output_path=${OUTPUT_PATH}  --prior_dist='jet_ref_frame' | tee -a ${OUTPUT_PATH}/logs.txt
           volumeMounts:
             - mountPath: /mnt/data
               name: as-train-pvc
