@@ -1,3 +1,4 @@
+import pickle
 import torch
 
 from jetnet.utils import EtaPhiPtE_to_relEtaPhiPt, cartesian_to_EtaPhiPtE
@@ -67,7 +68,13 @@ def run_save_metrics(X_test, gen_samples, jet_types, output_path):
         except Exception as e:
             print(f"Error occurred while computing fpnd for {jet_type}: {e}")
 
+
     with open(f"{output_path}/metrics.csv", "w") as f:
         f.write("Metric,Value\n")
         for key, value in eval_info.items():
             f.write(f"{key},{value}\n")
+    
+    with open(f"{output_path}/eval_info.pkl", "wb") as f:
+        pickle.dump(eval_info, f)
+    print(f"Metrics saved to {output_path}/metrics.csv and {output_path}/eval_info.pkl")
+    return eval_info
