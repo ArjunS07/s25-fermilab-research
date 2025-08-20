@@ -292,11 +292,13 @@ if __name__ == "__main__":
             f.write(f"{epoch},{loss}\n")
 
     torch.save(model.state_dict(), f"{model_output_path}/models/final_model.pth")
-    
+
+    jet_attr_model_loaded = jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device)
+
     generate_model_vector_field(
         out_dir=model_output_path,
         final_model=model,
-        jet_attr_model=jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device),
+        jet_attr_model=jet_attr_model_loaded,
         X_test=X_test,
         scale=final_scale,
         n_jet_types=len(args.jet_types),
@@ -309,6 +311,7 @@ if __name__ == "__main__":
 
     samples = generate_samples(
         model=model,
+        jet_attr_model=jet_attr_model_loaded,
         root_output_path=model_output_path,
         num_particles=args.num_particles,
         final_scale=final_scale,
@@ -322,6 +325,5 @@ if __name__ == "__main__":
         X_test=X_test,
         jet_types=args.jet_types,
         gen_samples=samples,
-        scale=final_scale,
         output_path=model_output_path
     )

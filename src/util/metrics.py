@@ -18,8 +18,8 @@ def __x_test_to_abs(X_test):
 
     return torch.stack([eta, phi, pt, p0], dim=-1)
 
-def run_save_metrics(X_test, gen_samples, scale, jet_types, output_path):
-    gen_polar_abs = cartesian_to_EtaPhiPtE(scale * gen_samples)
+def run_save_metrics(X_test, gen_samples, jet_types, output_path):
+    gen_polar_abs = cartesian_to_EtaPhiPtE(gen_samples)
     gen_polar_abs[:, :, 1] += torch.pi
 
     test_polar_abs = __x_test_to_abs(X_test=X_test)
@@ -31,11 +31,10 @@ def run_save_metrics(X_test, gen_samples, scale, jet_types, output_path):
         real_jets=test_polar_rel[:, :, :3],
         gen_jets=gen_polar_rel[:, :, :3]
     )
-    eval_info["fpd"] = jetnet_eval.fpd(
-        real_features=test_polar_rel.reshape((-1, 4)),
-        gen_features=gen_polar_rel.reshape((-1, 4)),
-        seed=42
-    )
+
+    test_polar_rel = test_polar_rel[:gen_polar_rel.shape[0]]
+    assert test_polar_rel.shape == gen_polar_rel.shape
+
     eval_info["w1efp"] = jetnet_eval.w1efp(
         jets1=gen_polar_rel,
         jets2=test_polar_rel,
@@ -49,10 +48,19 @@ def run_save_metrics(X_test, gen_samples, scale, jet_types, output_path):
         jets2=test_polar_rel,
     )
 
+    try:
+        eval_info["fpd"] = jetnet_eval.fpd(
+            real_features=test_polar_rel.reshape((-1, 4)),
+            gen_features=gen_polar_rel.reshape((-1, 4)),
+            seed=42
+        )
+    except Exception as e:
+        print(f"Error occurred while computing fpd: {e}")
+
     for jet_type in jet_types:
         try:
             eval_info[f"fpnd_{jet_type}"] = jetnet_eval.fpnd(
-                jets=gen_polar_rel[:, :, :3],
+                jets=gen_polar_rel,
                 jet_type=jet_type,
                 use_tqdm=False
             )

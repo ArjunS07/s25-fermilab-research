@@ -329,7 +329,7 @@ class JetFlowMatcher(nn.Module):
         else:
             return x * mask.unsqueeze(-1)
 
-    def step(self, x_t, jet_conditions, mask, t_start, t_end, method='RK2'):
+    def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler'):
         """
         Calculate the probability density at a particular time step
         """
@@ -339,9 +339,9 @@ class JetFlowMatcher(nn.Module):
             x_next = x_t + update * (t_end - t_start)
             return x_next
         elif method == 'RK2':
-            start_vel = self.forward(x_t=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
+            start_vel = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
             midpoint_x = x_t + (start_vel * (t_end - t_start) / 2)
-            midpoint_vel = self.forward(x_t=midpoint_x, t=t_start + (t_end - t_start) / 2, jet_conditions=jet_conditions, mask=mask)
+            midpoint_vel = self.forward(x=midpoint_x, t=t_start + (t_end - t_start) / 2, jet_conditions=jet_conditions, mask=mask)
             x_next = x_t + (t_end - t_start) * midpoint_vel
             return x_next
         else:
