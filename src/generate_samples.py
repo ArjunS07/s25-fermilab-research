@@ -5,14 +5,13 @@ import matplotlib.pyplot as plt
 
 from util import jet_attributes
 from util.file_management import make_clear_folder
-from jet_attr_model import get_model_pth_path
-from models.NewLEFM import LEJetGeneratorFM
 from util.distributions import gen_initial_distribution
 
 features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 
 def generate_samples(
         model,
+        jet_attr_model,
         device,
         root_output_path,
         num_particles,
@@ -22,8 +21,7 @@ def generate_samples(
         batch_size,
         n_jet_types=3,
 ):
-    jet_attr_path = get_model_pth_path(root_output_path)
-    jet_attr_generator = jet_attributes.load_model(model_path=jet_attr_path).to(device)
+    
 
     # make folder
     make_clear_folder(f"{root_output_path}/samples")
@@ -32,7 +30,7 @@ def generate_samples(
 
     with torch.no_grad():
         model.eval()
-        jet_attr_generator.eval()
+        jet_attr_model.eval()
         
         times = torch.linspace(0, 1, integration_steps + 1).to(device)
 
@@ -44,7 +42,7 @@ def generate_samples(
                 )
             x = x.to(device)
             
-            generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_generator, device, n_jet_types=n_jet_types, num_jets=x.shape[0])
+            generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_model, device, n_jet_types=n_jet_types, num_jets=x.shape[0])
             jet_one_hot_enc = generated_jet_attrs[:, :5].to(device)
             n_particles = generated_jet_attrs[:, -1].long().to(device)
 
@@ -59,6 +57,13 @@ def generate_samples(
             ], dim=-1)
 
             for i in range(integration_steps):
+                new_x = model.step(
+                    x_t=x,
+                    jet_conditions=generated_jet_attrs,
+                    mask=masks,
+                    t_start=times[i],
+                    t_end=times[i + 1]
+                )
                 new_x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1])
                 x = new_x
                 fig, axs = plt.subplots(1, 4, figsize=(20, 10))
@@ -89,39 +94,3 @@ def generate_samples(
     return torch.cat(all_samples, dim=0)
 
 
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate samples using the trained model")
-    parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
-    parser.add_argument("--integration_steps", type=int, default=16, help="Number of integration steps for ODE solver")
-
-    parser.add_argument("--out_dir", type=str, default="out", help="Output directory to save generated samples")
-    parser.add_argument("--num_particles", type=int, default=150, help="Number of particles in each jet")
-    parser.add_argument("--num_particle_features", type=int, default=4, help="Number of features per particle")
-    parser.add_argument("--final_scale", type=float, default=42.0, help="Final scale factor for the generated samples")
-
-    parser.add_argument("--batch_size", type=int, default=256, help="Batch size for generating samples")
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to run the model on")
-    parser.add_argument("--model_path", type=str, required=True, help="Path to the trained model checkpoint")
-
-    args = parser.parse_args()
-    model_info = torch.load(args.model_path, map_location=args.device)
-    n_layers = 1 + int(list(model_info.keys())[-71].split("layers.")[-1].split(".")[0])
-    model = LEJetGeneratorFM(n_layers=n_layers).to(args.device)
-    model.load_state_dict(model_info)  # Load the model state dictionary
-
-    model.to(args.device)
-    model.eval()
-
-    generate_samples(
-        model=model,
-        device=args.device,
-        out_dir=args.out_dir,
-        num_particles=args.num_particles,
-        num_particle_features=args.num_particle_features,
-        final_scale=args.final_scale,
-        integration_steps=args.integration_steps,
-        n_samples=args.n_samples,
-        batch_size=args.batch_size
-    )
-    print(f"Samples generated and saved to {args.out_dir}/gen/samples_cartesian.pt")
