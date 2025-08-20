@@ -16,7 +16,6 @@ def generate_samples(
         device,
         root_output_path,
         num_particles,
-        num_particle_features,
         final_scale,
         integration_steps,
         n_samples,
@@ -28,6 +27,8 @@ def generate_samples(
 
     # make folder
     make_clear_folder(f"{root_output_path}/samples")
+
+    all_samples = []
 
     with torch.no_grad():
         model.eval()
@@ -81,10 +82,12 @@ def generate_samples(
             if start_idx % (batch_size * 10) == 0:
                 print(f"Generated {start_idx + batch_size} samples so far")
             
-            del x, generated_jet_attrs
+            all_samples.append(final_scale * x.cpu())
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            
+
+    return torch.cat(all_samples, dim=0)
+
 
 
 if __name__ == "__main__":

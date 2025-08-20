@@ -18,6 +18,8 @@ from util.distributions import gen_initial_distribution
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian, jacobian_epp_etaphipte
 from util.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
+from util.metrics import run_save_metrics
+from generate_samples import generate_samples
 from data import data_args, get_data_path
 
 RANDOM_SEED = 42
@@ -55,8 +57,7 @@ if __name__ == "__main__":
 
     # Network hyperparameters
     parser.add_argument("--model_type", type=str, default="Week7EGNN", choices=["LEJetGeneratorFM", "FlowMatchingMLP", "Week7EGNN"], help="Type of model to use")
-    parser.add_argument("--use_residual_update", type=bool, default=True, help="Use residual update in model forward pass")
-    parser.add_argument("--n_hidden", type=int, default=64, help="Number of hidden units in the network")
+    parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
     parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
     
     # Training
@@ -69,7 +70,8 @@ if __name__ == "__main__":
     parser.add_argument("--x_1_translation", type=float, default=0.0, help="Translation to apply to x_1 during training")
 
     # Integration
-    parser.add_argument("--n_samples", type=int, default=5_000, help="Number of samples to generate during inference")
+    parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
+    parser.add_argument("--n_viz_samples", type=int, default=1000, help="Number of samples to generate during inference")
     parser.add_argument("--integration_steps", type=int, default=16, help="Number of integration steps for ODE solver")
 
     args = parser.parse_args()
@@ -114,8 +116,7 @@ if __name__ == "__main__":
             max_particles=args.num_particles,
             num_layers=args.n_layers,
             hidden_dim=args.n_hidden,
-            use_residual_update=args.use_residual_update,
-        ).to(device)
+            ).to(device)
     elif args.model_type == "LEJetGeneratorFM":
         model: LEJetGeneratorFM = LEJetGeneratorFM(
             n_layers=args.n_layers,
@@ -301,6 +302,26 @@ if __name__ == "__main__":
         n_jet_types=len(args.jet_types),
         n_particles_per_jet=args.num_particles,
         n_features_per_particle=NUM_PARTICLE_FEATURES,
-        n_viz_samples=(args.n_samples),
+        n_viz_samples=args.n_viz_samples,
         initial_dist_method=args.prior_dist,
+        integration_steps=args.integration_steps
+    )
+
+    samples = generate_samples(
+        model=model,
+        root_output_path=model_output_path,
+        num_particles=args.num_particles,
+        final_scale=final_scale,
+        integration_steps=args.integration_steps,
+        n_samples=args.n_samples,
+        n_jet_types=len(args.jet_types),
+        device=device,
+        batch_size=args.batch_size,
+    )
+    run_save_metrics(
+        X_test=X_test,
+        jet_types=args.jet_types,
+        gen_samples=samples,
+        scale=final_scale,
+        output_path=model_output_path
     )
