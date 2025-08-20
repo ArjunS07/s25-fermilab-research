@@ -19,6 +19,7 @@ from util.coordinates import transform_rel_particle_coordinates_to_cartesian, ja
 from util.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
 from util.metrics import run_save_metrics
+from util.cfg import null_vector
 from generate_samples import generate_samples
 from data import data_args, get_data_path
 
@@ -30,14 +31,21 @@ TRAIN_SPLIT = 0.7
 SIGMA_MIN = 1e-4
 
 class PairedDataset(torch.utils.data.Dataset):
-    def __init__(self, jet_info, particle_data):
+    def __init__(self, jet_info, particle_data, n_jet_types=5, jet_info_drop_prob=0.2):
         self.jet_info = jet_info
         self.particle_data = particle_data
-    
+        self.n_jet_types = n_jet_types
+        self.jet_info_drop_prob = jet_info_drop_prob
+
     def __len__(self):
         return len(self.particle_data)
     
+    def __null_jet_vector(self):
+        return null_vector(self.n_jet_types)
+
     def __getitem__(self, idx):
+        if random.random() < self.jet_info_drop_prob:
+            return self.__null_jet_vector(), self.particle_data[idx]
         return self.jet_info[idx], self.particle_data[idx]
 
 if __name__ == "__main__":
@@ -62,9 +70,10 @@ if __name__ == "__main__":
     
     # Training
     parser.add_argument('--prior_dist', type=str, choices=['isotropic_lognorm', 'jet_ref_frame'], default='isotropic_lognorm', help='Distribution to sample initial particles from')
-    parser.add_argument("--multi_core", type=bool, default=False, help="Use multiple cores for training")
+    parser.add_argument('--cfg_null_dropout_rate', type=float, default=0.2, help='Probability of dropping out jet information and using null vector')
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
-    parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
+    parser.add_argument("--target_batch_size", type=int, default=2048, help="Virtual batch size for accumulation of gradients for backprop")
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
     parser.add_argument("--epoch_frac", type=float, default=1.0, help="Fraction of training dataset to use per epoch")
     parser.add_argument("--x_1_translation", type=float, default=0.0, help="Translation to apply to x_1 during training")
@@ -143,29 +152,11 @@ if __name__ == "__main__":
     losses = []
 
     # Annealed cosine learning rate with warmup
-    lr = 5e-4
-    weight_decay = 1e-2
+    lr = 1e-4
+    weight_decay = 5e-3
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     epoch_fraction = args.epoch_frac
     samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
-
-    
-    # warmup_pct = 0.1
-    # steps_per_epoch = (samples_per_epoch + args.batch_size - 1) // args.batch_size  # Ceiling division
-    # total_steps = args.num_epochs * steps_per_epoch
-    # warmup_steps = int(warmup_pct * total_steps)
-    # def lr_lambda(current_step):
-    #     if current_step < warmup_steps:
-    #         # Linear warm-up
-    #         return float(current_step) / float(max(1, warmup_steps))
-    #     else:
-    #         # Cosine annealing after warm-up
-    #         progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-    #         lr = 0.5 * (1.0 + np.cos(np.pi * progress))
-    #         return max(lr, 1e-6) # Ensure nonzero
-    # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-    # current_step = 0
-
 
     
     for epoch in range(args.num_epochs):
@@ -177,8 +168,7 @@ if __name__ == "__main__":
         X_train_epoch = torch.utils.data.Subset(X_train_particle_transformed, epoch_indices)
         train_jet_info_epoch = train_jet_info[epoch_indices]
 
-
-        paired_dataset = PairedDataset(train_jet_info_epoch, X_train_epoch)
+        paired_dataset = PairedDataset(train_jet_info_epoch, X_train_epoch, n_jet_types=len(args.jet_types), jet_info_drop_prob=args.cfg_null_dropout_rate)
         train_loader = DataLoader(
             paired_dataset,
             batch_size=args.batch_size,
@@ -187,7 +177,8 @@ if __name__ == "__main__":
         )
 
         optimizer.zero_grad()
-        accumulation_steps = min(8, args.n_train_samples // args.batch_size - 1)
+        # Guard for local testing
+        accumulation_steps = min(args.target_batch_size // args.batch_size, args.n_train_samples // args.batch_size - 1)
         accumulated_loss = 0
         total_n_accumulations = 0
 
@@ -311,6 +302,8 @@ if __name__ == "__main__":
         )
     except Exception as e:
         print(f"Error occurred while generating model vector field: {e}")
+        with open(f"{model_output_path}/error_log.txt", "a") as f:
+            f.write(f"Error occurred while generating model vector field: {e}\n")
 
     samples = generate_samples(
         model=model,

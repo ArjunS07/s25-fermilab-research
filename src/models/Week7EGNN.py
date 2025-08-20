@@ -4,8 +4,7 @@ import numpy as np
 
 
 from util.minkowski_utils import normsq4, dotsq4
-
-from util.jet_attributes import load_model, one_hot_enc_jet_type, generate_jets, generate_masks
+from util.cfg import null_vector_like
 
 def psi(p):
     ''' `\psi(p) = Sgn(p) \cdot \log(|p| + 1)` '''
@@ -269,7 +268,6 @@ class LorentzEquivariantLayer(nn.Module):
         
         x_new = x + displacement_term
         
-        # Apply mask to ensure padded particles remain zero
         x_new = x_new * mask.unsqueeze(-1)
         return x_new, g_new
     
@@ -283,14 +281,8 @@ class JetFlowMatcher(nn.Module):
         self.num_layers = num_layers
 
         self.use_residual_update = use_residual_update
-
-        # Time embedding
-        self.time_embedding = TimeEmbedding(embed_dim=embed_dim)
-        
-        # Global embedding  
+        self.time_embedding = TimeEmbedding(embed_dim=embed_dim)        
         self.global_embedding = GlobalEmbedding(max_num_jet_types, max_particles, embed_dim)
-        
-        # Stack of Lorentz-equivariant layers
         self.layers = nn.ModuleList([
             LorentzEquivariantLayer(embed_dim, message_dim, hidden_dim) 
             for _ in range(num_layers)
@@ -329,20 +321,48 @@ class JetFlowMatcher(nn.Module):
         else:
             return x * mask.unsqueeze(-1)
 
-    def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler'):
+    def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler', use_cfg=False, guidance_weight=2.0):
         """
         Calculate the probability density at a particular time step
         """
         batch_size = x_t.shape[0]
+        if use_cfg:
+            null_jet_conditions = null_vector_like(jet_conditions)
+
         if method == 'euler':
-            update = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
-            x_next = x_t + update * (t_end - t_start)
+            vel = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
+            if use_cfg:
+                unconditional_vel = self.forward(
+                    x=x_t,
+                    t=t_start.unsqueeze(0).repeat(batch_size),
+                    jet_conditions=null_jet_conditions,
+                    mask=mask
+                )
+                guided_vel = unconditional_vel + guidance_weight * (vel - unconditional_vel)
+                vel = guided_vel
+            x_next = x_t + vel * (t_end - t_start)
             return x_next
         elif method == 'RK2':
-            start_vel = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
-            midpoint_x = x_t + (start_vel * (t_end - t_start) / 2)
-            midpoint_vel = self.forward(x=midpoint_x, t=t_start + (t_end - t_start) / 2, jet_conditions=jet_conditions, mask=mask)
-            x_next = x_t + (t_end - t_start) * midpoint_vel
-            return x_next
+            dt = t_end - t_start
+            t_mid = t_start + dt / 2
+            
+            # Compute guided velocity once at start
+            start_vel = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), 
+                                jet_conditions=jet_conditions, mask=mask)
+            if use_cfg:
+                unconditional_vel = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size),
+                                            jet_conditions=null_jet_conditions, mask=mask)
+                start_vel = unconditional_vel + guidance_weight * (start_vel - unconditional_vel)
+            
+            # Use guided velocity for midpoint prediction
+            midpoint_x = x_t + start_vel * dt / 2
+            midpoint_vel = self.forward(x=midpoint_x, t=t_mid.unsqueeze(0).repeat(batch_size),
+                                    jet_conditions=jet_conditions, mask=mask)
+            if use_cfg:
+                unconditional_midpoint_vel = self.forward(x=midpoint_x, t=t_mid.unsqueeze(0).repeat(batch_size),
+                                                        jet_conditions=null_jet_conditions, mask=mask)
+                midpoint_vel = unconditional_midpoint_vel + guidance_weight * (midpoint_vel - unconditional_midpoint_vel)
+            
+            return x_t + dt * midpoint_vel
         else:
             raise NotImplementedError(f"Method {method} not implemented")
