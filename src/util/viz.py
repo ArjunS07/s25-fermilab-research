@@ -10,6 +10,7 @@ from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from util import jet_attributes
 from util.file_management import make_clear_folder
 from util.distributions import gen_initial_distribution
+from util.cfg import null_vector_like
 
 colors = sns.color_palette("deep")
 import os
@@ -44,7 +45,7 @@ def plot_hist(X_test_samples, x_model, output_path, filename):
     plt.savefig(f"{output_path}/{filename}.png", bbox_inches='tight', dpi=300)
 
 
-def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, scale, n_jet_types, n_particles_per_jet, initial_dist_method='isotropic_lognorm', n_features_per_particle=4, n_viz_samples=1000, zoom_in=True, save_videos=True, clamp_stddevs=3, integration_steps=16):
+def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, scale, n_jet_types, n_particles_per_jet, initial_dist_method='isotropic_lognorm', n_features_per_particle=4, n_viz_samples=1000, zoom_in=True, save_videos=True, integration_steps=16, use_cfg=False, cfg_guidance_weight=1):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     output_path = f"{out_dir}/vf_viz"
     make_clear_folder(output_path)
@@ -93,7 +94,13 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         sns.set_palette("deep")
         for i in range(len(times) - 1):
             t = times[i].unsqueeze(0).repeat(n_viz_samples).to(device)
-            final_field = final_model.forward(x_model_final, t, generated_jet_attrs, masks)
+            final_field_conditional = final_model.forward(x_model_final, t, generated_jet_attrs, masks)
+            if use_cfg:
+                null_vector = null_vector_like(generated_jet_attrs)
+                final_field_unconditional = final_model.forward(x_model_final, t, null_vector, masks)
+                final_field = final_field_conditional + cfg_guidance_weight * (final_field_conditional - final_field_unconditional)
+            else:
+                final_field = final_field_conditional
             print(f"{i=}, {times[i]=}, {times[i+1]=}, {final_field.mean()=}, {final_field.std()=}")
             plt.close()
             plt.clf()

@@ -5,11 +5,8 @@ import logging
 import numpy as np
 import torch
 import random
-from torch import nn
 from torch.utils.data import DataLoader
 
-from models.NewLEFM import LEJetGeneratorFM
-from models.FlowMatchingMLP import FlowMatchingMLP
 from models.Week7EGNN import JetFlowMatcher
 from util import jet_attributes
 from util.jet_attributes import NUM_CLASSES
@@ -19,7 +16,7 @@ from util.coordinates import transform_rel_particle_coordinates_to_cartesian, ja
 from util.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
 from util.metrics import run_save_metrics
-from util.cfg import null_vector
+from util.cfg import null_vector_like
 from generate_samples import generate_samples
 from data import data_args, get_data_path
 
@@ -31,21 +28,14 @@ TRAIN_SPLIT = 0.7
 SIGMA_MIN = 1e-4
 
 class PairedDataset(torch.utils.data.Dataset):
-    def __init__(self, jet_info, particle_data, n_jet_types=5, jet_info_drop_prob=0.2):
+    def __init__(self, jet_info, particle_data):
         self.jet_info = jet_info
         self.particle_data = particle_data
-        self.n_jet_types = n_jet_types
-        self.jet_info_drop_prob = jet_info_drop_prob
 
     def __len__(self):
         return len(self.particle_data)
     
-    def __null_jet_vector(self):
-        return null_vector(self.n_jet_types)
-
     def __getitem__(self, idx):
-        if random.random() < self.jet_info_drop_prob:
-            return self.__null_jet_vector(), self.particle_data[idx]
         return self.jet_info[idx], self.particle_data[idx]
 
 if __name__ == "__main__":
@@ -119,28 +109,12 @@ if __name__ == "__main__":
         f.write(f"{final_scale}\n")
     X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
     
-    if args.model_type == "Week7EGNN":
-        model: JetFlowMatcher = JetFlowMatcher(
-            max_num_jet_types=NUM_CLASSES,
-            max_particles=args.num_particles,
-            num_layers=args.n_layers,
-            hidden_dim=args.n_hidden,
-            ).to(device)
-    elif args.model_type == "LEJetGeneratorFM":
-        model: LEJetGeneratorFM = LEJetGeneratorFM(
-            n_layers=args.n_layers,
-            n_particles=args.num_particles
-        ).to(device)
-    elif args.model_type == "FlowMatchingMLP":
-        model = FlowMatchingMLP(
-            n_particles=args.num_particles,
-            particle_dim=NUM_PARTICLE_FEATURES,
-            global_dim=64,
-            n_layers=args.n_layers,
-            hidden_dim=args.n_hidden,
-            n_jet_types=len(data_args["jet_type"]),
-            time_embed_dim=64,
-        ).to(device)
+    model: JetFlowMatcher = JetFlowMatcher(
+        max_num_jet_types=NUM_CLASSES,
+        max_particles=args.num_particles,
+        num_layers=args.n_layers,
+        hidden_dim=args.n_hidden,
+    ).to(device)
     
     make_clear_folder(f"{model_output_path}/models")
     torch.save(model.state_dict(), f"{model_output_path}/models/initial_model.pth")
@@ -168,7 +142,7 @@ if __name__ == "__main__":
         X_train_epoch = torch.utils.data.Subset(X_train_particle_transformed, epoch_indices)
         train_jet_info_epoch = train_jet_info[epoch_indices]
 
-        paired_dataset = PairedDataset(train_jet_info_epoch, X_train_epoch, n_jet_types=len(args.jet_types), jet_info_drop_prob=args.cfg_null_dropout_rate)
+        paired_dataset = PairedDataset(train_jet_info_epoch, X_train_epoch)
         train_loader = DataLoader(
             paired_dataset,
             batch_size=args.batch_size,
@@ -187,13 +161,16 @@ if __name__ == "__main__":
             batch_jet_info = batch_jet_info.to(device)
             batch_particle_info = batch_particle_info.to(device)
 
-            if args.model_type == "Week7EGNN":
-                batch_jet_n_particles = batch_jet_info[:, 3]
-                batch_jet_pt_mass = batch_jet_info[:, 1:3]
-                encoded_jet_types = jet_attributes.one_hot_enc_jet_type(batch_jet_info[:, 4].long()).to(device)
-                batch_jet_info_cropped = torch.cat([
-                    encoded_jet_types, batch_jet_n_particles.unsqueeze(-1)
-                ], dim=-1).to(device)
+            batch_jet_n_particles = batch_jet_info[:, 3]
+            batch_jet_pt_mass = batch_jet_info[:, 1:3]
+            encoded_jet_types = jet_attributes.one_hot_enc_jet_type(batch_jet_info[:, 4].long()).to(device)
+            batch_jet_info_cropped = torch.cat([
+                encoded_jet_types, batch_jet_n_particles.unsqueeze(-1)
+            ], dim=-1).to(device)
+
+            if torch.rand(1) < args.cfg_null_dropout_rate:
+                batch_jet_info_cropped = null_vector_like(batch_jet_info_cropped, max_n_jet_types=NUM_CLASSES)
+                print(batch_jet_info_cropped)
 
             x_1 = batch_particle_info[:, :, :4]
             x_1 += args.x_1_translation
@@ -287,8 +264,10 @@ if __name__ == "__main__":
     jet_attr_model_loaded = jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device)
 
     try:
+        make_clear_folder(f"{model_output_path}/vf_viz_cfg")
+        make_clear_folder(f"{model_output_path}/vf_viz_nocfg")
         generate_model_vector_field(
-            out_dir=model_output_path,
+            out_dir=f"{model_output_path}/vf_viz_cfg",
             final_model=model,
             jet_attr_model=jet_attr_model_loaded,
             X_test=X_test,
@@ -298,7 +277,23 @@ if __name__ == "__main__":
             n_features_per_particle=NUM_PARTICLE_FEATURES,
             n_viz_samples=args.n_viz_samples,
             initial_dist_method=args.prior_dist,
-            integration_steps=args.integration_steps
+            integration_steps=args.integration_steps,
+            use_cfg=True,
+            cfg_guidance_weight=1
+        )
+        generate_model_vector_field(
+            out_dir=f"{model_output_path}/vf_viz_nocfg",
+            final_model=model,
+            jet_attr_model=jet_attr_model_loaded,
+            X_test=X_test,
+            scale=final_scale,
+            n_jet_types=len(args.jet_types),
+            n_particles_per_jet=args.num_particles,
+            n_features_per_particle=NUM_PARTICLE_FEATURES,
+            n_viz_samples=args.n_viz_samples,
+            initial_dist_method=args.prior_dist,
+            integration_steps=args.integration_steps,
+            use_cfg=False,
         )
     except Exception as e:
         print(f"Error occurred while generating model vector field: {e}")
@@ -316,6 +311,7 @@ if __name__ == "__main__":
         n_jet_types=len(args.jet_types),
         device=device,
         batch_size=args.batch_size,
+        use_cfg=True
     )
     run_save_metrics(
         X_test=X_test,

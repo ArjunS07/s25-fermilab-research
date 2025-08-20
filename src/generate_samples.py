@@ -20,6 +20,8 @@ def generate_samples(
         n_samples,
         batch_size,
         n_jet_types=3,
+        use_cfg=False,
+        cfg_guidance_weight=1.0
 ):
     
 
@@ -64,7 +66,7 @@ def generate_samples(
                     t_start=times[i],
                     t_end=times[i + 1]
                 )
-                new_x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1])
+                new_x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1], use_cfg=use_cfg, guidance_weight=cfg_guidance_weight)
                 x = new_x
                 fig, axs = plt.subplots(1, 4, figsize=(20, 10))
                 

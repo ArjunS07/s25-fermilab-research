@@ -338,31 +338,9 @@ class JetFlowMatcher(nn.Module):
                     jet_conditions=null_jet_conditions,
                     mask=mask
                 )
-                guided_vel = unconditional_vel + guidance_weight * (vel - unconditional_vel)
+                guided_vel = vel + guidance_weight * (vel - unconditional_vel)
                 vel = guided_vel
             x_next = x_t + vel * (t_end - t_start)
             return x_next
-        elif method == 'RK2':
-            dt = t_end - t_start
-            t_mid = t_start + dt / 2
-            
-            # Compute guided velocity once at start
-            start_vel = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), 
-                                jet_conditions=jet_conditions, mask=mask)
-            if use_cfg:
-                unconditional_vel = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size),
-                                            jet_conditions=null_jet_conditions, mask=mask)
-                start_vel = unconditional_vel + guidance_weight * (start_vel - unconditional_vel)
-            
-            # Use guided velocity for midpoint prediction
-            midpoint_x = x_t + start_vel * dt / 2
-            midpoint_vel = self.forward(x=midpoint_x, t=t_mid.unsqueeze(0).repeat(batch_size),
-                                    jet_conditions=jet_conditions, mask=mask)
-            if use_cfg:
-                unconditional_midpoint_vel = self.forward(x=midpoint_x, t=t_mid.unsqueeze(0).repeat(batch_size),
-                                                        jet_conditions=null_jet_conditions, mask=mask)
-                midpoint_vel = unconditional_midpoint_vel + guidance_weight * (midpoint_vel - unconditional_midpoint_vel)
-            
-            return x_t + dt * midpoint_vel
         else:
             raise NotImplementedError(f"Method {method} not implemented")
