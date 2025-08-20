@@ -26,12 +26,6 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         jet_eta = jet_features[:, 0]
         jet_phi = (2 * torch.pi) * torch.rand(batch_size)
         jet_pt = jet_features[:, 1]
-        jet_mass = jet_features[:, 2]
-
-
-        relEtaPhiPt = torch.stack([eta_rel, phi_rel, pt_rel], dim=2)
-        stacked_jet_features = torch.stack([jet_eta, jet_phi, jet_pt, jet_mass], dim=1)
-        # Because of issues with the JetNet utility implementation, we do the conversion ourselves
 
         pt = pt_rel * jet_pt.unsqueeze(1)
         eta = eta_rel + jet_eta.unsqueeze(1)
