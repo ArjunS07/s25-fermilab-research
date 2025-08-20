@@ -276,7 +276,7 @@ class LorentzEquivariantLayer(nn.Module):
 class JetFlowMatcher(nn.Module):
     """Complete flow matching model for jet generation."""
     def __init__(self, max_num_jet_types, max_particles=150, embed_dim=64, 
-                 num_layers=6, message_dim=128, hidden_dim=64, use_residual_update=False,):
+                 num_layers=6, message_dim=128, hidden_dim=64, use_residual_update=True):
         super().__init__()
         self.max_particles = max_particles
         self.embed_dim = embed_dim
