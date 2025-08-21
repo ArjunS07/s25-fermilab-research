@@ -2,7 +2,7 @@ import seaborn as sns
 import torch
 import matplotlib.pyplot as plt
 
-from models.Week7EGNN import JetFlowMatcher
+from models.LEFT_JeN import LEFTJeN
 from util import jet_attributes
 from util.file_management import make_clear_folder
 from util.distributions import gen_initial_distribution
@@ -10,7 +10,7 @@ from util.distributions import gen_initial_distribution
 features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 
 def generate_samples(
-        model: JetFlowMatcher,
+        model: LEFTJeN,
         jet_attr_model,
         device,
         root_output_path,

@@ -7,7 +7,7 @@ import torch
 import random
 from torch.utils.data import DataLoader
 
-from models.Week7EGNN import JetFlowMatcher
+from models.LEFT_JeN import LEFTJeN
 from util import jet_attributes
 from util.jet_attributes import NUM_CLASSES
 from jet_attr_model import get_model_pth_path
@@ -106,7 +106,7 @@ if __name__ == "__main__":
         f.write(f"{final_scale}\n")
     X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
     
-    model: JetFlowMatcher = JetFlowMatcher(
+    model: LEFTJeN = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=args.num_particles,
         num_layers=args.n_layers,

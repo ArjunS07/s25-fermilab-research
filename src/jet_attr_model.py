@@ -133,7 +133,6 @@ if __name__ == "__main__":
 
         loss_hist = np.append(loss_hist, loss.to('cpu').data.numpy())
     
-    # save loss as csv
     np.savetxt(f"{jet_attr_model_path}/jet_attr_model_loss.csv", loss_hist, delimiter=",")
     if args.save_model:
         with open(get_model_pth_path(args.output_path), "wb") as f:
@@ -149,7 +148,6 @@ if __name__ == "__main__":
     plt.ylabel("Forward KL Divergence Loss", fontsize=14)
     plt.savefig(f"{jet_attr_model_path}/jet_attr_model_loss_hist.png", dpi=300, bbox_inches="tight")
     
-    # Run evaluation
     model.eval()
     n_samples = args.n_test_samples
     sample_jet_types = torch.randint(0, NUM_CLASSES, (n_samples,)).to(device)
@@ -213,11 +211,8 @@ if __name__ == "__main__":
         ax1 = axs[0, i]
         ax2 = axs[1, i]
 
-        # Get combined x and y limits for both axes
         xlims = np.array([ax1.get_xlim(), ax2.get_xlim()])
         ylims = np.array([ax1.get_ylim(), ax2.get_ylim()])
-
-        # Set both axes to have the same limits
         xlim_combined = (xlims[:, 0].min(), xlims[:, 1].max())
         ylim_combined = (ylims[:, 0].min(), ylims[:, 1].max())
 

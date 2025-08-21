@@ -272,7 +272,7 @@ class LorentzEquivariantLayer(nn.Module):
         x_new = x_new * mask.unsqueeze(-1)
         return x_new, g_new
     
-class JetFlowMatcher(nn.Module):
+class LEFTJeN(nn.Module):
     """Complete flow matching model for jet generation."""
     def __init__(self, max_num_jet_types, max_particles=150, embed_dim=64, 
                  num_layers=6, message_dim=128, hidden_dim=64, use_residual_update=True):

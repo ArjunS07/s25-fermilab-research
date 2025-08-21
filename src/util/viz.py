@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
-from models.Week7EGNN import JetFlowMatcher
+from models.LEFT_JeN import LEFTJeN
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from util import jet_attributes
 from util.file_management import make_clear_folder
