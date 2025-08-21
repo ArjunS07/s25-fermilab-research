@@ -5,12 +5,21 @@ import os
 import numpy as np
 import torch
 import normflows as nf
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from data import get_data_path
 from util.jet_attributes import one_hot_enc_jet_type, NUM_CLASSES
+from util.file_management import make_clear_folder
+from jetnet.evaluation import fpd, kpd
 
 RANDOM_SEED = 42
-
+JET_FEATURES = [r"$\eta$", r"$p_T$", r"$m$", r"$N_P$"]
+jet_type_map = {
+    0: "Gluons",
+    1: "Light quarks",
+    2: "Top quarks",
+}
 
 def get_model_pth_path(output_path):
     return os.path.join(output_path, "jet_attr_model.pth")
@@ -34,6 +43,9 @@ def noise_num_particles(X, noise_std=0.15):
 if __name__ == "__main__":
     torch.manual_seed(RANDOM_SEED)
 
+    plt.rcParams["text.usetex"] = True
+    sns.set_palette("deep")
+
     parser = argparse.ArgumentParser(description="Train Jet Attribute NF Model on JetNet dataset")
     parser.add_argument("--output_path", type=str, default="/mnt/data/output", help="Path to save the output files")
     parser.add_argument("--batch_size", type=int, default=8192, help="Batch size for training")
@@ -41,15 +53,22 @@ if __name__ == "__main__":
     parser.add_argument("--K", type=int, default=10, help="Number of layers in the flow")
     parser.add_argument("--hidden_units", type=int, default=128, help="Number of hidden units in the flow")
     parser.add_argument("--hidden_layers", type=int, default=8, help="Number of hidden layers in the flow")
+    parser.add_argument("--n_test_samples", type=int, default=50_000, help="Number of test samples to generate")
     parser.add_argument("--save_model", type=bool, default=True, help="Whether to save the trained model")
 
     args = parser.parse_args()
     data_path = get_data_path(args.output_path)
+    jet_attr_model_path = f"{args.output_path}/jet_attr_model"
+    make_clear_folder(jet_attr_model_path)
+    
     with open(f"{data_path}/x_train.pkl", "rb") as f:
         X_train = pickle.load(f)
+    with open(f"{data_path}/x_test.pkl", "rb") as f:
+        X_test = pickle.load(f)
 
     # Only take global jet features
     X_train = X_train[:][1]
+    X_test = X_test[:][1]
 
     # equalize the number of jets per type
     X_train_equalized = []
@@ -115,12 +134,127 @@ if __name__ == "__main__":
         loss_hist = np.append(loss_hist, loss.to('cpu').data.numpy())
     
     # save loss as csv
-    np.savetxt(f"{args.output_path}/jet_attr_model_loss_hist.csv", loss_hist, delimiter=",")
+    np.savetxt(f"{jet_attr_model_path}/jet_attr_model_loss.csv", loss_hist, delimiter=",")
     if args.save_model:
         with open(get_model_pth_path(args.output_path), "wb") as f:
             torch.save(model, f)
+    
+    sns.set_palette("deep")
+    sns.lineplot(
+        x=np.arange(len(loss_hist)),
+        y=loss_hist,
+        label="Loss",
+    )
+    plt.xlabel("Epoch", fontsize=14)
+    plt.ylabel("Forward KL Divergence Loss", fontsize=14)
+    plt.savefig(f"{jet_attr_model_path}/jet_attr_model_loss_hist.png", dpi=300, bbox_inches="tight")
+    
+    # Run evaluation
+    model.eval()
+    n_samples = args.n_test_samples
+    sample_jet_types = torch.randint(0, NUM_CLASSES, (n_samples,)).to(device)
+    one_hot_types = one_hot_enc_jet_type(sample_jet_types)
+    sample_vals, sample_logprobs = model.sample(n_samples, context=one_hot_types)
+    sample_jet_types.shape, sample_vals.shape, sample_logprobs.shape
+    # Quantize the number of particles
+    sample_vals[:, 3] = torch.round(sample_vals[:, 3])
 
-    with open(f"{args.output_path}/jet_attr_model_info.txt", "w") as f:
+    fig, axs = plt.subplots(1, 4, figsize=(20, 4))
+    for i, feature in enumerate(JET_FEATURES):
+        ax = axs[i]
+        sns.kdeplot(
+            sample_vals[:, i].detach().numpy(),
+            ax=ax,
+            label=r"Generated " + feature + r" (all jets)",
+        )
+        sns.kdeplot(
+            X_test[:, i].numpy(),
+            ax=ax,
+            label=r"Test " + feature + r" (all jets)",
+        )
+        ax.set_xlabel(feature, fontsize=18)
+        if i == 0:
+            ax.set_ylabel("Density")
+        else:
+            ax.set_ylabel("")
+        ax.legend(loc="upper right", fontsize=10)
+
+    plt.tight_layout()
+    plt.savefig(f"{jet_attr_model_path}/jet_attr_nf_sampled_all_features.png", dpi=300, bbox_inches="tight")
+
+    fig, axs = plt.subplots(2, 4, figsize=(20, 8))
+    for i, feature in enumerate(JET_FEATURES):
+        ax = axs[0, i]
+        for jet_type in jet_type_map.keys():
+            sns.kdeplot(
+                X_test[X_test[:, -1] == jet_type][:, i].numpy(),
+                ax=ax,
+                label=jet_type_map[jet_type]
+            )
+        if i == 0:
+            ax.set_ylabel("Test set jet attributes", fontsize=14, rotation=0, labelpad=60)
+        else:
+            ax.set_ylabel("")
+
+        ax = axs[1, i]
+        for jet_type in jet_type_map.keys():
+            sns.kdeplot(
+                sample_vals[sample_jet_types == jet_type][:, i].detach().numpy(),
+                ax=ax,
+                label=jet_type_map[jet_type]
+            )
+        ax.set_xlabel(feature, fontsize=18)
+        if i == 0:
+            ax.set_ylabel("Generated jet attributes", fontsize=14, rotation=0, labelpad=60)
+        else:
+            ax.set_ylabel("")
+
+    for i in range(4):
+        ax1 = axs[0, i]
+        ax2 = axs[1, i]
+
+        # Get combined x and y limits for both axes
+        xlims = np.array([ax1.get_xlim(), ax2.get_xlim()])
+        ylims = np.array([ax1.get_ylim(), ax2.get_ylim()])
+
+        # Set both axes to have the same limits
+        xlim_combined = (xlims[:, 0].min(), xlims[:, 1].max())
+        ylim_combined = (ylims[:, 0].min(), ylims[:, 1].max())
+
+        ax1.set_xlim(xlim_combined)
+        ax2.set_xlim(xlim_combined)
+        ax1.set_ylim(ylim_combined)
+        ax2.set_ylim(ylim_combined)
+
+
+    legend_handles, legend_labels = axs[0, 0].get_legend_handles_labels()
+    fig.legend(
+        legend_handles,
+        legend_labels,
+        title="",
+        loc="center right",
+        bbox_to_anchor=(1.05, 0.5),
+        fontsize=14,
+        title_fontsize=13
+    )
+    plt.tight_layout()
+    plt.savefig(f"{jet_attr_model_path}/jet_attr_nf_sampled_jet_type.png", dpi=300, bbox_inches="tight")
+
+    fpd_val, fpd_err = fpd(
+        real_features=X_test[:, :-1].numpy(),
+        gen_features=sample_vals.detach().numpy(),
+        seed=RANDOM_SEED
+    )
+    kpd_val, kpd_err = kpd(
+        real_features=X_test[:, :-1].numpy(),
+        gen_features=sample_vals.detach().numpy(),
+        seed=RANDOM_SEED
+    )
+    with open(f"{jet_attr_model_path}/jet_attr_nf_metrics.txt", "w") as f:
+        f.write(f"FPD: {fpd_val:.5E} ± {fpd_err:.5E}\n")
+        f.write(f"KPD: {kpd_val:.5E} ± {kpd_err:.5E}\n")
+
+    with open(f"{jet_attr_model_path}/jet_attr_model_info.txt", "w") as f:
         f.write(f"CLI args:\n")
         for arg in vars(args):
             f.write(f"{arg}: {getattr(args, arg)}\n")
