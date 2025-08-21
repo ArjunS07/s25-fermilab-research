@@ -117,14 +117,10 @@ def boost_from_com_to_lab(p_4vec_com, target_total_4momentum, mask):
     # Current total in CoM frame (should be ~(M, 0, 0, 0))
     current_total = __compute_total_4momentum(p_4vec_com, mask)
     
-    # Extract target quantities
     target_E = target_total_4momentum[:, 0:1]  # [batch, 1]
     target_p_3vec = target_total_4momentum[:, 1:4]  # [batch, 3]
     
-    # Boost velocity to achieve target
-    beta_vec = target_p_3vec / torch.clamp(target_E, min=1e-8)  # [batch, 3]
-    
-    # Apply boost
+    beta_vec = target_p_3vec / torch.clamp(target_E, min=1e-8)  # [batch, 3]    
     p_4vec_lab = __lorentz_boost(p_4vec_com, beta_vec, mask)
     
     return p_4vec_lab

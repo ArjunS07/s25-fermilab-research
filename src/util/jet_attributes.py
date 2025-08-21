@@ -56,7 +56,7 @@ def generate_jets(model, device, n_jet_types, num_jets=1000, one_hot_types=None)
     jets[:, -1] = torch.round(jets[:, -1])
     jets[:, -1] = torch.clamp(jets[:, -1], min=MIN_N_PARTICLES, max=MAX_N_PARTICLES) 
     jets = torch.cat([
-        one_hot_types,  # Add one-hot encoded jet types
+        one_hot_types,
         jets,
     ], dim=-1).to(device)  # Concatenate along the last dimension
     return jets, jet_logprobs

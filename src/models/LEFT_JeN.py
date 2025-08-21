@@ -54,7 +54,6 @@ class TimeEmbedding(nn.Module):
         cos_proj = torch.cos(time_projection)
         time_embed = torch.cat([sin_proj, cos_proj], dim=-1)  # (batch_size, embed_dim)
         
-        # Pass through fully connected layers
         x = self.fc1(time_embed)  # (batch_size, 32)
         x = self.fc2(x)          # (batch_size, embed_dim)
         
@@ -81,7 +80,6 @@ class PhiMLP(nn.Module):
         
         self.net = nn.Sequential(*layers)
         
-        # Xavier initialization
         for layer in self.net:
             if isinstance(layer, nn.Linear):
                 nn.init.xavier_uniform_(layer.weight, gain=0.1)
@@ -104,7 +102,6 @@ class GlobalEmbedding(nn.Module):
         self.fc1 = nn.Linear(input_dim, 32)
         self.fc2 = nn.Linear(32, embed_dim)
         
-        # Xavier initialization
         nn.init.xavier_uniform_(self.fc1.weight, gain=0.1)
         nn.init.xavier_uniform_(self.fc2.weight, gain=0.1)
         nn.init.zeros_(self.fc1.bias)
@@ -229,8 +226,8 @@ class LorentzEquivariantLayer(nn.Module):
         
         global_message_sum = scaled_messages.sum(dim=[1, 2])  # (batch_size, message_dim)
         global_message_normalized = (self.alpha / N_actual_sq) * global_message_sum
-        # Update global embedding: φ_g^l
         
+        # Update global embedding: φ_g^l
         global_input = torch.cat([g0, g_prev, t_emb, global_message_normalized], dim=-1)
         g_new = self.phi_g(global_input)
         g_new = self.global_norm(g_new)
@@ -265,7 +262,6 @@ class LorentzEquivariantLayer(nn.Module):
         displacement_term = self.gamma * displacement_sum   # (batch_size, max_particles, 4)
         
         x_new = x + displacement_term
-        
         x_new = x_new * mask.unsqueeze(-1)
         return x_new, g_new
     
