@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-job-30-gluons
+  name: as-jet-train-job-30-noresidual
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -59,26 +59,26 @@ spec:
               export CUDA_LAUNCH_BLOCKING=1
               export TORCH_USE_CUDA_DSA=1
 
-              cd /mnt/data/src
+               cd /mnt/data/src
 
               UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
               OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID"
               echo "Output path: $OUTPUT_PATH"
               mkdir $OUTPUT_PATH
               
-              python3 data.py --jet_types g --num_particles=30 --output_path=${OUTPUT_PATH}
+              python3 data.py --num_particles=30 --output_path=${OUTPUT_PATH}
               python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
-              python3 train.py --batch_size=32 --num_epochs=200 --n_samples=50000 --n_layers=6 --jet_types g --num_particles=30 --output_path=${OUTPUT_PATH}  --use_residual | tee -a ${OUTPUT_PATH}/logs.txt
+              python3 train.py --batch_size=32 --num_epochs=200 --n_samples=50000 --n_layers=6 --num_particles=30 --output_path=${OUTPUT_PATH}  | tee -a ${OUTPUT_PATH}/logs.txt
+          
           volumeMounts:
             - mountPath: /mnt/data
               name: as-train-pvc
           resources:
             limits:
               nvidia.com/a40: 1
-              memory: "16Gi"
+              memory: "12Gi"
               cpu: "2.4"
             requests:
               nvidia.com/a40: 1
-              memory: "16Gi"
+              memory: "12Gi"
               cpu: "2"
-      
