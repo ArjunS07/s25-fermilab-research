@@ -17,6 +17,7 @@ from util.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
 from util.metrics import run_save_metrics
 from util.cfg import null_vector_like
+from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import data_args, get_data_path
 
@@ -24,8 +25,6 @@ RANDOM_SEED = 42
 MAX_N_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4 # E/c, px, py, pz
 TRAIN_SPLIT = 0.7
-
-SIGMA_MIN = 1e-4
 
 class PairedDataset(torch.utils.data.Dataset):
     def __init__(self, jet_info, particle_data):
@@ -54,22 +53,21 @@ if __name__ == "__main__":
     parser.add_argument("--mask", type=bool, default=True, help="Use mask for particles")
 
     # Network hyperparameters
-    parser.add_argument("--model_type", type=str, default="Week7EGNN", choices=["LEJetGeneratorFM", "FlowMatchingMLP", "Week7EGNN"], help="Type of model to use")
     parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
-    parser.add_argument("--n_layers", type=int, default=4, help="Number of layers in the network")
+    parser.add_argument("--n_layers", type=int, default=3, help="Number of layers in the network")
     
     # Training
-    parser.add_argument('--cfg_null_dropout_rate', type=float, default=0.2, help='Probability of dropping out jet information and using null vector')
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
     parser.add_argument("--target_batch_size", type=int, default=2048, help="Virtual batch size for accumulation of gradients for backprop")
+    parser.add_argument('--cfg_null_dropout_rate', type=float, default=0.2, help='Probability of dropping out jet information and using null vector')
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
     parser.add_argument("--epoch_frac", type=float, default=1.0, help="Fraction of training dataset to use per epoch")
-    parser.add_argument("--x_1_translation", type=float, default=0.0, help="Translation to apply to x_1 during training")
+    parser.add_argument("--sigma_min", type=float, default=1e-4, help="Tolerance around target for flow map")
 
-    # Integration
+    # Inference
     parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
-    parser.add_argument("--n_viz_samples", type=int, default=1000, help="Number of samples to generate during inference")
+    parser.add_argument("--n_viz_samples", type=int, default=1000, help="Number of samples to generate for VF visualization")
     parser.add_argument("--integration_steps", type=int, default=16, help="Number of integration steps for ODE solver")
 
     args = parser.parse_args()
@@ -119,12 +117,10 @@ if __name__ == "__main__":
     torch.save(model.state_dict(), f"{model_output_path}/models/initial_model.pth")
     train_jet_info = X_train[:][1].to(device)
     if args.num_particles < MAX_N_PARTICLES:
-        # clamp the number of particles to args.num_particles
         train_jet_info[:, 3] = train_jet_info[:, 3].clamp(max=args.num_particles)
     train_jet_info = train_jet_info[:args.n_train_samples]
     losses = []
 
-    # Annealed cosine learning rate with warmup
     lr = 1e-4
     weight_decay = 5e-3
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -172,8 +168,9 @@ if __name__ == "__main__":
                 batch_jet_info_cropped = batch_jet_info_cropped.to(device)
 
             x_1 = batch_particle_info[:, :, :4]
-            x_1 += args.x_1_translation
             true_masks = batch_particle_info[:, :, 4] if args.mask else None
+
+            x_1 = boost_to_com_frame(x_1, mask=true_masks)
             x_0 = gen_initial_distribution(x_1=x_1)
             x_0 = x_0.to(device)
             
@@ -183,33 +180,24 @@ if __name__ == "__main__":
                 # important - x0 is a noisy normal distribution by default
                 x_0 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_0
 
-            # Logit-normal samplign of t to focus around t=0.5 which is hardest
+            # Logit-normal sampling of t to focus around t=0.5 which is hardest
             # https://github.com/UNITES-Lab/FlowTS
             # t = torch.sigmoid(torch.randn(x_0.shape[0]))
             t = torch.rand(x_0.shape[0])
             t = t.to(device)
             t_viewed = t.view(-1, 1, 1)
 
-            # The model takes in Cartesian coordinates, and x_t is in Cartesian coordinates
-            x_t = (1 - (1-SIGMA_MIN)*t_viewed)*x_0 + t_viewed * x_1
+            x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0 + t_viewed * x_1
             x_t = x_t.to(device)
-            conditional_u_t_cartesian = x_1 - ((1-SIGMA_MIN)*x_0)
+            conditional_u_t_cartesian = x_1 - ((1-args.sigma_min)*x_0)
             pred_cartesian = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
-
-            # Jacobian_x_t = jacobian_epp_etaphipte(x_t)
-            # conditional_u_t_polar = torch.einsum('...ij, ...j->...i', Jacobian_x_t, conditional_u_t_cartesian)
-            # pred_polar = torch.einsum('...ij, ...j->...i', Jacobian_x_t, pred_cartesian)
 
             if true_masks is not None:
                 conditional_u_t_cartesian = conditional_u_t_cartesian * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-                # conditional_u_t_polar = conditional_u_t_polar * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
 
                 pred_cartesian = pred_cartesian * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-                # pred_polar = pred_polar * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
 
-            # polar_loss = (conditional_u_t_polar - pred_polar).square()
             cartesian_loss = (conditional_u_t_cartesian - pred_cartesian).square()
-            # loss = (0.5 * cartesian_loss) + (0.5 * polar_loss)
             loss = cartesian_loss
 
             if true_masks is not None:
@@ -246,7 +234,6 @@ if __name__ == "__main__":
                         pred_at_zero = model.forward(x=zero_input, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
                         print(f"Model prediction around origin: mean={pred_at_zero.mean():.6f}, std={pred_at_zero.std():.6f}")
                 
-            
             del x_1, x_0, t, t_viewed, x_t, conditional_u_t_cartesian, pred_cartesian, loss
 
         losses.append(epoch_loss / total_n_accumulations)

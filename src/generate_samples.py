@@ -1,8 +1,8 @@
-import argparse
 import seaborn as sns
 import torch
 import matplotlib.pyplot as plt
 
+from models.Week7EGNN import JetFlowMatcher
 from util import jet_attributes
 from util.file_management import make_clear_folder
 from util.distributions import gen_initial_distribution
@@ -10,7 +10,7 @@ from util.distributions import gen_initial_distribution
 features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 
 def generate_samples(
-        model,
+        model: JetFlowMatcher,
         jet_attr_model,
         device,
         root_output_path,
@@ -41,6 +41,7 @@ def generate_samples(
             x = gen_initial_distribution(
                 batch_size=current_batch_size,
                 num_particles=num_particles,
+                device=device
                 )
             x = x.to(device)
             

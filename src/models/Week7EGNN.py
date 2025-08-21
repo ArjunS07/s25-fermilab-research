@@ -5,6 +5,7 @@ import numpy as np
 
 from util.minkowski_utils import normsq4, dotsq4
 from util.cfg import null_vector_like
+from util.boost_equiv import enforce_com_frame
 
 def psi(p):
     ''' `\psi(p) = Sgn(p) \cdot \log(|p| + 1)` '''
@@ -341,6 +342,8 @@ class JetFlowMatcher(nn.Module):
                 guided_vel = vel + guidance_weight * (vel - unconditional_vel)
                 vel = guided_vel
             x_next = x_t + vel * (t_end - t_start)
+            # Correct x_next to CoM frame
+            x_next = enforce_com_frame(x_next, mask)
             return x_next
         else:
             raise NotImplementedError(f"Method {method} not implemented")

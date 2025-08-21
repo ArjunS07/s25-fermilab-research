@@ -1,20 +1,57 @@
 import torch
 from jetnet.utils import EtaPhiPtE_to_cartesian
 
-def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, prior_dist='isotropic_lognorm', jet_features=None):
+
+def generate_x_0_com_frame(x_1=None, batch_size=None, num_particles=None, device='cpu'):
+    """Generate noise that naturally has zero total momentum"""
+
+    if x_1 is not None:
+        batch_size, num_particles = x_1.shape[:2]
+        device = x_1.device
+    elif (batch_size is None) or (num_particles is None):
+        raise ValueError("Either x_1 or (batch_size and num_particles) must be provided.")
+
+    
+
+def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, prior_dist='isotropic_com', jet_features=None, device='cpu'):
 
     if x_1 is not None:
         batch_size, num_particles = x_1.shape[:2]
         device = x_1.device
 
-    if prior_dist == 'isotropic_lognorm':
+    if prior_dist == 'isotropic_com':
+        n_pairs = num_particles // 2
+    
+        # Generate random directions and magnitudes
+        E_c = torch.exp(torch.randn(batch_size, n_pairs, device=device))
+        theta = torch.arccos(1 - 2*torch.rand(batch_size, n_pairs, device=device))
+        phi = 2*torch.pi*torch.rand(batch_size, n_pairs, device=device)
+        
+        p_x = E_c * torch.sin(theta) * torch.cos(phi)
+        p_y = E_c * torch.sin(theta) * torch.sin(phi)
+        p_z = E_c * torch.cos(theta)
+        
+        # pair particles with opposite momentum
+        p_x_opp = -p_x
+        p_y_opp = -p_y  
+        p_z_opp = -p_z
+        E_c_opp = E_c
+        
+        # Interleave pairs so that the mask doesn't destroy the zero CoM structure
+        particles = torch.zeros(batch_size, num_particles, 4, device=device)
+        particles[:, 0::2] = torch.stack([E_c, p_x, p_y, p_z], dim=-1)
+        particles[:, 1::2] = torch.stack([E_c_opp, p_x_opp, p_y_opp, p_z_opp], dim=-1)
+        
+        return particles
+
+    elif prior_dist == 'isotropic_lognorm':
         E_c = torch.exp(torch.randn(batch_size, num_particles, device=device))
         theta = torch.arccos(1 - 2*torch.rand(batch_size, num_particles, device=device))
         phi = 2*torch.pi*torch.rand(batch_size, num_particles, device=device)
         p_x = E_c * torch.sin(theta) * torch.cos(phi)
         p_y = E_c * torch.sin(theta) * torch.sin(phi)
         p_z = E_c * torch.cos(theta)
-        p = torch.stack([E_c, p_x, p_y, p_z], dim=2)
+        return torch.stack([E_c, p_x, p_y, p_z], dim=2)
 
     elif prior_dist == 'jet_ref_frame':
         assert jet_features is not None, "jet_features must be provided for jet_ref_frame method"
@@ -36,6 +73,4 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         p0 = pt * torch.cosh(eta)
 
         stacked = torch.stack([eta, phi, pt, p0], axis=-1)
-        p = EtaPhiPtE_to_cartesian(stacked)
-
-    return p
+        return EtaPhiPtE_to_cartesian(stacked)

@@ -45,7 +45,7 @@ def plot_hist(X_test_samples, x_model, output_path, filename):
     plt.savefig(f"{output_path}/{filename}.png", bbox_inches='tight', dpi=300)
 
 
-def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, scale, n_jet_types, n_particles_per_jet, initial_dist_method='isotropic_lognorm', n_features_per_particle=4, n_viz_samples=1000, zoom_in=True, save_videos=True, integration_steps=16, use_cfg=False, cfg_guidance_weight=1):
+def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, scale, n_jet_types, n_particles_per_jet, initial_dist_method='isotropic_com', n_features_per_particle=4, n_viz_samples=1000, zoom_in=True, save_videos=True, integration_steps=16, use_cfg=False, cfg_guidance_weight=1):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     output_path = f"{out_dir}/vf_viz"
     make_clear_folder(output_path)
@@ -80,9 +80,10 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         x = gen_initial_distribution(
             batch_size=n_viz_samples,
             num_particles=n_particles_per_jet,
-            jet_features=generated_jet_attrs
+            jet_features=generated_jet_attrs,
+            prior_dist=initial_dist_method,
+            device=device
         )
-        x = x.to(device)
         x_0 = x.clone()
         
 
