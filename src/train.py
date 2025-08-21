@@ -55,6 +55,7 @@ if __name__ == "__main__":
     # Network hyperparameters
     parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
     parser.add_argument("--n_layers", type=int, default=3, help="Number of layers in the network")
+    parser.add_argument("--use_residual", type=bool, default=False, help="Use residual connections in the network")
     
     # Training
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
@@ -111,6 +112,7 @@ if __name__ == "__main__":
         max_particles=args.num_particles,
         num_layers=args.n_layers,
         hidden_dim=args.n_hidden,
+        use_residual_update=args.use_residual,
     ).to(device)
     
     make_clear_folder(f"{model_output_path}/models")
@@ -229,10 +231,6 @@ if __name__ == "__main__":
             
                 if total_n_accumulations % 10 == 0:
                     print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {(epoch_loss / total_n_accumulations):.4f}")
-                    with torch.no_grad():
-                        zero_input = torch.randn_like(x_t) * 0.01
-                        pred_at_zero = model.forward(x=zero_input, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
-                        print(f"Model prediction around origin: mean={pred_at_zero.mean():.6f}, std={pred_at_zero.std():.6f}")
                 
             del x_1, x_0, t, t_viewed, x_t, conditional_u_t_cartesian, pred_cartesian, loss
 

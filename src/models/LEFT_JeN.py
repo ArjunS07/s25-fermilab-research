@@ -304,16 +304,16 @@ class LEFTJeN(nn.Module):
         
         for i, layer in enumerate(self.layers):
             x_new, g = layer(x, g0, g, t_emb, mask)
-            alpha = 0.5 + i * 0.03
-            x = ((1 - alpha) * x) + (alpha * x_new)
+            if self.use_residual_update:
+                alpha = 0.5 + i * 0.03
+                x = ((1 - alpha) * x) + (alpha * x_new)
+            else:
+                x = x_new
             x = x * mask.unsqueeze(-1)
 
-        if self.use_residual_update:
-            velocity = x - x0
-            return velocity * mask.unsqueeze(-1)
-        else:
-            return x * mask.unsqueeze(-1)
-
+        velocity = x - x0
+        return velocity * mask.unsqueeze(-1)
+        
     def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler', use_cfg=False, guidance_weight=2.0):
         """
         Calculate the probability density at a particular time step
