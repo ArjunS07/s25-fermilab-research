@@ -235,9 +235,6 @@ class LorentzEquivariantLayer(nn.Module):
         g_new = self.phi_g(global_input)
         g_new = self.global_norm(g_new)
         
-        particle_message_sum = scaled_messages.sum(dim=2)  # (batch_size, max_particles, message_dim)  
-        particle_message_normalized = self.beta / N_actual.unsqueeze(-1) * particle_message_sum
-        
         # Prepare inputs for φ_x^l for all pairs
         g0_exp = g0.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
         g_prev_exp = g_prev.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
@@ -273,7 +270,6 @@ class LorentzEquivariantLayer(nn.Module):
         return x_new, g_new
     
 class LEFTJeN(nn.Module):
-    """Complete flow matching model for jet generation."""
     def __init__(self, max_num_jet_types, max_particles=150, embed_dim=64, 
                  num_layers=6, message_dim=128, hidden_dim=64, use_residual_update=True):
         super().__init__()
