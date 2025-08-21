@@ -169,6 +169,7 @@ if __name__ == "__main__":
 
             if torch.rand(1) < args.cfg_null_dropout_rate:
                 batch_jet_info_cropped = null_vector_like(batch_jet_info_cropped, max_n_jet_types=NUM_CLASSES)
+                batch_jet_info_cropped = batch_jet_info_cropped.to(device)
                 print(batch_jet_info_cropped)
 
             x_1 = batch_particle_info[:, :, :4]
