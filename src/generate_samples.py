@@ -21,7 +21,7 @@ def generate_samples(
         batch_size,
         n_jet_types=3,
         use_cfg=False,
-        cfg_guidance_weight=1.0
+        cfg_guidance_weight=2.0
 ):
     
 
