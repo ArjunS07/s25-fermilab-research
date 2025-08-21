@@ -59,13 +59,6 @@ def generate_samples(
             ], dim=-1)
 
             for i in range(integration_steps):
-                new_x = model.step(
-                    x_t=x,
-                    jet_conditions=generated_jet_attrs,
-                    mask=masks,
-                    t_start=times[i],
-                    t_end=times[i + 1]
-                )
                 new_x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1], use_cfg=use_cfg, guidance_weight=cfg_guidance_weight)
                 x = new_x
                 fig, axs = plt.subplots(1, 4, figsize=(20, 10))

@@ -21,7 +21,7 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         device = jet_features.device
         eta_rel = torch.normal(0, 0.8, size=(batch_size, num_particles), device=device)
         phi_rel = torch.normal(0, 0.8, size=(batch_size, num_particles), device=device)
-        pt_rel = torch.exp(torch.randn(batch_size, num_particles), device=device)
+        pt_rel = torch.exp(torch.randn(batch_size, num_particles, device=device))
 
         # jet features are ["eta", "pt", "mass", "num_particles", "type"],
         jet_eta = jet_features[:, 0]
