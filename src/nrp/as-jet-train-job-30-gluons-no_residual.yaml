@@ -68,7 +68,7 @@ spec:
               
               python3 data.py --jet_types g --num_particles=30 --output_path=${OUTPUT_PATH}
               python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
-              python3 train.py --batch_size=32 --num_epochs=200 --n_samples=50000 --n_layers=6 --jet_types g --num_particles=30 --output_path=${OUTPUT_PATH}  | tee -a ${OUTPUT_PATH}/logs.txt
+              python3 train.py --batch_size=16 --num_epochs=200 --n_samples=50000 --n_layers=6 --jet_types g --num_particles=30 --output_path=${OUTPUT_PATH}  | tee -a ${OUTPUT_PATH}/logs.txt
           volumeMounts:
             - mountPath: /mnt/data
               name: as-train-pvc
