@@ -3,9 +3,7 @@ import os
 import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
-import numpy as np
 
-from models.LEFT_JeN import LEFTJeN
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from util import jet_attributes
 from util.file_management import make_clear_folder
@@ -19,7 +17,7 @@ from util.distributions import gen_initial_distribution
 
 from util.file_management import make_clear_folder
 def plot_hist(X_test_samples, x_model, output_path, filename):
-    fig, axs = plt.subplots(4, figsize=(10, 10))
+    _, axs = plt.subplots(4, figsize=(10, 10))
     feature_names = [r"$E/c$", r"$p_x$", r"$p_y$", r"$p_z$"]
     for i in range(4):
         sns.histplot(
