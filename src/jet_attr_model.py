@@ -43,7 +43,7 @@ def noise_num_particles(X, noise_std=0.15):
 if __name__ == "__main__":
     torch.manual_seed(RANDOM_SEED)
 
-    plt.rcParams["text.usetex"] = True
+    plt.rc("mathtext", fontset="cm") 
     sns.set_palette("deep")
 
     parser = argparse.ArgumentParser(description="Train Jet Attribute NF Model on JetNet dataset")
