@@ -235,19 +235,23 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig(f"{jet_attr_model_path}/jet_attr_nf_sampled_jet_type.png", dpi=300, bbox_inches="tight")
 
-    fpd_val, fpd_err = fpd(
-        real_features=X_test[:, :-1].numpy(),
-        gen_features=sample_vals.detach().numpy(),
-        seed=RANDOM_SEED
-    )
-    kpd_val, kpd_err = kpd(
-        real_features=X_test[:, :-1].numpy(),
-        gen_features=sample_vals.detach().numpy(),
-        seed=RANDOM_SEED
-    )
-    with open(f"{jet_attr_model_path}/jet_attr_nf_metrics.txt", "w") as f:
-        f.write(f"FPD: {fpd_val:.5E} ± {fpd_err:.5E}\n")
-        f.write(f"KPD: {kpd_val:.5E} ± {kpd_err:.5E}\n")
+    try:
+
+        fpd_val, fpd_err = fpd(
+            real_features=X_test[:, :-1].numpy(),
+            gen_features=sample_vals.detach().numpy(),
+            seed=RANDOM_SEED
+        )
+        kpd_val, kpd_err = kpd(
+            real_features=X_test[:, :-1].numpy(),
+            gen_features=sample_vals.detach().numpy(),
+            seed=RANDOM_SEED
+        )
+        with open(f"{jet_attr_model_path}/jet_attr_nf_metrics.txt", "w") as f:
+            f.write(f"FPD: {fpd_val:.5E} ± {fpd_err:.5E}\n")
+            f.write(f"KPD: {kpd_val:.5E} ± {kpd_err:.5E}\n")
+    except Exception as e:
+        print(f"Error occurred while computing metrics: {e}")
 
     with open(f"{jet_attr_model_path}/jet_attr_model_info.txt", "w") as f:
         f.write(f"CLI args:\n")
