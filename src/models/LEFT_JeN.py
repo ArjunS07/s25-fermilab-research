@@ -10,7 +10,7 @@ from util.boost_equiv import enforce_com_frame
 def psi(p):
     ''' `\psi(p) = Sgn(p) \cdot \log(|p| + 1)` '''
     # Clamp inputs
-    p = torch.clamp(p, -1e4, 1e4)
+    p = torch.clamp(p, -1e6, 1e6)
     return torch.sign(p) * torch.log1p(torch.abs(p))
 
 class TimeEmbedding(nn.Module):

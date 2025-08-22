@@ -221,6 +221,7 @@ if __name__ == "__main__":
 
                 optimizer.step()
                 optimizer.zero_grad()
+                
 
                 epoch_loss += (accumulated_loss) / accumulation_steps            
                 total_n_accumulations += 1
@@ -233,6 +234,8 @@ if __name__ == "__main__":
                     print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {(epoch_loss / total_n_accumulations):.4f}")
                 
             del x_1, x_0, t, t_viewed, x_t, conditional_u_t_cartesian, pred_cartesian, loss
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         losses.append(epoch_loss / total_n_accumulations)
 
