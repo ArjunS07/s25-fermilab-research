@@ -23,7 +23,7 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         n_pairs = num_particles // 2
     
         # Generate random directions and magnitudes
-        E_c = torch.exp(torch.randn(batch_size, n_pairs, device=device))
+        E_c = 0.5 + 0.5 * torch.exp(0.5 * torch.randn(batch_size, n_pairs, device=device))
         theta = torch.arccos(1 - 2*torch.rand(batch_size, n_pairs, device=device))
         phi = 2*torch.pi*torch.rand(batch_size, n_pairs, device=device)
         
@@ -64,8 +64,6 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         jet_eta = jet_features[:, 0]
         jet_phi = (2 * torch.pi) * torch.rand(batch_size)
         jet_pt = jet_features[:, 1]
-
-        # move everything to the same device
 
         pt = pt_rel * jet_pt.unsqueeze(1)
         eta = eta_rel + jet_eta.unsqueeze(1)
