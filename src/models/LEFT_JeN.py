@@ -10,7 +10,7 @@ from util.boost_equiv import enforce_com_frame
 def psi(p):
     ''' `\psi(p) = Sgn(p) \cdot \log(|p| + 1)` '''
     # Clamp inputs
-    p = torch.clamp(p, -1e6, 1e6)
+    p = torch.clamp(p, -1e4, 1e4)
     return torch.sign(p) * torch.log1p(torch.abs(p))
 
 class TimeEmbedding(nn.Module):
@@ -145,8 +145,7 @@ class LorentzEquivariantLayer(nn.Module):
 
         # Learnable scaling parameters
         self.alpha = nn.Parameter(torch.tensor(0.1))
-        self.beta = nn.Parameter(torch.tensor(0.1))
-        self.gamma = nn.Parameter(torch.tensor(0.01))
+        self.gamma = nn.Parameter(torch.tensor(0.1))
 
         self.message_norm = nn.LayerNorm(message_dim)
         self.global_norm = nn.LayerNorm(embed_dim)
