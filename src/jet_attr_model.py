@@ -161,12 +161,12 @@ if __name__ == "__main__":
     for i, feature in enumerate(JET_FEATURES):
         ax = axs[i]
         sns.kdeplot(
-            sample_vals[:, i].detach().numpy(),
+            sample_vals[:, i].detach().cpu().numpy(),
             ax=ax,
             label=r"Generated " + feature + r" (all jets)",
         )
         sns.kdeplot(
-            X_test[:, i].numpy(),
+            X_test[:, i].cpu().numpy(),
             ax=ax,
             label=r"Test " + feature + r" (all jets)",
         )
@@ -185,7 +185,7 @@ if __name__ == "__main__":
         ax = axs[0, i]
         for jet_type in jet_type_map.keys():
             sns.kdeplot(
-                X_test[X_test[:, -1] == jet_type][:, i].numpy(),
+                X_test[X_test[:, -1] == jet_type][:, i].cpu().numpy(),
                 ax=ax,
                 label=jet_type_map[jet_type]
             )
@@ -197,7 +197,7 @@ if __name__ == "__main__":
         ax = axs[1, i]
         for jet_type in jet_type_map.keys():
             sns.kdeplot(
-                sample_vals[sample_jet_types == jet_type][:, i].detach().numpy(),
+                sample_vals[sample_jet_types == jet_type][:, i].detach().cpu().numpy(),
                 ax=ax,
                 label=jet_type_map[jet_type]
             )
@@ -238,13 +238,13 @@ if __name__ == "__main__":
     try:
 
         fpd_val, fpd_err = fpd(
-            real_features=X_test[:, :-1].numpy(),
-            gen_features=sample_vals.detach().numpy(),
+            real_features=X_test[:, :-1].cpu().numpy(),
+            gen_features=sample_vals.detach().cpu().numpy(),
             seed=RANDOM_SEED
         )
         kpd_val, kpd_err = kpd(
-            real_features=X_test[:, :-1].numpy(),
-            gen_features=sample_vals.detach().numpy(),
+            real_features=X_test[:, :-1].cpu().numpy(),
+            gen_features=sample_vals.detach().cpu().numpy(),
             seed=RANDOM_SEED
         )
         with open(f"{jet_attr_model_path}/jet_attr_nf_metrics.txt", "w") as f:
