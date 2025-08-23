@@ -55,7 +55,7 @@ if __name__ == "__main__":
     # Network hyperparameters
     parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
     parser.add_argument("--n_layers", type=int, default=3, help="Number of layers in the network")
-    parser.add_argument("--use_residual", type=bool, default=False, help="Use residual connections in the network")
+    parser.add_argument("--use_residual", action="store_true", help="Use residual connections in the network")
     
     # Training
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
