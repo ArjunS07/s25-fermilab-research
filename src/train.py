@@ -173,8 +173,7 @@ if __name__ == "__main__":
             true_masks = batch_particle_info[:, :, 4] if args.mask else None
 
             x_1 = boost_to_com_frame(x_1, mask=true_masks)
-            x_0 = gen_initial_distribution(x_1=x_1)
-            x_0 = x_0.to(device)
+            x_0 = gen_initial_distribution(x_1=x_1).to(device)
             
             if true_masks is not None:
                 # multiply x_1 for redundancy, training data should have it masked by default

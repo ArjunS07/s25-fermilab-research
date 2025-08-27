@@ -24,8 +24,8 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
     
         # Generate random directions and magnitudes
         E_c = 0.5 + 0.5 * torch.exp(0.5 * torch.randn(batch_size, n_pairs))
-        theta = torch.arccos(1 - 2*torch.rand(batch_size, n_pairs, device=device))
-        phi = 2*torch.pi*torch.rand(batch_size, n_pairs, device=device)
+        theta = torch.arccos(1 - 2*torch.rand(batch_size, n_pairs))
+        phi = 2*torch.pi*torch.rand(batch_size, n_pairs)
         
         p_x = E_c * torch.sin(theta) * torch.cos(phi)
         p_y = E_c * torch.sin(theta) * torch.sin(phi)
@@ -38,7 +38,7 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         E_c_opp = E_c
         
         # Interleave pairs so that the mask doesn't destroy the zero CoM structure
-        particles = torch.zeros(batch_size, num_particles, 4, device=device)
+        particles = torch.zeros(batch_size, num_particles, 4)
         particles[:, 0::2] = torch.stack([E_c, p_x, p_y, p_z], dim=-1)
         particles[:, 1::2] = torch.stack([E_c_opp, p_x_opp, p_y_opp, p_z_opp], dim=-1)
         
