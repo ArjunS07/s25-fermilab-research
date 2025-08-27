@@ -162,7 +162,7 @@ class LorentzEquivariantLayer(nn.Module):
         batch_size, max_particles, _ = x.shape
         device = x.device
 
-        x = torch.clamp(x, -1e3, 1e3)  # Clamp inputs to avoid numerical issues
+        x = torch.clamp(x, -1e8, 1e8)  # Clamp inputs to avoid numerical issues
         
         # Expand mask for broadcasting
         mask_i = mask.unsqueeze(-1).unsqueeze(-1)  # (batch_size, max_particles, 1, 1)
@@ -183,7 +183,6 @@ class LorentzEquivariantLayer(nn.Module):
         xj_flat = x_j.expand(-1, max_particles, -1, -1).contiguous().view(-1, 4)        
         inner_prod = dotsq4(xi_flat, xj_flat).view(batch_size, max_particles, max_particles)
         
-        # Apply psi transformation
         psi_norm = psi(torch.clamp(norm_diff, -1e3, 1e3))
         psi_inner = psi(torch.clamp(inner_prod, -1e3, 1e3))
         
@@ -304,7 +303,7 @@ class LEFTJeN(nn.Module):
         for i, layer in enumerate(self.layers):
             x_new, g = layer(x, g0, g, t_emb, mask)
             if self.use_residual_update:
-                alpha = 0.5 + i * 0.03
+                alpha = 0.25 + i * 0.03
                 x = ((1 - alpha) * x) + (alpha * x_new)
             else:
                 x = x_new
@@ -334,7 +333,7 @@ class LEFTJeN(nn.Module):
                 vel = guided_vel
             x_next = x_t + vel * (t_end - t_start)
             # Correct x_next to CoM frame
-            x_next = enforce_com_frame(x_next, mask)
+            # x_next = enforce_com_frame(x_next, mask)
             return x_next
         else:
             raise NotImplementedError(f"Method {method} not implemented")

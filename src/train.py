@@ -60,7 +60,7 @@ if __name__ == "__main__":
     # Training
     parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
-    parser.add_argument("--target_batch_size", type=int, default=2048, help="Virtual batch size for accumulation of gradients for backprop")
+    parser.add_argument("--target_batch_size", type=int, default=256, help="Virtual batch size for accumulation of gradients for backprop")
     parser.add_argument('--cfg_null_dropout_rate', type=float, default=0.2, help='Probability of dropping out jet information and using null vector')
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
     parser.add_argument("--epoch_frac", type=float, default=1.0, help="Fraction of training dataset to use per epoch")

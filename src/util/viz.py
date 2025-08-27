@@ -14,6 +14,7 @@ colors = sns.color_palette("deep")
 import os
 from util import jet_attributes
 from util.distributions import gen_initial_distribution
+from boost_equiv import enforce_com_frame, boost_to_com_frame
 
 from util.file_management import make_clear_folder
 def plot_hist(X_test_samples, x_model, output_path, filename):
@@ -52,6 +53,10 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
     X_test_samples = X_test_particle_transformed[:n_viz_samples]
     X_test_samples = X_test_samples / scale
     X_test_samples = X_test_samples.to(device)
+    X_test_samples_mask = X_test_samples[..., -1]
+    X_test_samples = X_test_samples[..., :-1]
+    X_test_samples = boost_to_com_frame(X_test_samples, X_test_samples_mask)
+
     print("Got x test")
 
     with torch.no_grad():
@@ -82,10 +87,9 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
             prior_dist=initial_dist_method,
             device=device
         )
-        x_0 = x.clone()
-        
-
         x = x * masks.unsqueeze(-1).expand(-1, -1, n_features_per_particle)
+
+        x_0 = x.clone()
         x_model_final = x.clone()
 
         times = torch.linspace(0, 1, integration_steps + 1).to(device)
@@ -94,7 +98,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
             t = times[i].unsqueeze(0).repeat(n_viz_samples).to(device)
             final_field_conditional = final_model.forward(x_model_final, t, generated_jet_attrs, masks)
             if use_cfg:
-                null_vector = null_vector_like(generated_jet_attrs)
+                null_vector = null_vector_like(generated_jet_attrs).to(device)
                 final_field_unconditional = final_model.forward(x_model_final, t, null_vector, masks)
                 final_field = final_field_conditional + cfg_guidance_weight * (final_field_conditional - final_field_unconditional)
             else:
@@ -150,6 +154,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
                 plt.savefig(f"{output_path}/field_vectors_zoomed_{i}.png", bbox_inches='tight', dpi=300)
             
             x_model_final = x_model_final + (final_field * (times[i+1] - times[i]))
+            x_model_final = enforce_com_frame(x_model_final, masks)
             print(f"{x_model_final.mean()=}, {x_model_final.std()=}")
 
             plt.clf()

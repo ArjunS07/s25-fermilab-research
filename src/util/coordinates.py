@@ -9,8 +9,7 @@ def transform_rel_particle_coordinates_to_cartesian(X):
     where particle_features is of shape (n_particles, n_particle_features)
     and jet_features is of length n_jet_features
 
-    Particle features need to start as etarel, phirel, ptrel
-    Jet features need to start as eta, pt, mass
+    Particle features need to start as etarel, phirel, ptrel. Jet features need to start as eta, pt, mass
 
     The function generates random phi-values for jets taking into account the azimuthal symmetry of the collider
     """
@@ -45,7 +44,7 @@ def jacobian_epp_etaphipte(eppp):
     """
     Returns Jacobian for converting a Cartesian vector at Cartesian cooordinates E, p_x, p_y, p_z to a polar vector eta, phi, p_T, E
 
-    epp: batch_size, particles_per_jet, 4
+    eppp: batch_size, particles_per_jet, 4
     """
     E, p_x, p_y, p_z = eppp[..., 0], eppp[..., 1], eppp[..., 2], eppp[..., 3]
 

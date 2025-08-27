@@ -23,7 +23,7 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         n_pairs = num_particles // 2
     
         # Generate random directions and magnitudes
-        E_c = 0.5 + 0.5 * torch.exp(0.5 * torch.randn(batch_size, n_pairs, device=device))
+        E_c = 0.5 + 0.5 * torch.exp(0.5 * torch.randn(batch_size, n_pairs))
         theta = torch.arccos(1 - 2*torch.rand(batch_size, n_pairs, device=device))
         phi = 2*torch.pi*torch.rand(batch_size, n_pairs, device=device)
         
