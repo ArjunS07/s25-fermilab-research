@@ -14,7 +14,7 @@ colors = sns.color_palette("deep")
 import os
 from util import jet_attributes
 from util.distributions import gen_initial_distribution
-from boost_equiv import enforce_com_frame, boost_to_com_frame
+from util.boost_equiv import enforce_com_frame, boost_to_com_frame
 
 from util.file_management import make_clear_folder
 def plot_hist(X_test_samples, x_model, output_path, filename):
