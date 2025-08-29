@@ -286,7 +286,7 @@ if __name__ == "__main__":
         model=model,
         jet_attr_model=jet_attr_model_loaded,
         root_output_path=model_output_path,
-        num_particles=args.num_particles,
+        max_particles_per_jet=args.num_particles,
         final_scale=final_scale,
         integration_steps=args.integration_steps,
         n_samples=args.n_samples,

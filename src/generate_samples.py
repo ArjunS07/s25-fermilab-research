@@ -14,7 +14,7 @@ def generate_samples(
         jet_attr_model,
         device,
         root_output_path,
-        num_particles,
+        max_particles_per_jet,
         final_scale,
         integration_steps,
         n_samples,
@@ -40,23 +40,24 @@ def generate_samples(
             current_batch_size = min(batch_size, n_samples - start_idx)
             x = gen_initial_distribution(
                 batch_size=current_batch_size,
-                num_particles=num_particles,
+                num_particles=max_particles_per_jet,
                 device=device
                 )
             x = x.to(device)
             
             generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_model, device, n_jet_types=n_jet_types, num_jets=x.shape[0])
             jet_one_hot_enc = generated_jet_attrs[:, :5].to(device)
-            n_particles = generated_jet_attrs[:, -1].long().to(device)
+            gen_n_particles = generated_jet_attrs[:, -1].long().to(device)
+            gen_n_particles = gen_n_particles.clamp(max=max_particles_per_jet)
 
             masks = jet_attributes.generate_masks(
-                n_particles,
-                max_particles_per_jet=num_particles,
+                gen_n_particles,
+                max_particles_per_jet=max_particles_per_jet,
                 device=device
             )
             generated_jet_attrs = torch.cat([
                 jet_one_hot_enc,
-                n_particles.unsqueeze(-1).float()
+                gen_n_particles.unsqueeze(-1).float()
             ], dim=-1)
 
             for i in range(integration_steps):
