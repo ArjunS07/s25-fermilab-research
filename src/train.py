@@ -3,6 +3,8 @@ import argparse
 import logging
 
 import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
 import torch
 import random
 from torch.utils.data import DataLoader
@@ -212,15 +214,36 @@ if __name__ == "__main__":
             accumulated_loss += loss.item()
 
             if (i + 1) % accumulation_steps == 0:
+                grad_stats = {}
+                for name, param in model.named_parameters():
+                    if param.grad is not None:
+                        grad_norm = param.grad.norm(2).item()
+                        grad_mean = param.grad.abs().mean().item()
+                        grad_stats[name] = {
+                            'norm': grad_norm,
+                            'mean': grad_mean,
+                            'weight_norm': param.data.norm(2).item(),
+                            'update_ratio': grad_norm / (param.data.norm(2).item() + 1e-8)
+                        }
+                
+                if total_n_accumulations % 10 == 0:
+                    with open(f"{model_output_path}/gradient_stats.csv", "a") as f:
+                        if epoch == 0 and total_n_accumulations == 0:
+                            f.write("epoch,step," + ",".join([f"{name}_norm,{name}_mean,{name}_update_ratio" 
+                                                            for name in grad_stats.keys()]) + "\n")
+                        row = f"{epoch},{total_n_accumulations},"
+                        row += ",".join([f"{s['norm']},{s['mean']},{s['update_ratio']}" 
+                                        for s in grad_stats.values()])
+                        f.write(row + "\n")
+
                 for param in model.parameters():
                     if param.grad is not None:
                         param.grad /= accumulation_steps
-                max_norm = max(1.0, 5.0 * (1 - epoch / args.num_epochs))  # 1.0 → 5.0
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)  
+                # max_norm = max(1.0, 5.0 * (1 - epoch / args.num_epochs))
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)  
 
                 optimizer.step()
                 optimizer.zero_grad()
-                
 
                 epoch_loss += (accumulated_loss) / accumulation_steps            
                 total_n_accumulations += 1
@@ -238,10 +261,22 @@ if __name__ == "__main__":
 
         losses.append(epoch_loss / total_n_accumulations)
 
+    # Logging
     with open(f"{model_output_path}/training_loss.csv", "w") as f:
         f.write("epoch,loss\n")
         for epoch, loss in enumerate(losses):
             f.write(f"{epoch},{loss}\n")
+
+    # Plot per-layer gradient norms over time
+    df = pd.read_csv(f"{model_output_path}/gradient_stats.csv")
+    layer_names = [col.replace('_norm', '') for col in df.columns if col.endswith('_norm')]
+    for layer in layer_names:
+        # linear step scale, log norm
+        plt.semilogy(df['step'], df[f'{layer}_norm'], label=layer, alpha=0.7)
+    plt.xlabel('Training Step')
+    plt.ylabel('Gradient Norm (log scale)')
+    plt.legend()
+    plt.savefig(f"{model_output_path}/gradient_norms.png")
 
     torch.save(model.state_dict(), f"{model_output_path}/models/final_model.pth")
 
