@@ -203,7 +203,7 @@ if __name__ == "__main__":
             cartesian_loss = (conditional_u_t_cartesian - pred_cartesian).square()
             loss = cartesian_loss
 
-            if true_masks is not None:
+            if true_masks is not None: 
                 loss = loss * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
                 loss = loss.sum() / (true_masks.sum() * NUM_PARTICLE_FEATURES)
             else:
@@ -217,19 +217,20 @@ if __name__ == "__main__":
                 grad_stats = {}
                 for name, param in model.named_parameters():
                     if param.grad is not None:
+                        current_weight = param.data.norm(2).item()
                         grad_norm = param.grad.norm(2).item()
                         grad_mean = param.grad.abs().mean().item()
                         grad_stats[name] = {
                             'norm': grad_norm,
                             'mean': grad_mean,
-                            'weight_norm': param.data.norm(2).item(),
-                            'update_ratio': grad_norm / (param.data.norm(2).item() + 1e-8)
+                            'weight_norm': current_weight,
+                            'update_ratio': grad_norm / (current_weight + 1e-8)
                         }
                 
                 if total_n_accumulations % 10 == 0:
                     with open(f"{model_output_path}/gradient_stats.csv", "a") as f:
                         if epoch == 0 and total_n_accumulations == 0:
-                            f.write("epoch,step," + ",".join([f"{name}_norm,{name}_mean,{name}_update_ratio" 
+                            f.write("epoch,step," + ",".join([f"{name}_grad_norm,{name}_mean,{name}_update_ratio" 
                                                             for name in grad_stats.keys()]) + "\n")
                         row = f"{epoch},{total_n_accumulations},"
                         row += ",".join([f"{s['norm']},{s['mean']},{s['update_ratio']}" 
@@ -269,14 +270,16 @@ if __name__ == "__main__":
 
     # Plot per-layer gradient norms over time
     df = pd.read_csv(f"{model_output_path}/gradient_stats.csv")
+    grad_fig_out_path = f"{model_output_path}/grad_figures"
+    make_clear_folder(grad_fig_out_path)
     layer_names = [col.replace('_norm', '') for col in df.columns if col.endswith('_norm')]
     for layer in layer_names:
-        # linear step scale, log norm
-        plt.semilogy(df['step'], df[f'{layer}_norm'], label=layer, alpha=0.7)
-    plt.xlabel('Training Step')
-    plt.ylabel('Gradient Norm (log scale)')
-    plt.legend()
-    plt.savefig(f"{model_output_path}/gradient_norms.png")
+        plt.semilogy(df[f'{layer}_norm'], label=layer, alpha=0.7)
+        plt.xlabel('Epoch')
+        plt.ylabel('Gradient Norm (log scale)')
+        plt.legend()
+        plt.savefig(f"{grad_fig_out_path}/{layer}_gradient_norm.png")
+        plt.clf()
 
     torch.save(model.state_dict(), f"{model_output_path}/models/final_model.pth")
 

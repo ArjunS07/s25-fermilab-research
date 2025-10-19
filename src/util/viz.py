@@ -88,6 +88,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
             device=device
         )
         x = x * masks.unsqueeze(-1).expand(-1, -1, n_features_per_particle)
+        print(f"Applied masks! {x.mean()=}, {x.std()=}")
 
         x_0 = x.clone()
         x_model_final = x.clone()
@@ -97,10 +98,13 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         for i in range(len(times) - 1):
             t = times[i].unsqueeze(0).repeat(n_viz_samples).to(device)
             final_field_conditional = final_model.forward(x_model_final, t, generated_jet_attrs, masks)
+            print("Got conditional FP")
             if use_cfg:
                 null_vector = null_vector_like(generated_jet_attrs).to(device)
                 final_field_unconditional = final_model.forward(x_model_final, t, null_vector, masks)
+                print("Got unconditional FP")
                 final_field = final_field_conditional + cfg_guidance_weight * (final_field_conditional - final_field_unconditional)
+                print("Applied CFG")
             else:
                 final_field = final_field_conditional
             print(f"{i=}, {times[i]=}, {times[i+1]=}, {final_field.mean()=}, {final_field.std()=}")
@@ -153,8 +157,12 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
                 plt.ylim(-1, 1)
                 plt.savefig(f"{output_path}/field_vectors_zoomed_{i}.png", bbox_inches='tight', dpi=300)
             
-            x_model_final = x_model_final + (final_field * (times[i+1] - times[i]))
-            x_model_final = enforce_com_frame(x_model_final, masks)
+            dt = times[i+1] - times[i]
+            dt = dt.to(device)
+            final_field = final_field.to(device)
+            print(f"{final_field.mean()=}, {final_field.std()=} {dt=}")
+            x_model_final = x_model_final + (final_field * dt)
+            x_model_final = enforce_com_frame(x_model_final, masks).to(device)
             print(f"{x_model_final.mean()=}, {x_model_final.std()=}")
 
             plt.clf()
