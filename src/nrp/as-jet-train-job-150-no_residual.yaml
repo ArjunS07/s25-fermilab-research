@@ -62,22 +62,22 @@ spec:
                cd /mnt/data/src
 
               UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
-              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID"
+              OUTPUT_PATH="/mnt/data/output/gqt150-noresidual-$UNIQUE_RUN_ID"
               echo "Output path: $OUTPUT_PATH"
               mkdir $OUTPUT_PATH
               
               python3 data.py --num_particles=150 --output_path=${OUTPUT_PATH}
               python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
-              python3 train.py --batch_size=16 --num_epochs=200 --n_samples=50000 --n_layers=6 --num_particles=150 --output_path=${OUTPUT_PATH}  | tee -a ${OUTPUT_PATH}/logs.txt
+              python3 train.py --batch_size=16 --num_epochs=50 --n_samples=50000 --n_layers=6 --num_particles=150 --output_path=${OUTPUT_PATH}  | tee -a ${OUTPUT_PATH}/logs.txt
           volumeMounts:
             - mountPath: /mnt/data
               name: as-train-pvc
           resources:
             limits:
-              nvidia.com/a100: 1
+              nvidia.com/a40: 1
               memory: "12Gi"
               cpu: "2.4"
             requests:
-              nvidia.com/a100: 1
+              nvidia.com/a40: 1
               memory: "12Gi"
               cpu: "2"
