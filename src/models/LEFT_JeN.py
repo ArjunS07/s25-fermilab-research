@@ -147,8 +147,8 @@ class LorentzEquivariantLayer(nn.Module):
         self.alpha = nn.Parameter(torch.tensor(0.1))
         self.gamma = nn.Parameter(torch.tensor(0.1))
 
-        self.message_norm = nn.LayerNorm(message_dim)
-        self.global_norm = nn.LayerNorm(embed_dim)
+        self.message_sf = nn.LayerNorm(message_dim)
+        self.global_sf = nn.LayerNorm(embed_dim)
         
     def forward(self, x, g0, g_prev, t_emb, mask):
         """
@@ -205,7 +205,7 @@ class LorentzEquivariantLayer(nn.Module):
         
         # Compute messages: φ_e^l
         messages = self.phi_e(message_input)  # (batch_size, max_particles, max_particles, message_dim)
-        messages = self.message_norm(messages)  # Normalize messages
+        messages = self.message_sf(messages)  # Normalize messages
         
         # Apply pair mask to messages
         pair_mask_exp = pair_mask.unsqueeze(-1).expand(-1, -1, -1, self.message_dim)
@@ -223,12 +223,12 @@ class LorentzEquivariantLayer(nn.Module):
         N_actual_sq = N_actual * N_actual  # (batch_size, 1)
         
         global_message_sum = scaled_messages.sum(dim=[1, 2])  # (batch_size, message_dim)
-        global_message_normalized = (self.alpha / N_actual_sq) * global_message_sum
+        global_message_sfalized = (self.alpha / N_actual_sq) * global_message_sum
         
         # Update global embedding: φ_g^l
-        global_input = torch.cat([g0, g_prev, t_emb, global_message_normalized], dim=-1)
+        global_input = torch.cat([g0, g_prev, t_emb, global_message_sfalized], dim=-1)
         g_new = self.phi_g(global_input)
-        g_new = self.global_norm(g_new)
+        g_new = self.global_sf(g_new)
         
         # Prepare inputs for φ_x^l for all pairs
         g0_exp = g0.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
