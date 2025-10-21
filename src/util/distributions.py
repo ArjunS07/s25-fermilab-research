@@ -38,7 +38,7 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         E_c_opp = E_c
         
         # Interleave pairs so that the mask doesn't destroy the zero CoM structure
-        particles = torch.zeros(batch_size, num_particles, 4)
+        particles = torch.zeros(batch_size, num_particles, 4, device=device)
         particles[:, 0::2] = torch.stack([E_c, p_x, p_y, p_z], dim=-1)
         particles[:, 1::2] = torch.stack([E_c_opp, p_x_opp, p_y_opp, p_z_opp], dim=-1)
         
@@ -62,7 +62,7 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
 
         # jet features are ["eta", "pt", "mass", "num_particles", "type"],
         jet_eta = jet_features[:, 0]
-        jet_phi = (2 * torch.pi) * torch.rand(batch_size)
+        jet_phi = (2 * torch.pi) * torch.rand(batch_size, device=device)
         jet_pt = jet_features[:, 1]
 
         pt = pt_rel * jet_pt.unsqueeze(1)
