@@ -58,7 +58,7 @@ def generate_samples(
             generated_jet_attrs = torch.cat([
                 jet_one_hot_enc,
                 gen_n_particles.unsqueeze(-1).float()
-            ], dim=-1)
+            ], dim=-1).to(device)
 
             for i in range(integration_steps):
                 new_x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1], use_cfg=use_cfg, guidance_weight=cfg_guidance_weight)

@@ -113,6 +113,7 @@ class GlobalEmbedding(nn.Module):
             jet_type_onehot: (batch_size, num_jet_types) one-hot encoded jet type
             n_constituents: (batch_size,) number of constituents per jet
         """
+        jet_info = jet_info.to(self.fc1.weight.device)
         n_constituents = jet_info[:, -1]
         n_norm = n_constituents.float() / self.max_constituents
         n_norm = n_norm.unsqueeze(-1) 
