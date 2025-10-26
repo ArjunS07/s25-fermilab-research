@@ -22,6 +22,7 @@ from util.cfg import null_vector_like
 from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import data_args, get_data_path
+from util.mask_helpers import mean_std_masked_tensor
 
 RANDOM_SEED = 42
 MAX_N_PARTICLES = 150
@@ -107,8 +108,7 @@ if __name__ == "__main__":
     final_scale = np.mean(scales)
     with open(f"{model_output_path}/scale.txt", "w") as f:
         f.write(f"{final_scale}\n")
-    X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
-    
+    # X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
     model: LEFTJeN = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=args.num_particles,
@@ -174,7 +174,9 @@ if __name__ == "__main__":
             x_1 = batch_particle_info[:, :, :4]
             true_masks = batch_particle_info[:, :, 4] if args.mask else None
 
+            # TODO: Boost before, can't boost scaled data
             x_1 = boost_to_com_frame(x_1, mask=true_masks)
+            x_1 = (1/final_scale) * x_1
             x_0 = gen_initial_distribution(x_1=x_1).to(device)
             
             if true_masks is not None:
@@ -182,7 +184,10 @@ if __name__ == "__main__":
                 x_1 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_1
                 # important - x0 is a noisy normal distribution by default
                 x_0 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_0
-
+            
+            # mean_std_masked_tensor("x_0", x_0, true_masks)
+            # mean_std_masked_tensor("x_1", x_1, true_masks)
+            
             # Logit-normal sampling of t to focus around t=0.5 which is hardest
             # https://github.com/UNITES-Lab/FlowTS
             # t = torch.sigmoid(torch.randn(x_0.shape[0]))
@@ -192,15 +197,19 @@ if __name__ == "__main__":
 
             x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0 + t_viewed * x_1
             x_t = x_t.to(device)
+            # mean_std_masked_tensor("x_t", x_t, true_masks)
+
             conditional_u_t_cartesian = x_1 - ((1-args.sigma_min)*x_0)
             pred_cartesian = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
-
             if true_masks is not None:
                 conditional_u_t_cartesian = conditional_u_t_cartesian * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-
                 pred_cartesian = pred_cartesian * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+            
+            # mean_std_masked_tensor("conditional_u_t_cartesian", conditional_u_t_cartesian, true_masks)
+            # mean_std_masked_tensor("pred_cartesian", pred_cartesian, true_masks)
 
             cartesian_loss = (conditional_u_t_cartesian - pred_cartesian).square()
+            mean_std_masked_tensor("cartesian_loss", cartesian_loss, true_masks)
             loss = cartesian_loss
 
             if true_masks is not None: 
@@ -240,9 +249,8 @@ if __name__ == "__main__":
                 for param in model.parameters():
                     if param.grad is not None:
                         param.grad /= accumulation_steps
-                # max_norm = max(1.0, 5.0 * (1 - epoch / args.num_epochs))
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)  
-
+                
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
                 optimizer.step()
                 optimizer.zero_grad()
 
