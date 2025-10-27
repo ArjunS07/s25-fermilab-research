@@ -19,7 +19,7 @@ from util.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
 from util.metrics import run_save_metrics
 from util.cfg import null_vector_like
-from util.boost_equiv import boost_to_com_frame
+# from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import data_args, get_data_path
 from util.mask_helpers import mean_std_masked_tensor
@@ -102,15 +102,15 @@ if __name__ == "__main__":
         # Particles are, by default, ordered by p_t. take the n highest pt particles in each jet
         X_train_particle_transformed = X_train_particle_transformed[:, :args.num_particles, :]
     
-    # e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
-    # p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
-    # p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
-    # p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
-    # scales = [np.std(e_c), np.std(p_x), np.std(p_y), np.std(p_z)]
-    # final_scale = np.mean(scales)
-    # with open(f"{model_output_path}/scale.txt", "w") as f:
-        # f.write(f"{final_scale}\n")
-    # X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
+    e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
+    p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
+    p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
+    p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
+    scales = [np.std(e_c), np.std(p_x), np.std(p_y), np.std(p_z)]
+    final_scale = np.mean(scales)
+    with open(f"{model_output_path}/scale.txt", "w") as f:
+        f.write(f"{final_scale}\n")
+    X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
     model: LEFTJeN = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=args.num_particles,
@@ -177,8 +177,8 @@ if __name__ == "__main__":
             true_masks = batch_particle_info[:, :, 4] if args.mask else None
 
             # TODO: Boost before, can't boost scaled data
-            x_1 = boost_to_com_frame(x_1, mask=true_masks)
-            x_1 = (1/SCALE) * x_1
+            # x_1 = boost_to_com_frame(x_1, mask=true_masks)
+            # x_1 = (1/SCALE) * x_1
             x_0 = gen_initial_distribution(x_1=x_1).to(device)
             
             if true_masks is not None:
@@ -211,7 +211,7 @@ if __name__ == "__main__":
             # mean_std_masked_tensor("pred_cartesian", pred_cartesian, true_masks)
 
             cartesian_loss = (conditional_u_t_cartesian - pred_cartesian).square()
-            mean_std_masked_tensor("cartesian_loss", cartesian_loss, true_masks)
+            # mean_std_masked_tensor("cartesian_loss", cartesian_loss, true_masks)
             loss = cartesian_loss
 
             if true_masks is not None: 
@@ -303,7 +303,7 @@ if __name__ == "__main__":
             final_model=model,
             jet_attr_model=jet_attr_model_loaded,
             X_test=X_test,
-            scale=SCALE,
+            scale=final_scale,
             n_jet_types=len(args.jet_types),
             n_particles_per_jet=args.num_particles,
             n_features_per_particle=NUM_PARTICLE_FEATURES,
@@ -317,7 +317,7 @@ if __name__ == "__main__":
             final_model=model,
             jet_attr_model=jet_attr_model_loaded,
             X_test=X_test,
-            scale=SCALE,
+            scale=final_scale,
             n_jet_types=len(args.jet_types),
             n_particles_per_jet=args.num_particles,
             n_features_per_particle=NUM_PARTICLE_FEATURES,
@@ -335,7 +335,7 @@ if __name__ == "__main__":
         jet_attr_model=jet_attr_model_loaded,
         root_output_path=model_output_path,
         max_particles_per_jet=args.num_particles,
-        final_scale=SCALE,
+        final_scale=final_scale,
         integration_steps=args.integration_steps,
         n_samples=args.n_samples,
         n_jet_types=len(args.jet_types),

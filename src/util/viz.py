@@ -14,7 +14,7 @@ colors = sns.color_palette("deep")
 import os
 from util import jet_attributes
 from util.distributions import gen_initial_distribution
-from util.boost_equiv import enforce_com_frame, boost_to_com_frame
+# from util.boost_equiv import enforce_com_frame, boost_to_com_frame
 
 from util.file_management import make_clear_folder
 def plot_hist(X_test_samples, x_model, output_path, filename):
@@ -54,8 +54,8 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
 
     X_test_samples_mask = X_test_samples[..., -1]
     X_test_samples = X_test_samples[..., :-1]
-    X_test_samples = boost_to_com_frame(X_test_samples, X_test_samples_mask)
-    
+    # X_test_samples = boost_to_com_frame(X_test_samples, X_test_samples_mask)
+
     X_test_samples = X_test_samples / scale
     X_test_samples = X_test_samples.to(device)
 
@@ -164,7 +164,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
             final_field = final_field.to(device)
             print(f"{final_field.mean()=}, {final_field.std()=} {dt=}")
             x_model_final = x_model_final + (final_field * dt)
-            x_model_final = enforce_com_frame(x_model_final, masks).to(device)
+            # x_model_final = enforce_com_frame(x_model_final, masks).to(device)
             print(f"{x_model_final.mean()=}, {x_model_final.std()=}")
 
             plt.clf()

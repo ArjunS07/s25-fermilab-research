@@ -5,7 +5,6 @@ import numpy as np
 
 from util.minkowski_utils import normsq4, dotsq4
 from util.cfg import null_vector_like
-from util.boost_equiv import enforce_com_frame
 
 def psi(p):
     ''' `\psi(p) = Sgn(p) \cdot \log(|p| + 1)` '''
