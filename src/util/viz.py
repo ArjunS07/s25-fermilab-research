@@ -51,11 +51,13 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
 
     X_test_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_test)
     X_test_samples = X_test_particle_transformed[:n_viz_samples]
-    X_test_samples = X_test_samples / scale
-    X_test_samples = X_test_samples.to(device)
+
     X_test_samples_mask = X_test_samples[..., -1]
     X_test_samples = X_test_samples[..., :-1]
     X_test_samples = boost_to_com_frame(X_test_samples, X_test_samples_mask)
+    
+    X_test_samples = X_test_samples / scale
+    X_test_samples = X_test_samples.to(device)
 
     print("Got x test")
 

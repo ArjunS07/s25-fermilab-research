@@ -29,6 +29,8 @@ MAX_N_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4 # E/c, px, py, pz
 TRAIN_SPLIT = 0.7
 
+SCALE = 2000
+
 class PairedDataset(torch.utils.data.Dataset):
     def __init__(self, jet_info, particle_data):
         self.jet_info = jet_info
@@ -100,14 +102,14 @@ if __name__ == "__main__":
         # Particles are, by default, ordered by p_t. take the n highest pt particles in each jet
         X_train_particle_transformed = X_train_particle_transformed[:, :args.num_particles, :]
     
-    e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
-    p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
-    p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
-    p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
-    scales = [np.std(e_c), np.std(p_x), np.std(p_y), np.std(p_z)]
-    final_scale = np.mean(scales)
-    with open(f"{model_output_path}/scale.txt", "w") as f:
-        f.write(f"{final_scale}\n")
+    # e_c = np.array(X_train_particle_transformed[:, :, 0].flatten())
+    # p_x = np.array(X_train_particle_transformed[:, :, 1].flatten())
+    # p_y = np.array(X_train_particle_transformed[:, :, 2].flatten())
+    # p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())
+    # scales = [np.std(e_c), np.std(p_x), np.std(p_y), np.std(p_z)]
+    # final_scale = np.mean(scales)
+    # with open(f"{model_output_path}/scale.txt", "w") as f:
+        # f.write(f"{final_scale}\n")
     # X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
     model: LEFTJeN = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
@@ -176,7 +178,7 @@ if __name__ == "__main__":
 
             # TODO: Boost before, can't boost scaled data
             x_1 = boost_to_com_frame(x_1, mask=true_masks)
-            x_1 = (1/final_scale) * x_1
+            x_1 = (1/SCALE) * x_1
             x_0 = gen_initial_distribution(x_1=x_1).to(device)
             
             if true_masks is not None:
@@ -301,7 +303,7 @@ if __name__ == "__main__":
             final_model=model,
             jet_attr_model=jet_attr_model_loaded,
             X_test=X_test,
-            scale=final_scale,
+            scale=SCALE,
             n_jet_types=len(args.jet_types),
             n_particles_per_jet=args.num_particles,
             n_features_per_particle=NUM_PARTICLE_FEATURES,
@@ -315,7 +317,7 @@ if __name__ == "__main__":
             final_model=model,
             jet_attr_model=jet_attr_model_loaded,
             X_test=X_test,
-            scale=final_scale,
+            scale=SCALE,
             n_jet_types=len(args.jet_types),
             n_particles_per_jet=args.num_particles,
             n_features_per_particle=NUM_PARTICLE_FEATURES,
@@ -333,7 +335,7 @@ if __name__ == "__main__":
         jet_attr_model=jet_attr_model_loaded,
         root_output_path=model_output_path,
         max_particles_per_jet=args.num_particles,
-        final_scale=final_scale,
+        final_scale=SCALE,
         integration_steps=args.integration_steps,
         n_samples=args.n_samples,
         n_jet_types=len(args.jet_types),
