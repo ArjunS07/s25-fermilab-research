@@ -72,3 +72,26 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
 
         stacked = torch.stack([eta, phi, pt, p0], axis=-1)
         return EtaPhiPtE_to_cartesian(stacked)
+    
+
+def time_dist(batch_size, device='cpu', mode='power_law', *args, **kwargs):
+    if mode == 'uniform':
+        return torch.rand(batch_size, device=device)
+    elif mode == 'power_law':
+        # pdf = (1+a) * x^a
+        # cdf = x^(a+1)
+        # https://math.stackexchange.com/questions/3499892/sampling-from-a-distribution-with-given-pdf
+        a = kwargs.get('a', 0.2)
+        # sample x uniformly over 0, 1
+        u = torch.rand(batch_size, device=device)
+        return u ** (1 / (a + 1))
+    elif mode == 'lognorm':
+        #-lognorm(-0.5, 1)
+        mu = kwargs.get('mu', -0.5)
+        sigma = kwargs.get('sigma', 1.0)
+        dist = torch.distributions.LogNormal(mu, sigma)
+        samples = dist.sample((batch_size,)).to(device)
+        samples = samples / samples.max()
+        return samples
+    else:
+        raise ValueError(f"Unknown time distribution mode: {mode}")

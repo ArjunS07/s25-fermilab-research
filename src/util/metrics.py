@@ -4,7 +4,7 @@ import torch
 from jetnet.utils import EtaPhiPtE_to_relEtaPhiPt, cartesian_to_EtaPhiPtE
 import jetnet.evaluation as jetnet_eval
 
-def __x_test_to_abs(X_test):
+def __x_test_to_abs(X_test, device='cpu'):
     jet_eta = (X_test[:][1][:, 0]).unsqueeze(1)
     jet_phi_vals = (2 * torch.pi) * torch.rand(len(X_test)).unsqueeze(1)
     jet_pt_ec = X_test[:][1][:, 1:3]
@@ -17,13 +17,13 @@ def __x_test_to_abs(X_test):
     phi = phi_rel + Phi.unsqueeze(1)
     p0 = pt * torch.cosh(eta)
 
-    return torch.stack([eta, phi, pt, p0], dim=-1)
+    return torch.stack([eta, phi, pt, p0], dim=-1).to(device)
 
-def run_save_metrics(X_test, gen_samples, jet_types, output_path):
-    gen_polar_abs = cartesian_to_EtaPhiPtE(gen_samples)
+def run_save_metrics(X_test, gen_samples, jet_types, output_path, device='cpu'):
+    gen_polar_abs = cartesian_to_EtaPhiPtE(gen_samples.to(device))
     gen_polar_abs[:, :, 1] += torch.pi
 
-    test_polar_abs = __x_test_to_abs(X_test=X_test)
+    test_polar_abs = __x_test_to_abs(X_test=X_test, device=device)
     test_polar_rel = EtaPhiPtE_to_relEtaPhiPt(test_polar_abs)
     gen_polar_rel = EtaPhiPtE_to_relEtaPhiPt(gen_polar_abs)
     

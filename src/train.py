@@ -13,8 +13,9 @@ from models.LEFT_JeN import LEFTJeN
 from util import jet_attributes
 from util.jet_attributes import NUM_CLASSES
 from jet_attr_model import get_model_pth_path
-from util.distributions import gen_initial_distribution
+from util.distributions import gen_initial_distribution, time_dist
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian, jacobian_epp_etaphipte
+from jetnet.utils import EtaPhiPtE_to_cartesian, cartesian_to_EtaPhiPtE
 from util.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
 from util.metrics import run_save_metrics
@@ -70,6 +71,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
     parser.add_argument("--epoch_frac", type=float, default=1.0, help="Fraction of training dataset to use per epoch")
     parser.add_argument("--sigma_min", type=float, default=1e-4, help="Tolerance around target for flow map")
+    parser.add_argument("--train_space", type=str, default='cartesian', choices=['cartesian', 'polar'], help="Coordinate space in which to interpolate points")
+    parser.add_argument("--time_sampling", type=str, default='uniform', choices=['uniform', 'power_law', 'lognorm'], help="Method to sample time steps during training")
 
     # Inference
     parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
@@ -190,28 +193,49 @@ if __name__ == "__main__":
             # mean_std_masked_tensor("x_0", x_0, true_masks)
             # mean_std_masked_tensor("x_1", x_1, true_masks)
             
-            # Logit-normal sampling of t to focus around t=0.5 which is hardest
-            # https://github.com/UNITES-Lab/FlowTS
-            # t = torch.sigmoid(torch.randn(x_0.shape[0]))
-            t = torch.rand(x_0.shape[0])
+            if args.time_sampling == 'uniform':
+                t = time_dist(x_0.shape[0], device=device, mode='uniform')
+            elif args.time_sampling == 'power_law':
+                t = time_dist(x_0.shape[0], device=device, mode='power_law', a=0.2)
+            elif args.time_sampling == 'lognorm':
+                t = time_dist(x_0.shape[0], device=device, mode='lognorm', mu=-0.5, sigma=1.0)
+            else:
+                raise ValueError(f"Unknown time sampling method: {args.time_sampling}")
             t = t.to(device)
             t_viewed = t.view(-1, 1, 1)
 
-            x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0 + t_viewed * x_1
-            x_t = x_t.to(device)
-            # mean_std_masked_tensor("x_t", x_t, true_masks)
+            """
+            The support of the prob dist is convex in polar coordinates
+            So we convert x_0 and x_1 to polar
+            And calculate x_t in polar
+            Then we convert it back to cartesian for the model
 
-            conditional_u_t_cartesian = x_1 - ((1-args.sigma_min)*x_0)
-            pred_cartesian = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
+            We do loss in cartesian coords as usual - they should be equivalent. The point is to only use valid x_t
+            """
+
+            x_t = None
+            if args.train_space == 'polar':
+                x_0_polar = cartesian_to_EtaPhiPtE(x_0)
+                x_1_polar = cartesian_to_EtaPhiPtE(x_1)
+                x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0_polar + t_viewed * x_1_polar
+                x_t = EtaPhiPtE_to_cartesian(x_t)
+            else:
+                x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0 + t_viewed * x_1
+
+            x_t = x_t.to(device)
+            mean_std_masked_tensor("x_t", x_t, true_masks)
+
+            conditional_u_t = x_1 - ((1-args.sigma_min)*x_0)
+            pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
             if true_masks is not None:
-                conditional_u_t_cartesian = conditional_u_t_cartesian * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-                pred_cartesian = pred_cartesian * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+                conditional_u_t = conditional_u_t * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+                pred = pred * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
             
             # mean_std_masked_tensor("conditional_u_t_cartesian", conditional_u_t_cartesian, true_masks)
             # mean_std_masked_tensor("pred_cartesian", pred_cartesian, true_masks)
 
-            cartesian_loss = (conditional_u_t_cartesian - pred_cartesian).square()
-            # mean_std_masked_tensor("cartesian_loss", cartesian_loss, true_masks)
+            cartesian_loss = (conditional_u_t - pred).square()
+            mean_std_masked_tensor("cartesian_loss", cartesian_loss, true_masks)
             loss = cartesian_loss
 
             if true_masks is not None: 
@@ -219,7 +243,6 @@ if __name__ == "__main__":
                 loss = loss.sum() / (true_masks.sum() * NUM_PARTICLE_FEATURES)
             else:
                 loss = loss.mean()
-
 
             loss.backward()
             accumulated_loss += loss.item()
@@ -266,7 +289,7 @@ if __name__ == "__main__":
                 if total_n_accumulations % 10 == 0:
                     print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {(epoch_loss / total_n_accumulations):.4f}")
                 
-            del x_1, x_0, t, t_viewed, x_t, conditional_u_t_cartesian, pred_cartesian, loss
+            del x_1, x_0, t, t_viewed, x_t, conditional_u_t, pred, loss
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
@@ -330,22 +353,35 @@ if __name__ == "__main__":
         with open(f"{model_output_path}/error_log.txt", "a") as f:
             f.write(f"Error occurred while generating model vector field: {e}\n")
 
-    samples = generate_samples(
-        model=model,
-        jet_attr_model=jet_attr_model_loaded,
-        root_output_path=model_output_path,
-        max_particles_per_jet=args.num_particles,
-        final_scale=final_scale,
-        integration_steps=args.integration_steps,
-        n_samples=args.n_samples,
-        n_jet_types=len(args.jet_types),
-        device=device,
-        batch_size=args.batch_size,
-        use_cfg=True
-    )
-    run_save_metrics(
-        X_test=X_test,
-        jet_types=args.jet_types,
-        gen_samples=samples,
-        output_path=model_output_path
-    )
+    try:
+        samples = generate_samples(
+            model=model,
+            jet_attr_model=jet_attr_model_loaded,
+            root_output_path=model_output_path,
+            max_particles_per_jet=args.num_particles,
+            final_scale=final_scale,
+            integration_steps=args.integration_steps,
+            n_samples=args.n_samples,
+            n_jet_types=len(args.jet_types),
+            device=device,
+            batch_size=args.batch_size,
+            use_cfg=True
+        )
+    except Exception as e:
+        print(f"Error occurred while generating samples: {e}")
+        with open(f"{model_output_path}/error_log.txt", "a") as f:
+            f.write(f"Error occurred while generating samples: {e}\n")
+        exit(1)
+    
+    try:
+        run_save_metrics(
+            X_test=X_test,
+            jet_types=args.jet_types,
+            gen_samples=samples,
+            output_path=model_output_path,
+            device=device
+        )
+    except Exception as e:
+        print(f"Error occurred while running/saving metrics: {e}")
+        with open(f"{model_output_path}/error_log.txt", "a") as f:
+            f.write(f"Error occurred while running/saving metrics: {e}\n")

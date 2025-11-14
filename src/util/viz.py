@@ -46,13 +46,13 @@ def plot_hist(X_test_samples, x_model, output_path, filename):
 
 def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, scale, n_jet_types, n_particles_per_jet, initial_dist_method='isotropic_com', n_features_per_particle=4, n_viz_samples=1000, zoom_in=True, save_videos=True, integration_steps=16, use_cfg=False, cfg_guidance_weight=1):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    output_path = f"{out_dir}/vf_viz"
+    output_path = f"{out_dir}"
     make_clear_folder(output_path)
 
     X_test_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_test)
     X_test_samples = X_test_particle_transformed[:n_viz_samples]
 
-    X_test_samples_mask = X_test_samples[..., -1]
+    # X_test_samples_mask = X_test_samples[..., -1]
     X_test_samples = X_test_samples[..., :-1]
     # X_test_samples = boost_to_com_frame(X_test_samples, X_test_samples_mask)
 
@@ -201,8 +201,11 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         plt.savefig(f"{output_path}/field_vectors_zoomed_{i+1}.png", bbox_inches='tight', dpi=300)
     
     if save_videos:
-        os.system(f"ffmpeg -r 7 -i {output_path}/field_vectors_zoomed_%01d.png -vcodec mpeg4 -y  {output_path}/movie_zoomed_in.mp4")
-        os.system(f"ffmpeg -r 7 -i {output_path}/field_vectors_%01d.png -vcodec mpeg4 -y  {output_path}/movie_zoomed_out.mp4")
+        try:
+            os.system(f"ffmpeg -r 7 -i {output_path}/field_vectors_zoomed_%01d.png -vcodec mpeg4 -y  {output_path}/movie_zoomed_in.mp4")
+            os.system(f"ffmpeg -r 7 -i {output_path}/field_vectors_%01d.png -vcodec mpeg4 -y  {output_path}/movie_zoomed_out.mp4")
+        except Exception as e:
+            print(f"Could not create videos due to error: {e}")
 
 
     plot_hist(X_test_samples, x_model_final, output_path=output_path, filename="final_hist")

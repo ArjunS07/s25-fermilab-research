@@ -63,21 +63,21 @@ def generate_samples(
             for i in range(integration_steps):
                 new_x = model.step(x, generated_jet_attrs, masks, times[i], times[i + 1], use_cfg=use_cfg, guidance_weight=cfg_guidance_weight)
                 x = new_x
-                fig, axs = plt.subplots(1, 4, figsize=(20, 10))
+                # fig, axs = plt.subplots(1, 4, figsize=(20, 10))
                 
-                for j, feature in enumerate(features):
-                    ax = axs[j]
-                    sns.histplot(
-                        x[:, :, j].flatten().cpu().numpy(),
-                        bins=100,
-                        ax=ax,
-                        stat="density",
-                        kde=True,
-                        label="Generated"
-                    )
-                    ax.set_title(feature)
-                plt.savefig(f"{root_output_path}/samples/histogram_{start_idx//batch_size:04d}_step_{i}.png")
-                plt.close(fig)
+                # for j, feature in enumerate(features):
+                #     ax = axs[j]
+                #     sns.histplot(
+                #         x[:, :, j].flatten().cpu().numpy(),
+                #         bins=100,
+                #         ax=ax,
+                #         stat="density",
+                #         kde=True,
+                #         label="Generated"
+                #     )
+                #     ax.set_title(feature)
+                # plt.savefig(f"{root_output_path}/samples/histogram_{start_idx//batch_size:04d}_step_{i}.png")
+                # plt.close(fig)
 
             torch.save(final_scale * x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
 
@@ -88,6 +88,6 @@ def generate_samples(
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-    return torch.cat(all_samples, dim=0)
+    return torch.cat(all_samples, dim=0).to(device)
 
 
