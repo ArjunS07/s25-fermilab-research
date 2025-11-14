@@ -46,7 +46,7 @@ spec:
         apt update -y && apt install ffmpeg -y
         
         # Start Jupyter
-        cd /mnt/data/src
+        cd /mnt/data/
         jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root --NotebookApp.token='' --NotebookApp.password=''
         
     ports:
