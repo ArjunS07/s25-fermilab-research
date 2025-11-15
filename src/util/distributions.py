@@ -41,6 +41,10 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         particles = torch.zeros(batch_size, num_particles, 4, device=device)
         particles[:, 0::2] = torch.stack([E_c, p_x, p_y, p_z], dim=-1)
         particles[:, 1::2] = torch.stack([E_c_opp, p_x_opp, p_y_opp, p_z_opp], dim=-1)
+
+        current_std = particles.std()
+        target_std = 1.0  # Match training data mean std
+        particles = particles * (target_std / current_std)
         
         return particles
 

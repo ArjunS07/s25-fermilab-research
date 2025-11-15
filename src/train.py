@@ -30,7 +30,7 @@ MAX_N_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4 # E/c, px, py, pz
 TRAIN_SPLIT = 0.7
 
-SCALE = 2000
+# SCALE = 2000
 
 class PairedDataset(torch.utils.data.Dataset):
     def __init__(self, jet_info, particle_data):
@@ -114,6 +114,10 @@ if __name__ == "__main__":
     with open(f"{model_output_path}/scale.txt", "w") as f:
         f.write(f"{final_scale}\n")
     X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
+    print(f"{X_train_particle_transformed[:, :, 0].mean()=} {X_train_particle_transformed[:, :, 1].mean()=} {X_train_particle_transformed[:, :, 2].mean()=} {X_train_particle_transformed[:, :, 3].mean()=}")
+    print(f"{X_train_particle_transformed[:, :, 0].std()=} {X_train_particle_transformed[:, :, 1].std()=} {X_train_particle_transformed[:, :, 2].std()=} {X_train_particle_transformed[:, :, 3].std()=}")
+    print(f"{X_train_particle_transformed[:, :, 0].max()=} {X_train_particle_transformed[:, :, 1].max()=} {X_train_particle_transformed[:, :, 2].max()=} {X_train_particle_transformed[:, :, 3].max()=}")
+    print(f"{X_train_particle_transformed[:, :, 0].min()=} {X_train_particle_transformed[:, :, 1].min()=} {X_train_particle_transformed[:, :, 2].min()=} {X_train_particle_transformed[:, :, 3].min()=}")
     model: LEFTJeN = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=args.num_particles,
@@ -183,6 +187,7 @@ if __name__ == "__main__":
             # x_1 = boost_to_com_frame(x_1, mask=true_masks)
             # x_1 = (1/SCALE) * x_1
             x_0 = gen_initial_distribution(x_1=x_1).to(device)
+            print(f"{x_0[:, :, 0].std()=} {x_0[:, :, 1].std()=} {x_0[:, :, 2].std()=} {x_0[:, :, 3].std()=}")
             
             if true_masks is not None:
                 # multiply x_1 for redundancy, training data should have it masked by default
@@ -223,7 +228,7 @@ if __name__ == "__main__":
                 x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0 + t_viewed * x_1
 
             x_t = x_t.to(device)
-            mean_std_masked_tensor("x_t", x_t, true_masks)
+            # mean_std_masked_tensor("x_t", x_t, true_masks)
 
             conditional_u_t = x_1 - ((1-args.sigma_min)*x_0)
             pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
@@ -235,7 +240,7 @@ if __name__ == "__main__":
             # mean_std_masked_tensor("pred_cartesian", pred_cartesian, true_masks)
 
             cartesian_loss = (conditional_u_t - pred).square()
-            mean_std_masked_tensor("cartesian_loss", cartesian_loss, true_masks)
+            # mean_std_masked_tensor("cartesian_loss", cartesian_loss, true_masks)
             loss = cartesian_loss
 
             if true_masks is not None: 
