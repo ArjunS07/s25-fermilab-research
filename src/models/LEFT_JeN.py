@@ -107,11 +107,6 @@ class GlobalEmbedding(nn.Module):
         nn.init.zeros_(self.fc2.bias)
         
     def forward(self, jet_info):
-        """
-        Args:
-            jet_type_onehot: (batch_size, num_jet_types) one-hot encoded jet type
-            n_constituents: (batch_size,) number of constituents per jet
-        """
         jet_info = jet_info.to(self.fc1.weight.device)
         n_constituents = jet_info[:, -1]
         n_norm = n_constituents.float() / self.max_constituents
@@ -127,19 +122,19 @@ class LorentzEquivariantLayer(nn.Module):
         self.embed_dim = embed_dim
         self.message_dim = message_dim
         
-        # Message computation: φ_e^l
-        # Input: ψ(||x_i - x_j||), ψ(<x_i, x_j>), g^0, g^l, t_emb
+        # Message computation: phi_e^l
+        # Input: psi(||x_i - x_j||), psi(<x_i, x_j>), g^0, g^l, t_emb
         message_input_dim = 2 + embed_dim + embed_dim + embed_dim  # 2 + 3*embed_dim
         self.phi_e = PhiMLP(message_input_dim, [hidden_dim, hidden_dim], message_dim)
         
-        # Message aggregation scalar: φ_m^l
+        # Message aggregation scalar: phi_m^l
         self.phi_m = PhiMLP(message_dim, [hidden_dim, hidden_dim], 1, output_activation=nn.Tanh())
         
-        # Global embedding update: φ_g^l
+        # Global embedding update: phi_g^l
         global_input_dim = embed_dim + embed_dim + embed_dim + message_dim  # g^0, g^l, t_emb, aggregated_msg
         self.phi_g = PhiMLP(global_input_dim, [hidden_dim, hidden_dim], embed_dim)
         
-        # Displacement scaling: φ_x^l  
+        # Displacement scaling: phi_x^l  
         displacement_input_dim = embed_dim + embed_dim + embed_dim + message_dim  # g^0, g^l, t_emb, m_ij
         self.phi_x = PhiMLP(displacement_input_dim, [hidden_dim, hidden_dim], 1, output_activation=nn.Tanh())
 
@@ -151,14 +146,6 @@ class LorentzEquivariantLayer(nn.Module):
         self.global_sf = nn.LayerNorm(embed_dim)
         
     def forward(self, x, g0, g_prev, t_emb, mask):
-        """
-        Args:
-            x: (batch_size, max_particles, 4) particle 4-momenta
-            g0: (batch_size, embed_dim) initial global embedding
-            g_prev: (batch_size, embed_dim) previous layer global embedding  
-            t_emb: (batch_size, embed_dim) time embedding
-            mask: (batch_size, max_particles) particle mask
-        """
         batch_size, max_particles, _ = x.shape
         device = x.device
 
@@ -203,7 +190,7 @@ class LorentzEquivariantLayer(nn.Module):
             t_emb_exp                # (batch_size, max_particles, max_particles, embed_dim)
         ], dim=-1)
         
-        # Compute messages: φ_e^l
+        # Compute messages: phi_e^l
         messages = self.phi_e(message_input)  # (batch_size, max_particles, max_particles, message_dim)
         messages = self.message_sf(messages)  # Normalize messages
         
@@ -211,7 +198,7 @@ class LorentzEquivariantLayer(nn.Module):
         pair_mask_exp = pair_mask.unsqueeze(-1).expand(-1, -1, -1, self.message_dim)
         messages = messages * pair_mask_exp
         
-        # Compute message scalings: φ_m^l  
+        # Compute message scalings: phi_m^l  
         message_scalings = self.phi_m(messages).squeeze(-1)  # (batch_size, max_particles, max_particles)
         message_scalings = message_scalings * pair_mask
         
@@ -225,19 +212,19 @@ class LorentzEquivariantLayer(nn.Module):
         global_message_sum = scaled_messages.sum(dim=[1, 2])  # (batch_size, message_dim)
         global_message_sfalized = (self.alpha / N_actual_sq) * global_message_sum
         
-        # Update global embedding: φ_g^l
+        # Update global embedding: phi_g^l
         global_input = torch.cat([g0, g_prev, t_emb, global_message_sfalized], dim=-1)
         g_new = self.phi_g(global_input)
         g_new = self.global_sf(g_new)
         
-        # Prepare inputs for φ_x^l for all pairs
+        # Prepare inputs for phi_x^l for all pairs
         g0_exp = g0.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
         g_prev_exp = g_prev.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
         t_emb_exp = t_emb.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
         displacement_input = torch.cat([g0_exp, g_prev_exp, t_emb_exp, messages], dim=-1)
         # Shape: (batch_size, max_particles, max_particles, input_dim)
         
-        # Apply φ_x^l to all pairs at once
+        # Apply phi_x^l to all pairs at once
         phi_x_out = self.phi_x(displacement_input).squeeze(-1)  # (batch_size, max_particles, max_particles)
         
         # Compute normalized displacements for all pairs
@@ -283,19 +270,16 @@ class LEFTJeN(nn.Module):
     def forward(self, x, t, jet_conditions, mask):
         """
         Forward pass of the flow matching model.
-        
-        Args:
-            t: (batch_size,) time values
-            x0: (batch_size, max_particles, 4) initial particle 4-momenta
-            jet_type_onehot: (batch_size, num_jet_types) one-hot encoded jet type
-            n_constituents: (batch_size,) number of constituents per jet
-            
+
         Returns:
             v_theta: (batch_size, max_particles, 4) velocity field
         """
     
         t_emb = self.time_embedding(t) 
         g0 = self.global_embedding(jet_conditions)  
+        # To preserve LE, pass scalar global PT value through each layer
+        # pt = jet_conditions[:, 1]
+        # print(f"{pt.shape=}")
         
         x0 = x.clone()
         g = g0.clone()

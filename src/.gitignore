@@ -2,5 +2,6 @@ temp_gen_samples
 data
 datasets
 downloaded_output
+downloaded_outputs
 debugging/*.png
 local_out

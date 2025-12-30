@@ -81,6 +81,24 @@
     \end{enumerate}
 \end{frame}
 
+
+\begin{frame}[allowframebreaks]{$p_T$ new architecture details}
+    $x$ = Cartesian particle 4-momenta, $\phi_\cdot$ = learnable functions, $\psi(\cdot) = \text{sgn}(\cdot) \log(|\cdot| + 1)$,$N = \#$ particles, $|| \cdot ||, \langle \cdot \rangle$ = Minkowski norm and inner product
+    \begin{enumerate}
+        \item Embed scalar time value to random Fourier features through two fully cnnected layers with 32 and 64 nodes to producd $t_\text{emb}$
+        \item Pass one-hot encoded jet type $j_t$ and number of constituents $N$ through two fully-connected layers with 32 and 64 nodes to produce global embedding $g^0$
+        \item Initialize particle cloud $x_1 \dots x_N$, and zero-pad up to 150 if necessary
+        \item Stack $L$ Lorentz-group equivariant layers \begin{enumerate}
+            \item Input to the $l+1$-th layer is $t_\text{emb}$, $g^0$, $g^L, p_T, x_1 \cdots x_N$
+            \item Calculate messages $m_{ij}^l = \phi_e^l(\psi(||x_i^l - x_j^l||^2), \psi(\langle x_i, x_j \rangle), g^0, g^l, t_\text{emb}, p_T)$
+            \item Cache the message aggregation $$\sum\limits_{i, j \in N} \phi_m^l(m_{ij}^l) m_{ij} $$
+            \item Update the global embedding $$g^{l+1} = \phi_g^l \left(g^0, g^l, p_T, t_\text{emb} \frac{\alpha_l}{N^2} \sum\limits_{i, j \in N} \phi_m^l(m_{ij}^l) m_{ij}  \right)$$ where $\phi_m^l$ outputs a scalar and $\alpha_l$ is a scalar
+            \item Apply a linear combination to update the 4-vectors $$x_i^{l+1} = x_i^l + \gamma^l \sum\limits_{j \neq i} \phi_x^l (g^0, g^l, t_\text{emb}, m_{ij}) \frac{x_i^l - x_j^l}{1 + ||x_i^l - x_j^l||} $$  where $\phi_w^l$ and $\phi_x^l$ output scalars
+            \item Final output $v_\theta(t, x^0)_i = x_i^L$
+        \end{enumerate}
+    \end{enumerate}
+\end{frame}
+
 \begin{frame}
     \begin{center}
         \textit{Video of output}

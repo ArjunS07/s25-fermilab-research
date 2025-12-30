@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-job-30-power_law
+  name: as-jet-train-job-30-powerlaw
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -68,7 +68,7 @@ spec:
               
               python3 data.py --num_particles=30 --output_path=${OUTPUT_PATH}
               python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
-              python3 train.py --time_sampling='power_law' --batch_size=16 --num_epochs=50 --n_samples=50000 --n_layers=3 --num_particles=30 --output_path=${OUTPUT_PATH}  --use_residual | tee -a ${OUTPUT_PATH}/logs.txt
+              python3 train.py --time_sampling='power_law' --batch_size=16 --num_epochs=50 --n_samples=50000 --integration_steps=256 --n_layers=3 --num_particles=30 --output_path=${OUTPUT_PATH}  --use_residual | tee -a ${OUTPUT_PATH}/logs.txt
           
           volumeMounts:
             - mountPath: /mnt/data
