@@ -11,6 +11,6 @@ def null_vector(n_jet_types):
 def null_vector_like(jet_info, max_n_jet_types=5):
     """
     Create a null vector with the same shape as the jet information tensor.
+    All elements are zero, matching the convention for dropped-out conditioning.
     """
-    batch_size = jet_info.shape[0]
-    return null_vector(max_n_jet_types).unsqueeze(0).repeat(batch_size, 1)
+    return torch.zeros_like(jet_info)

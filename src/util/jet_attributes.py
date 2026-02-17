@@ -49,7 +49,7 @@ def generate_jets(model, device, n_jet_types, num_jets=1000, one_hot_types=None)
         num_jets: Number of jets to generate.
         one_hot_types: Optional one-hot encoded tensor of desired jet types. If None, random types
     """
-    if not one_hot_types:
+    if one_hot_types is None:
         sample_jet_types = torch.randint(0, n_jet_types, (num_jets,)).to(device)
         one_hot_types = one_hot_enc_jet_type(sample_jet_types)
     jets, jet_logprobs = model.sample(num_jets, context=one_hot_types)

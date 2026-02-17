@@ -10,6 +10,10 @@ def generate_x_0_com_frame(x_1=None, batch_size=None, num_particles=None, device
         device = x_1.device
     elif (batch_size is None) or (num_particles is None):
         raise ValueError("Either x_1 or (batch_size and num_particles) must be provided.")
+    raise NotImplementedError(
+        "generate_x_0_com_frame is not yet implemented. "
+        "Use gen_initial_distribution with prior_dist='isotropic_com' instead."
+    )
 
     
 
@@ -37,10 +41,12 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         p_z_opp = -p_z
         E_c_opp = E_c
         
-        # Interleave pairs so that the mask doesn't destroy the zero CoM structure
+        # Interleave pairs so that the mask doesn't destroy the zero CoM structure.
+        # Use explicit slice bounds so odd num_particles doesn't cause a shape mismatch:
+        # the last slot stays zero and will be masked out by the particle mask anyway.
         particles = torch.zeros(batch_size, num_particles, 4, device=device)
-        particles[:, 0::2] = torch.stack([E_c, p_x, p_y, p_z], dim=-1)
-        particles[:, 1::2] = torch.stack([E_c_opp, p_x_opp, p_y_opp, p_z_opp], dim=-1)
+        particles[:, 0:2*n_pairs:2] = torch.stack([E_c, p_x, p_y, p_z], dim=-1)
+        particles[:, 1:2*n_pairs:2] = torch.stack([E_c_opp, p_x_opp, p_y_opp, p_z_opp], dim=-1)
 
         current_std = particles.std()
         target_std = 1.0  # Match training data mean std
@@ -90,12 +96,14 @@ def time_dist(batch_size, device='cpu', mode='power_law', *args, **kwargs):
         u = torch.rand(batch_size, device=device)
         return u ** (1 / (a + 1))
     elif mode == 'lognorm':
-        #-lognorm(-0.5, 1)
         mu = kwargs.get('mu', -0.5)
         sigma = kwargs.get('sigma', 1.0)
         dist = torch.distributions.LogNormal(mu, sigma)
         samples = dist.sample((batch_size,)).to(device)
-        samples = samples / samples.max()
+        # Normalize using the theoretical 95th percentile of this LogNormal so the
+        # scaling is batch-independent. p95 = exp(mu + sigma * 1.645).
+        p95 = torch.exp(torch.tensor(mu + sigma * 1.645, device=device))
+        samples = (samples / p95).clamp(max=1.0)
         return samples
     else:
         raise ValueError(f"Unknown time distribution mode: {mode}")

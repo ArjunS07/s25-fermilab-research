@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-job-150-noresidual
+  name: as-jet-train-job-30-icp
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -25,18 +25,16 @@ spec:
             - /bin/bash
             - -c
             - |
-              set -e  # fail on any error
+              set -e
               set -ex
               apt-get update && apt-get install -y libffi-dev gcc g++ curl git wget build-essential
-              
-              # Ensure the mount directory exists and is writable
+
               mkdir -p /mnt/data
               ls -la /mnt/data
 
               git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
               cp -r /tmp/repo/src /mnt/data/
 
-              # Check if environment exists
               if [ -d "/mnt/data/python-env" ] && /mnt/data/python-env/bin/python -c "import torch; print('Environment OK')" 2>/dev/null; then
                 echo "=== Existing environment is working, skipping setup ==="
                 source /mnt/data/python-env/bin/activate
@@ -44,10 +42,7 @@ spec:
                 rm -rf /mnt/data/python-env
                 python -m venv /mnt/data/python-env
                 source /mnt/data/python-env/bin/activate
-                # Install PyTorch with CUDA support
                 pip install torch --index-url https://download.pytorch.org/whl/cu121
-
-                # Install requirements (ignore failure if requirements.txt missing)
                 if [ -f /mnt/data/src/requirements.txt ]; then
                   pip install -r /mnt/data/src/requirements.txt
                 else
@@ -59,25 +54,34 @@ spec:
               export CUDA_LAUNCH_BLOCKING=1
               export TORCH_USE_CUDA_DSA=1
 
-               cd /mnt/data/src
+              cd /mnt/data/src
 
               UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
-              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-gqt150-noresidual"
+              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-a30-polar-icp"
               echo "Output path: $OUTPUT_PATH"
               mkdir $OUTPUT_PATH
-              
-              python3 data.py --num_particles=150 --output_path=${OUTPUT_PATH}
+
+              python3 data.py --num_particles=30 --output_path=${OUTPUT_PATH}
               python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
-              python3 train.py --batch_size=16 --num_epochs=50 --n_samples=50000 --n_layers=3 --num_particles=150 --output_path=${OUTPUT_PATH}  | tee -a ${OUTPUT_PATH}/logs.txt
+              python3 cache_icp.py --output_path=${OUTPUT_PATH} --num_particles=30 --n_workers=2
+              python3 train.py \
+                --num_particles=30 \
+                --train_space=polar --time_sampling=power_law \
+                --batch_size=16 --num_epochs=50 \
+                --n_samples=50000 --integration_steps=256 --n_layers=3 \
+                --output_path=${OUTPUT_PATH} --use_residual \
+                --use_cosine_lr --use_time_sampling --no-use_curriculum \
+                --icp_cache_path=${OUTPUT_PATH}/icp_cache.pkl \
+                | tee -a ${OUTPUT_PATH}/logs.txt
           volumeMounts:
             - mountPath: /mnt/data
               name: as-train-pvc
           resources:
             limits:
               nvidia.com/a40: 1
-              memory: "12Gi"
+              memory: "16Gi"
               cpu: "2.4"
             requests:
               nvidia.com/a40: 1
-              memory: "12Gi"
+              memory: "16Gi"
               cpu: "2"

@@ -30,9 +30,10 @@ class TimeEmbedding(nn.Module):
         self.embed_dim = embed_dim
         self.scale = scale
         
-        torch.manual_seed(seed)
-        projection = (torch.randn(1, embed_dim//2) * scale).detach()
-        self.register_buffer('projection', projection, persistent=False)
+        gen = torch.Generator()
+        gen.manual_seed(seed)
+        projection = (torch.randn(1, embed_dim//2, generator=gen) * scale).detach()
+        self.register_buffer('projection', projection, persistent=True)
 
         self.fc1 = nn.Linear(embed_dim, 32)
         self.fc2 = nn.Linear(32, embed_dim)
@@ -83,35 +84,42 @@ class PhiMLP(nn.Module):
             if isinstance(layer, nn.Linear):
                 nn.init.xavier_uniform_(layer.weight, gain=0.1)
                 if layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0.1)
+                    nn.init.zeros_(layer.bias)
 
     def forward(self, x):
         return self.net(x)
 
 class GlobalEmbedding(nn.Module):
-    """Embeds jet type and number of constituents."""
-    def __init__(self, max_num_jet_types, max_constituents=150, embed_dim=64):
+    """Embeds jet type, number of constituents, and (optionally) jet pT."""
+    def __init__(self, max_num_jet_types, max_constituents=150, embed_dim=64, include_pt=False):
         super().__init__()
         self.max_constituents = max_constituents
-        
-        # One-hot jet type will have num_jet_types dimensions
-        # Number of constituents is a single scalar
-        input_dim = max_num_jet_types + 1
-        
+        self.include_pt = include_pt
+
+        # Layout: [one_hot_type (max_num_jet_types), n_particles_norm (1)] + optional [pT (1)]
+        input_dim = max_num_jet_types + 1 + (1 if include_pt else 0)
+
         self.fc1 = nn.Linear(input_dim, 32)
         self.fc2 = nn.Linear(32, embed_dim)
-        
+
         nn.init.xavier_uniform_(self.fc1.weight, gain=0.1)
         nn.init.xavier_uniform_(self.fc2.weight, gain=0.1)
         nn.init.zeros_(self.fc1.bias)
         nn.init.zeros_(self.fc2.bias)
-        
+
     def forward(self, jet_info):
         jet_info = jet_info.to(self.fc1.weight.device)
-        n_constituents = jet_info[:, -1]
-        n_norm = n_constituents.float() / self.max_constituents
-        n_norm = n_norm.unsqueeze(-1) 
-        x = torch.cat([jet_info[:, :-1], n_norm], dim=-1)  # (batch_size, num_jet_types + 1)
+        if self.include_pt:
+            # Layout: [...one_hot..., n_particles, pT]
+            n_constituents = jet_info[:, -2]
+            pt = jet_info[:, -1:]  # already normalized by FeaturewiseLinear — no transform
+            n_norm = (n_constituents.float() / self.max_constituents).unsqueeze(-1)
+            x = torch.cat([jet_info[:, :-2], n_norm, pt], dim=-1)
+        else:
+            # Layout: [...one_hot..., n_particles]
+            n_constituents = jet_info[:, -1]
+            n_norm = (n_constituents.float() / self.max_constituents).unsqueeze(-1)
+            x = torch.cat([jet_info[:, :-1], n_norm], dim=-1)
         x = torch.relu(self.fc1(x))
         x = self.fc2(x)
         return x
@@ -192,10 +200,12 @@ class LorentzEquivariantLayer(nn.Module):
         
         # Compute messages: phi_e^l
         messages = self.phi_e(message_input)  # (batch_size, max_particles, max_particles, message_dim)
-        messages = self.message_sf(messages)  # Normalize messages
-        
-        # Apply pair mask to messages
+
+        # Apply pair mask before LayerNorm so masked pairs don't influence learned statistics,
+        # then re-apply after to eliminate any nonzero contribution from LayerNorm's bias term.
         pair_mask_exp = pair_mask.unsqueeze(-1).expand(-1, -1, -1, self.message_dim)
+        messages = messages * pair_mask_exp
+        messages = self.message_sf(messages)
         messages = messages * pair_mask_exp
         
         # Compute message scalings: phi_m^l  
@@ -217,10 +227,8 @@ class LorentzEquivariantLayer(nn.Module):
         g_new = self.phi_g(global_input)
         g_new = self.global_sf(g_new)
         
-        # Prepare inputs for phi_x^l for all pairs
-        g0_exp = g0.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
-        g_prev_exp = g_prev.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
-        t_emb_exp = t_emb.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
+        # Prepare inputs for phi_x^l for all pairs.
+        # g0_exp, g_prev_exp, t_emb_exp were computed above for message_input and are still valid.
         displacement_input = torch.cat([g0_exp, g_prev_exp, t_emb_exp, messages], dim=-1)
         # Shape: (batch_size, max_particles, max_particles, input_dim)
         
@@ -251,18 +259,27 @@ class LorentzEquivariantLayer(nn.Module):
         return x_new, g_new
     
 class LEFTJeN(nn.Module):
-    def __init__(self, max_num_jet_types, max_particles=150, embed_dim=64, 
-                 num_layers=6, message_dim=128, hidden_dim=64, use_residual_update=True):
+    def __init__(self, max_num_jet_types, max_particles=150, embed_dim=64,
+                 num_layers=6, message_dim=128, hidden_dim=64,
+                 use_residual_update=True, include_pt=False):
         super().__init__()
         self.max_particles = max_particles
         self.embed_dim = embed_dim
         self.num_layers = num_layers
-
         self.use_residual_update = use_residual_update
-        self.time_embedding = TimeEmbedding(embed_dim=embed_dim)        
-        self.global_embedding = GlobalEmbedding(max_num_jet_types, max_particles, embed_dim)
+
+        if use_residual_update:
+            max_alpha = 0.25 + (num_layers - 1) * 0.03
+            if max_alpha > 1.0:
+                raise ValueError(
+                    f"Residual alpha schedule exceeds 1.0 at layer {num_layers - 1} "
+                    f"(max alpha={max_alpha:.2f}). Reduce num_layers or adjust the schedule."
+                )
+
+        self.time_embedding = TimeEmbedding(embed_dim=embed_dim)
+        self.global_embedding = GlobalEmbedding(max_num_jet_types, max_particles, embed_dim, include_pt=include_pt)
         self.layers = nn.ModuleList([
-            LorentzEquivariantLayer(embed_dim, message_dim, hidden_dim) 
+            LorentzEquivariantLayer(embed_dim, message_dim, hidden_dim)
             for _ in range(num_layers)
         ])
         
@@ -305,11 +322,12 @@ class LEFTJeN(nn.Module):
             null_jet_conditions = null_vector_like(jet_conditions)
 
         if method == 'euler':
-            vel = self.forward(x=x_t, t=t_start.unsqueeze(0).repeat(batch_size), jet_conditions=jet_conditions, mask=mask)
+            t_batch = t_start.unsqueeze(0).expand(batch_size)
+            vel = self.forward(x=x_t, t=t_batch, jet_conditions=jet_conditions, mask=mask)
             if use_cfg:
                 unconditional_vel = self.forward(
                     x=x_t,
-                    t=t_start.unsqueeze(0).repeat(batch_size),
+                    t=t_batch,
                     jet_conditions=null_jet_conditions,
                     mask=mask
                 )
