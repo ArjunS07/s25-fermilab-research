@@ -66,7 +66,9 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         jet_attr_model.eval()
     
         generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_model, device, n_jet_types=n_jet_types, num_jets=n_viz_samples)
+        # Layout from generate_jets: [one_hot(5), eta, pt, mass, n_particles]
         jet_one_hot_enc = generated_jet_attrs[:, :5].to(device)
+        gen_pt = generated_jet_attrs[:, 6].to(device)          # normalized pT from NF
         n_gen_particles = generated_jet_attrs[:, -1].long().to(device)
 
         n_gen_particles = torch.clamp(n_gen_particles, max=n_particles_per_jet)
@@ -76,11 +78,12 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
             max_particles_per_jet=n_particles_per_jet,
             device=device
         )
+        # Conditioning vector: [one_hot_type (5), n_particles (1), pT (1)] = 7 dims
         generated_jet_attrs = torch.cat([
             jet_one_hot_enc,
-            n_gen_particles.unsqueeze(-1).float()
+            n_gen_particles.unsqueeze(-1).float(),
+            gen_pt.unsqueeze(-1),
         ], dim=-1)
-        print("generated jet attributes shape:", generated_jet_attrs.shape)
 
         x = gen_initial_distribution(
             batch_size=n_viz_samples,
