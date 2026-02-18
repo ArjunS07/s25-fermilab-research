@@ -39,8 +39,8 @@ class TimeEmbedding(nn.Module):
         self.fc2 = nn.Linear(32, embed_dim)
         
         # Initialize weights
-        nn.init.xavier_uniform_(self.fc1.weight, gain=0.1)
-        nn.init.xavier_uniform_(self.fc2.weight, gain=0.1)
+        nn.init.xavier_uniform_(self.fc1.weight, gain=1.0)
+        nn.init.xavier_uniform_(self.fc2.weight, gain=1.0)
         
     def forward(self, t):
         if t.dim() == 1:
@@ -82,7 +82,7 @@ class PhiMLP(nn.Module):
         
         for layer in self.net:
             if isinstance(layer, nn.Linear):
-                nn.init.xavier_uniform_(layer.weight, gain=0.1)
+                nn.init.xavier_uniform_(layer.weight, gain=1.0)
                 if layer.bias is not None:
                     nn.init.zeros_(layer.bias)
 
@@ -102,8 +102,8 @@ class GlobalEmbedding(nn.Module):
         self.fc1 = nn.Linear(input_dim, 32)
         self.fc2 = nn.Linear(32, embed_dim)
 
-        nn.init.xavier_uniform_(self.fc1.weight, gain=0.1)
-        nn.init.xavier_uniform_(self.fc2.weight, gain=0.1)
+        nn.init.xavier_uniform_(self.fc1.weight, gain=1.0)
+        nn.init.xavier_uniform_(self.fc2.weight, gain=1.0)
         nn.init.zeros_(self.fc1.bias)
         nn.init.zeros_(self.fc2.bias)
 
