@@ -73,7 +73,7 @@ if __name__ == "__main__":
     parser.add_argument("--epoch_frac", type=float, default=1.0, help="Fraction of training dataset to use per epoch")
     parser.add_argument("--sigma_min", type=float, default=1e-4, help="Tolerance around target for flow map")
     parser.add_argument("--train_space", type=str, default='cartesian', choices=['cartesian', 'polar'], help="Coordinate space in which to interpolate points")
-    parser.add_argument("--time_sampling", type=str, default='uniform', choices=['uniform', 'power_law', 'lognorm'], help="Method to sample time steps during training")
+    parser.add_argument("--time_sampling", type=str, default='power_law', choices=['uniform', 'power_law', 'lognorm'], help="Method to sample time steps during training")
 
     # Inference
     parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
@@ -82,7 +82,9 @@ if __name__ == "__main__":
 
     # Ablation flags (all True by default; disable with --no-<flag>)
     parser.add_argument("--use_cosine_lr", action=argparse.BooleanOptionalAction, default=True,
-                        help="Use cosine annealing LR schedule (disable: --no-use_cosine_lr)")
+                        help="Use cosine annealing LR schedule with warm restarts (disable: --no-use_cosine_lr)")
+    parser.add_argument("--lr_t0", type=int, default=0,
+                        help="Warm restart period T_0 in epochs. 0 = auto (num_epochs // 2).")
     parser.add_argument("--use_curriculum", action=argparse.BooleanOptionalAction, default=True,
                         help="Use curriculum learning (disable: --no-use_curriculum)")
     parser.add_argument("--use_time_sampling", action=argparse.BooleanOptionalAction, default=True,
@@ -91,7 +93,7 @@ if __name__ == "__main__":
 
     # Curriculum settings
     parser.add_argument("--curriculum_alpha_start", type=float, default=2.0,
-                        help="Initial power-law exponent α (positive → oversample dense jets). "
+                        help="Initial power-law exponent alpha (positive → oversample dense jets). "
                              "Decays linearly to 0 by the final epoch.")
     parser.add_argument("--n_curriculum_buckets", type=int, default=10,
                         help="Number of particle-count buckets for curriculum")
@@ -205,13 +207,14 @@ if __name__ == "__main__":
         else:
             raise ValueError(f"Unknown time_sampling: {mode}")
 
-    lr = 1e-4
+    lr = 3e-4
     weight_decay = 1e-6
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     if args.use_cosine_lr:
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=args.num_epochs, eta_min=lr * 0.1
+        t0 = args.lr_t0 if args.lr_t0 > 0 else (args.num_epochs // 4)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer, T_0=t0, T_mult=1, eta_min=lr * 0.1
         )
 
     epoch_fraction = args.epoch_frac
@@ -224,11 +227,11 @@ if __name__ == "__main__":
 
         # ── Sample epoch indices (uniform or curriculum) ─────────────────────
         if args.use_curriculum:
-            # α decays linearly from α_start (epoch 0) to 0 (epoch num_epochs-1)
+            # alpha decays linearly from alpha_start (epoch 0) to 0 (epoch num_epochs-1)
             alpha = args.curriculum_alpha_start * (
                 1.0 - epoch / max(args.num_epochs - 1, 1)
             )
-            # P(bucket k) ∝ (k+1)^α; weight 0 for empty buckets automatically
+            # P(bucket k) \propto (k+1)^α; weight 0 for empty buckets automatically
             # because no samples belong to them.
             bucket_probs = torch.pow(
                 torch.arange(1, N_CURRICULUM_BUCKETS + 1, dtype=torch.float), alpha
@@ -393,7 +396,7 @@ if __name__ == "__main__":
 
         losses.append(epoch_loss / total_n_accumulations)
         if args.use_cosine_lr:
-            scheduler.step()
+            scheduler.step(epoch)
 
     # Logging
     with open(f"{model_output_path}/training_loss.csv", "w") as f:
