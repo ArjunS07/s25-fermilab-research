@@ -43,6 +43,10 @@ def _align_point_clouds_till_converge(x_0_orig, x1, max_iter=2_500):
     i = 0
     dist = np.linalg.norm(x_0 - x1, axis=1).sum()
     dist_delta = np.inf
+
+    best_dist = dist
+    best_x_0 = x_0.clone()
+
     while i < max_iter and dist_delta > 1e-8:
         cost = cdist(x_0, x1, metric='euclidean')
         # Better for stability
@@ -58,7 +62,12 @@ def _align_point_clouds_till_converge(x_0_orig, x1, max_iter=2_500):
         dist_delta = np.abs(dist_new - dist)
         dist = dist_new
         i += 1
-    return x_0
+
+        if dist_new < best_dist:
+            best_dist = dist_new
+            best_x_0 = x_0.clone()
+
+    return best_x_0
 
 # must be top-level for multiprocessing 
 def _icp_permute_worker(task):
