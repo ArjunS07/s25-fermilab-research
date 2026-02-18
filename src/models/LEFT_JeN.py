@@ -135,16 +135,16 @@ class LorentzEquivariantLayer(nn.Module):
         message_input_dim = 2 + embed_dim + embed_dim + embed_dim  # 2 + 3*embed_dim
         self.phi_e = PhiMLP(message_input_dim, [hidden_dim, hidden_dim], message_dim)
         
-        # Message aggregation scalar: phi_m^l
-        self.phi_m = PhiMLP(message_dim, [hidden_dim, hidden_dim], 1, output_activation=nn.Tanh())
-        
+        # Message aggregation scalar: phi_m^l — Sigmoid gives soft gate in [0,1]
+        self.phi_m = PhiMLP(message_dim, [hidden_dim, hidden_dim], 1, output_activation=nn.Sigmoid())
+
         # Global embedding update: phi_g^l
         global_input_dim = embed_dim + embed_dim + embed_dim + message_dim  # g^0, g^l, t_emb, aggregated_msg
         self.phi_g = PhiMLP(global_input_dim, [hidden_dim, hidden_dim], embed_dim)
-        
-        # Displacement scaling: phi_x^l  
+
+        # Displacement scaling: phi_x^l — no output activation; gamma controls magnitude
         displacement_input_dim = embed_dim + embed_dim + embed_dim + message_dim  # g^0, g^l, t_emb, m_ij
-        self.phi_x = PhiMLP(displacement_input_dim, [hidden_dim, hidden_dim], 1, output_activation=nn.Tanh())
+        self.phi_x = PhiMLP(displacement_input_dim, [hidden_dim, hidden_dim], 1)
 
         # Learnable scaling parameters
         self.alpha = nn.Parameter(torch.tensor(0.1))
