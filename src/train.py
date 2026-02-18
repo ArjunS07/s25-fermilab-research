@@ -173,7 +173,7 @@ if __name__ == "__main__":
     bucket_counts = torch.bincount(bucket_assignments, minlength=N_CURRICULUM_BUCKETS).float()
     n_nonempty = (bucket_counts > 0).sum().item()
     print(f"Curriculum: {N_CURRICULUM_BUCKETS} buckets, {int(n_nonempty)} non-empty, "
-          f"α_start={args.curriculum_alpha_start:.2f}")
+          f"alpha_start={args.curriculum_alpha_start:.2f}")
 
     # ── ICP cache ─────────────────────────────────────────────────────────────
     x_0_cache: torch.Tensor | None = None
@@ -211,7 +211,7 @@ if __name__ == "__main__":
 
     if args.use_cosine_lr:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=args.num_epochs, eta_min=lr * 0.01
+            optimizer, T_max=args.num_epochs, eta_min=lr * 0.1
         )
 
     epoch_fraction = args.epoch_frac
