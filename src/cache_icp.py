@@ -24,9 +24,11 @@ from multiprocessing import Pool
 
 import numpy as np
 import torch
-from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
+from scipy.optimize import linear_sum_assignment
+from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
+
 
 from data import data_args, get_data_path
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian
@@ -36,22 +38,51 @@ MAX_N_PARTICLES = 150
 RANDOM_SEED = 42
 
 
-# ── Worker (must be top-level for multiprocessing pickling) ──────────────────
+def _align_point_clouds_till_converge(x_0_orig, x1, max_iter=2_500):
+    x_0 = x_0_orig.clone()
+    i = 0
+    dist = np.linalg.norm(x_0 - x1, axis=1).sum()
+    dist_delta = np.inf
+    while i < max_iter and dist_delta > 1e-8:
+        cost = cdist(x_0, x1, metric='euclidean')
+        # Better for stability
+        cost = cost * (1_000. / cost.max())
+        _, col_ind = linear_sum_assignment(cost)
 
+        x_0 = x_0[col_ind]
+        # Align cartesian 3-momenta
+        rot, _, _ = R.align_vectors(x1[:, 1:4], x_0[:, 1:4], return_sensitivity=True)
+        x_0[:, 1:4] = x_0[:, 1:4] @ rot.as_matrix().T
+
+        dist_new = np.linalg.norm(x_0 - x1, axis=1).sum()
+        dist_delta = np.abs(dist_new - dist)
+        dist = dist_new
+        i += 1
+    return x_0
+
+# must be top-level for multiprocessing 
 def _icp_permute_worker(task):
     """
-    Find the permutation of x_0 that minimises total squared Euclidean
-    distance to x_1 for the real (unmasked) particles of one jet.
+    Align x_0 to x_1 for the real (unmasked) particles of one jet using the
+    alternating permutation + rotation ICP algorithm (Algorithm 3,
+    https://arxiv.org/abs/2312.07168):
 
-    task : (idx, x_0_full, x_1_full, n_real)
+        while not converged:
+            Π  = argmin_Π  ||Π(Rz)^T - y^T||   (Hungarian assignment)
+            R  = argmin_R  ||R(Πz)^T - y^T||   (Kabsch / align_vectors)
+
+    Rotation is applied to the 3-momentum components (px, py, pz) only.
+
+    task : (idx, x_0_full, x_1_full, n_real, max_iter)
         idx       – global index in the cache array (returned to reconstruct order)
-        x_0_full  – (max_particles, 4) float32 numpy array
-        x_1_full  – (max_particles, 4) float32 numpy array
+        x_0_full  – (max_particles, 4) float32 numpy array  (prior, normalised)
+        x_1_full  – (max_particles, 4) float32 numpy array  (target, normalised)
         n_real    – number of real particles (rest is zero-padding)
+        max_iter  – maximum ICP iterations
 
-    Returns (idx, x_0_permuted_full)
+    Returns (idx, x_0_aligned_full)
     """
-    idx, x_0_full, x_1_full, n_real = task
+    idx, x_0_full, x_1_full, n_real, max_iter = task
 
     if n_real == 0:
         return idx, x_0_full.copy()
@@ -59,23 +90,17 @@ def _icp_permute_worker(task):
     x_0_real = x_0_full[:n_real]   # (n_real, 4)
     x_1_real = x_1_full[:n_real]   # (n_real, 4)
 
-    # cost[i, j] = ||x_1[i] - x_0[j]||^2
-    cost = cdist(x_1_real, x_0_real, metric='sqeuclidean')
+    # align_point_clouds_till_converge expects tensors (calls .clone() internally).
+    # Use float64 so scipy's Kabsch solver works without dtype promotion issues.
+    x_0_t = torch.from_numpy(x_0_real.astype(np.float64))
+    x_1_t = torch.from_numpy(x_1_real.astype(np.float64))
 
-    # Normalise for numerical stability (mirrors align_clouds.py convention)
-    max_c = cost.max()
-    if max_c > 0:
-        cost = cost * (1000.0 / max_c)
+    x_0_aligned = _align_point_clouds_till_converge(x_0_t, x_1_t, max_iter=max_iter)
 
-    # col_ind[i] gives the x_0 particle that best matches x_1[i]
-    _, col_ind = linear_sum_assignment(cost)
+    x_0_out = np.zeros_like(x_0_full)
+    x_0_out[:n_real] = x_0_aligned.numpy().astype(np.float32)
+    return idx, x_0_out
 
-    x_0_permuted = np.zeros_like(x_0_full)
-    x_0_permuted[:n_real] = x_0_real[col_ind]
-    return idx, x_0_permuted
-
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _compute_scale(X_transformed):
     """Reproduce train.py's scale computation (unmasked particles only)."""
@@ -87,7 +112,6 @@ def _compute_scale(X_transformed):
     return float(np.mean(scales))
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -106,6 +130,8 @@ if __name__ == "__main__":
                         help="Number of parallel worker processes")
     parser.add_argument("--cache_filename", type=str, default="icp_cache.pkl",
                         help="Output filename inside output_path")
+    parser.add_argument("--icp_max_iter", type=int, default=100,
+                        help="Maximum ICP iterations per jet (default 100)")
     args = parser.parse_args()
 
     # ── Load and transform training data (same pipeline as train.py) ─────────
@@ -149,9 +175,8 @@ if __name__ == "__main__":
         )
     x_0_np = np.concatenate(x_0_parts, axis=0)   # (N, P, 4)
 
-    # ── Run ICP permutation in parallel ──────────────────────────────────────
     tasks = [
-        (i, x_0_np[i], x_1_np[i], int(n_real_np[i]))
+        (i, x_0_np[i], x_1_np[i], int(n_real_np[i]), args.icp_max_iter)
         for i in range(n_total)
     ]
 
