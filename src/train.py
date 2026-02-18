@@ -58,7 +58,6 @@ if __name__ == "__main__":
     # Data
     parser.add_argument("--jet_types", type=str, nargs="+", default=data_args["jet_type"])
     parser.add_argument("--num_particles", type=int, default=data_args["num_particles"], help="Number of particles in each jet")
-    parser.add_argument("--mask", type=bool, default=True, help="Use mask for particles")
 
     # Network hyperparameters
     parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
@@ -291,8 +290,8 @@ if __name__ == "__main__":
                     dropout_mask.unsqueeze(-1), null_vecs, batch_jet_info_cropped
                 )
 
-            x_1 = batch_particle_info[:, :, :4]
-            true_masks = batch_particle_info[:, :, 4] if args.mask else None
+            x_1 = batch_particle_info[:, :, :4].to(device)
+            true_masks = batch_particle_info[:, :, 4].to(device)   # always use mask
 
             # TODO: Boost before, can't boost scaled data
             # x_1 = boost_to_com_frame(x_1, mask=true_masks)
@@ -302,11 +301,9 @@ if __name__ == "__main__":
             else:
                 x_0 = gen_initial_distribution(x_1=x_1).to(device)
 
-            if true_masks is not None:
-                # multiply x_1 for redundancy, training data should have it masked by default
-                x_1 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_1
-                # important - x0 is a noisy normal distribution by default
-                x_0 = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES) * x_0
+            mask_exp = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
+            x_1 = mask_exp * x_1
+            x_0 = mask_exp * x_0
             
             # mean_std_masked_tensor("x_0", x_0, true_masks)
             # mean_std_masked_tensor("x_1", x_1, true_masks)
@@ -335,24 +332,13 @@ if __name__ == "__main__":
             x_t = x_t.to(device)
             # mean_std_masked_tensor("x_t", x_t, true_masks)
 
-            conditional_u_t = x_1 - ((1-args.sigma_min)*x_0)
+            conditional_u_t = (x_1 - ((1-args.sigma_min)*x_0)) * mask_exp
             pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
-            if true_masks is not None:
-                conditional_u_t = conditional_u_t * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-                pred = pred * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-            
-            # mean_std_masked_tensor("conditional_u_t_cartesian", conditional_u_t_cartesian, true_masks)
-            # mean_std_masked_tensor("pred_cartesian", pred_cartesian, true_masks)
+            pred = pred * mask_exp
 
-            cartesian_loss = (conditional_u_t - pred).square()
-            # mean_std_masked_tensor("cartesian_loss", cartesian_loss, true_masks)
-            loss = cartesian_loss
-
-            if true_masks is not None: 
-                loss = loss * true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
-                loss = loss.sum() / (true_masks.sum() * NUM_PARTICLE_FEATURES)
-            else:
-                loss = loss.mean()
+            # Loss: mean over real particle-features only (masked slots are zero and excluded)
+            n_real = true_masks.sum().clamp(min=1)
+            loss = ((conditional_u_t - pred).square() * mask_exp).sum() / (n_real * NUM_PARTICLE_FEATURES)
 
             loss.backward()
             # Divide by accumulation_steps here so accumulated_loss is the running average,
