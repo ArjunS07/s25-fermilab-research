@@ -206,7 +206,7 @@ if __name__ == "__main__":
             raise ValueError(f"Unknown time_sampling: {mode}")
 
     lr = 1e-4
-    weight_decay = 5e-3
+    weight_decay = 1e-6
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     if args.use_cosine_lr:
