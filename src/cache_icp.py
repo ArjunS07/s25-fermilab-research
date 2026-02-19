@@ -139,8 +139,8 @@ if __name__ == "__main__":
                         help="Number of parallel worker processes")
     parser.add_argument("--cache_filename", type=str, default="icp_cache.pkl",
                         help="Output filename inside output_path")
-    parser.add_argument("--icp_max_iter", type=int, default=100,
-                        help="Maximum ICP iterations per jet (default 100)")
+    parser.add_argument("--icp_max_iter", type=int, default=1000,
+                        help="Maximum ICP iterations per jet (default 1000)")
     args = parser.parse_args()
 
     # ── Load and transform training data (same pipeline as train.py) ─────────
