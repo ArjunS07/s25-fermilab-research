@@ -13,13 +13,13 @@ from models.LEFT_JeN import LEFTJeN
 from util import jet_attributes
 from util.jet_attributes import NUM_CLASSES
 from jet_attr_model import get_model_pth_path
-from util.distributions import gen_initial_distribution, time_dist
+from util.distributions import gen_initial_distribution, time_dist, hyperbolic_interpolant
+from util.hyperbolic import pushforward, hyperbolic_loss
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian, jacobian_epp_etaphipte
 from jetnet.utils import EtaPhiPtE_to_cartesian, cartesian_to_EtaPhiPtE
 from util.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
 from util.metrics import run_save_metrics
-from util.cfg import null_vector_like
 # from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import data_args, get_data_path
@@ -85,6 +85,8 @@ if __name__ == "__main__":
                         help="Use cosine annealing LR schedule with warm restarts (disable: --no-use_cosine_lr)")
     parser.add_argument("--lr_t0", type=int, default=0,
                         help="Warm restart period T_0 in epochs. 0 = auto (num_epochs // 2).")
+    parser.add_argument("--use_hyperbolic", action=argparse.BooleanOptionalAction, default=False,
+                        help="Use Riemannian flow matching in the Poincaré ball (Chen & Lipman 2024)")
     parser.add_argument("--use_curriculum", action=argparse.BooleanOptionalAction, default=True,
                         help="Use curriculum learning (disable: --no-use_curriculum)")
     parser.add_argument("--use_time_sampling", action=argparse.BooleanOptionalAction, default=True,
@@ -212,7 +214,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     if args.use_cosine_lr:
-        t0 = args.lr_t0 if args.lr_t0 > 0 else (args.num_epochs // 4)
+        t0 = args.lr_t0 if args.lr_t0 > 0 else (args.num_epochs // 4) if args.num_epochs >= 20 else max(1, args.num_epochs // 2)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             optimizer, T_0=t0, T_mult=1, eta_min=lr * 0.1
         )
@@ -285,12 +287,15 @@ if __name__ == "__main__":
                 batch_jet_pt.unsqueeze(-1),
             ], dim=-1).to(device)
 
-            # Per-sample CFG dropout: each sample independently drops jet conditioning.
+            # Per-sample CFG dropout: each sample independently drops jet type + pT
+            # conditioning. n_particles is preserved because it is already encoded in
+            # the particle mask, so nulling it adds no guidance signal and only weakens
+            # the unconditional-conditional gap.
             dropout_mask = torch.rand(batch_jet_info_cropped.shape[0], device=device) < args.cfg_null_dropout_rate
             if dropout_mask.any():
-                null_vecs = null_vector_like(batch_jet_info_cropped).to(device)
+                null_for_batch = model.make_null_cond(batch_jet_info_cropped)
                 batch_jet_info_cropped = torch.where(
-                    dropout_mask.unsqueeze(-1), null_vecs, batch_jet_info_cropped
+                    dropout_mask.unsqueeze(-1), null_for_batch, batch_jet_info_cropped
                 )
 
             x_1 = batch_particle_info[:, :, :4].to(device)
@@ -314,34 +319,38 @@ if __name__ == "__main__":
             t = _sample_t(x_0.shape[0]).to(device)
             t_viewed = t.view(-1, 1, 1)
 
-            """
-            The support of the prob dist is convex in polar coordinates
-            So we convert x_0 and x_1 to polar
-            And calculate x_t in polar
-            Then we convert it back to cartesian for the model
+            if args.use_hyperbolic:
+                # Riemannian flow matching: geodesic interpolant in the Poincaré ball.
+                # x_t is returned in Cartesian for the model; y_t and u_t_ball stay in the ball.
+                x_t, y_t, u_t_ball = hyperbolic_interpolant(x_0, x_1, t)
+                x_t = x_t.to(device)
+                y_t = y_t.to(device)
+                u_t_ball = u_t_ball * mask_exp   # zero out padding in target
 
-            We do loss in cartesian coords as usual - they should be equivalent. The point is to only use valid x_t
-            """
+                pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
+                pred = pred * mask_exp
 
-            x_t = None
-            if args.train_space == 'polar':
-                x_0_polar = cartesian_to_EtaPhiPtE(x_0)
-                x_1_polar = cartesian_to_EtaPhiPtE(x_1)
-                x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0_polar + t_viewed * x_1_polar
-                x_t = EtaPhiPtE_to_cartesian(x_t)
+                # Push Cartesian model output into the ball tangent space, then compute
+                # the Riemannian loss ||v_theta - u_t||^2_g (Equation 14).
+                pred_ball = pushforward(x_t, pred) * mask_exp
+                loss = hyperbolic_loss(pred_ball, u_t_ball, y_t, mask=true_masks)
             else:
-                x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0 + t_viewed * x_1
+                # Euclidean flow matching (polar or Cartesian interpolation).
+                if args.train_space == 'polar':
+                    x_0_polar = cartesian_to_EtaPhiPtE(x_0)
+                    x_1_polar = cartesian_to_EtaPhiPtE(x_1)
+                    x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0_polar + t_viewed * x_1_polar
+                    x_t = EtaPhiPtE_to_cartesian(x_t)
+                else:
+                    x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0 + t_viewed * x_1
+                x_t = x_t.to(device)
 
-            x_t = x_t.to(device)
-            # mean_std_masked_tensor("x_t", x_t, true_masks)
+                conditional_u_t = (x_1 - ((1-args.sigma_min)*x_0)) * mask_exp
+                pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
+                pred = pred * mask_exp
 
-            conditional_u_t = (x_1 - ((1-args.sigma_min)*x_0)) * mask_exp
-            pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
-            pred = pred * mask_exp
-
-            # Loss: mean over real particle-features only (masked slots are zero and excluded)
-            n_real = true_masks.sum().clamp(min=1)
-            loss = ((conditional_u_t - pred).square() * mask_exp).sum() / (n_real * NUM_PARTICLE_FEATURES)
+                n_real = true_masks.sum().clamp(min=1)
+                loss = ((conditional_u_t - pred).square() * mask_exp).sum() / (n_real * NUM_PARTICLE_FEATURES)
 
             loss.backward()
             # Divide by accumulation_steps here so accumulated_loss is the running average,
@@ -390,7 +399,7 @@ if __name__ == "__main__":
                 if total_n_accumulations % 10 == 0:
                     print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {(epoch_loss / total_n_accumulations):.4f}")
                 
-            del x_1, x_0, t, t_viewed, x_t, conditional_u_t, pred, loss
+            del x_1, x_0, t, x_t, pred, loss
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
