@@ -78,10 +78,7 @@ def generate_samples(
                                use_cfg=use_cfg, guidance_weight=cfg_guidance_weight)
 
             scaled_x = final_scale * x
-            torch.save(scaled_x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
-
-            if start_idx % (batch_size * 10) == 0:
-                print(f"Generated {start_idx + batch_size} samples so far")
+            # torch.save(scaled_x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
 
             all_samples.append(scaled_x.cpu())
             all_pt_cond.append(gen_pt.cpu())

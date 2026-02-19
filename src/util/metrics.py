@@ -27,6 +27,12 @@ def run_save_metrics(X_test, gen_samples, jet_types, output_path, device='cpu'):
     test_polar_abs = __x_test_to_abs(X_test=X_test, device=device)
     test_polar_rel = EtaPhiPtE_to_relEtaPhiPt(test_polar_abs)
     gen_polar_rel = EtaPhiPtE_to_relEtaPhiPt(gen_polar_abs)
+
+    # Move to CPU once for all subsequent numpy / jetnet calls
+    test_polar_abs = test_polar_abs.cpu()
+    test_polar_rel = test_polar_rel.cpu()
+    gen_polar_abs  = gen_polar_abs.cpu()
+    gen_polar_rel  = gen_polar_rel.cpu()
     
     # Create comparison plots
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
@@ -58,7 +64,7 @@ def run_save_metrics(X_test, gen_samples, jet_types, output_path, device='cpu'):
 
     plt.tight_layout()
     plt.savefig(f"{output_path}/distribution_comparison.png", dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
     # Jet-level features comparison
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
@@ -88,7 +94,7 @@ def run_save_metrics(X_test, gen_samples, jet_types, output_path, device='cpu'):
 
     plt.tight_layout()
     plt.savefig(f"{output_path}/jet_features.png", dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
     print(f"\nPlots saved to {output_path}/")
     
