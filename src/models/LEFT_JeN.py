@@ -4,7 +4,6 @@ import numpy as np
 
 
 from util.minkowski_utils import normsq4, dotsq4
-from util.cfg import null_vector_like
 
 def psi(p):
     ''' `\psi(p) = Sgn(p) \cdot \log(|p| + 1)` '''
@@ -101,6 +100,7 @@ class GlobalEmbedding(nn.Module):
 
         self.fc1 = nn.Linear(input_dim, 32)
         self.fc2 = nn.Linear(32, embed_dim)
+        self.output_norm = nn.LayerNorm(embed_dim)
 
         nn.init.xavier_uniform_(self.fc1.weight, gain=1.0)
         nn.init.xavier_uniform_(self.fc2.weight, gain=1.0)
@@ -122,7 +122,7 @@ class GlobalEmbedding(nn.Module):
             x = torch.cat([jet_info[:, :-1], n_norm], dim=-1)
         x = torch.relu(self.fc1(x))
         x = self.fc2(x)
-        return x
+        return self.output_norm(x)
 
 class LorentzEquivariantLayer(nn.Module):
     def __init__(self, embed_dim=64, message_dim=128, hidden_dim=64):
@@ -282,8 +282,30 @@ class LEFTJeN(nn.Module):
             LorentzEquivariantLayer(embed_dim, message_dim, hidden_dim)
             for _ in range(num_layers)
         ])
+
+        # Learned null conditioning token. Replaces the all-zeros null vector so the
+        # unconditional representation is clearly separated from low-value conditioning.
+        # n_particles_idx marks the slot that is preserved even in the null vector
+        # (it is redundant with the mask, so zeroing it provides no extra guidance signal).
+        cond_dim = max_num_jet_types + 1 + (1 if include_pt else 0)
+        self.n_particles_idx = max_num_jet_types  # index of n_particles in cond vector
+        self.null_cond = nn.Parameter(torch.zeros(cond_dim))
         
     
+    def make_null_cond(self, jet_conditions: torch.Tensor) -> torch.Tensor:
+        """
+        Build null conditioning for CFG.
+        - Jet type and pT slots → learned null_cond parameter.
+        - n_particles slot → real value from jet_conditions (already encoded in the mask,
+          so it provides no type/pT guidance and should not be nulled out).
+        """
+        B = jet_conditions.shape[0]
+        null_base = self.null_cond.unsqueeze(0).expand(B, -1)
+        # Selector: 1 at n_particles position, 0 elsewhere
+        keep = torch.zeros(jet_conditions.shape[-1], device=jet_conditions.device)
+        keep[self.n_particles_idx] = 1.0
+        return null_base * (1 - keep) + jet_conditions * keep
+
     def forward(self, x, t, jet_conditions, mask):
         """
         Forward pass of the flow matching model.
@@ -319,7 +341,7 @@ class LEFTJeN(nn.Module):
         """
         batch_size = x_t.shape[0]
         if use_cfg:
-            null_jet_conditions = null_vector_like(jet_conditions)
+            null_jet_conditions = self.make_null_cond(jet_conditions)
 
         if method == 'euler':
             t_batch = t_start.unsqueeze(0).expand(batch_size)
