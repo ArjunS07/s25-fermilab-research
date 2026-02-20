@@ -77,7 +77,7 @@ def generate_samples(
                 x = model.step(x, cond, masks, times[i], times[i + 1],
                                use_cfg=use_cfg, guidance_weight=cfg_guidance_weight)
 
-            scaled_x = final_scale * x
+            scaled_x = final_scale * x * masks.unsqueeze(-1)   # zero-out padded slots
             # torch.save(scaled_x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
 
             all_samples.append(scaled_x.cpu())

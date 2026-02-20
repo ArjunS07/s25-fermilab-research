@@ -108,30 +108,40 @@ def run_save_metrics(X_test, gen_samples, jet_types, output_path, device='cpu'):
     test_polar_rel = test_polar_rel[:gen_polar_rel.shape[0]]
     assert test_polar_rel.shape == gen_polar_rel.shape
 
-    try:
-        eval_info["w1efp"] = jetnet_eval.w1efp(
-            jets1=gen_polar_rel,
-            jets2=test_polar_rel,
-        )
-        eval_info["w1m"] = jetnet_eval.w1m(
-            jets1=gen_polar_rel,
-            jets2=test_polar_rel,
-        )
-        eval_info["w1p"] = jetnet_eval.w1p(
-            jets1=gen_polar_rel,
-            jets2=test_polar_rel,
-        )
-    except Exception as e:
-        print(f"Error occurred while computing W1 metrics: {e}")
+    # Jetnet W1 metrics expect 3-channel (eta_rel, phi_rel, pt_rel) jets
+    gen_rel3  = gen_polar_rel[:, :, :3]
+    test_rel3 = test_polar_rel[:, :, :3]
 
     try:
-        eval_info["fpd"] = jetnet_eval.fpd(
-            real_features=test_polar_rel.reshape((-1, 4)),
-            gen_features=gen_polar_rel.reshape((-1, 4)),
-            seed=42
-        )
+        eval_info["w1efp"] = jetnet_eval.w1efp(jets1=gen_rel3, jets2=test_rel3)
+        print(f"W1EFP: {eval_info['w1efp']}")
     except Exception as e:
-        print(f"Error occurred while computing fpd: {e}")
+        print(f"Error computing w1efp: {e}")
+
+    try:
+        eval_info["w1m"] = jetnet_eval.w1m(jets1=gen_rel3, jets2=test_rel3)
+        print(f"W1M: {eval_info['w1m']}")
+    except Exception as e:
+        print(f"Error computing w1m: {e}")
+
+    try:
+        eval_info["w1p"] = jetnet_eval.w1p(jets1=gen_rel3, jets2=test_rel3)
+        print(f"W1P: {eval_info['w1p']}")
+    except Exception as e:
+        print(f"Error computing w1p: {e}")
+
+    try:
+        # fpd expects one flat feature vector per jet: (N_jets, max_particles * 3)
+        N_test = test_rel3.shape[0]
+        N_gen  = gen_rel3.shape[0]
+        eval_info["fpd"] = jetnet_eval.fpd(
+            real_features=test_rel3.reshape(N_test, -1),
+            gen_features=gen_rel3.reshape(N_gen, -1),
+            seed=42,
+        )
+        print(f"FPD: {eval_info['fpd']}")
+    except Exception as e:
+        print(f"Error computing fpd: {e}")
 
     for jet_type in jet_types:
         try:
