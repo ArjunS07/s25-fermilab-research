@@ -477,7 +477,7 @@ if __name__ == "__main__":
             n_jet_types=len(args.jet_types),
             device=device,
             batch_size=args.batch_size,
-            use_cfg=True
+            use_cfg=False
         )
     except Exception as e:
         print(f"Error occurred while generating samples: {e}")
