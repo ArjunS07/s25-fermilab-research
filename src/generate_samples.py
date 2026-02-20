@@ -126,7 +126,7 @@ def _plot_pt_comparison(samples, pt_cond, masks, out_path):
     x_line = np.linspace(pt_cond_np.min(), pt_cond_np.max(), 200)
     ax.plot(x_line, slope * x_line + intercept,
             color="crimson", linewidth=1.5,
-            label=rf"Linear fit ($R^2={r_value**2:.3f}, slope={slope:.3f}$)")
+            label=rf"Linear fit ($R^2={r_value**2:.3f}$, slope=${slope:.3f}$)")
     ax.set_xlabel(r"Conditioning $p_T$ (normalized)", fontsize=13)
     ax.set_ylabel(r"$\sum_i p_{T,i}$ (generated, physical units)", fontsize=13)
     ax.set_title(r"Generated scalar $p_T$ sum vs. conditioning $p_T$", fontsize=13)
