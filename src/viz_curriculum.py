@@ -36,12 +36,14 @@ sns.set_style("whitegrid")
 
 def main():
     parser = argparse.ArgumentParser(description="Visualise curriculum learning schedule")
-    parser.add_argument("--output_path", type=str, default="/mnt/data/output")
+    parser.add_argument("--output_path", type=str, default="local_out/2026-02-19_20-30-49--local-run-pod-B9AEDFDA-B270-4C8E-8E67-4AE55EA8F972/")
     parser.add_argument("--num_epochs", type=int, default=50)
     parser.add_argument("--num_particles", type=int, default=data_args["num_particles"])
     parser.add_argument("--n_curriculum_buckets", type=int, default=10)
     parser.add_argument("--curriculum_alpha_start", type=float, default=2.0)
-    parser.add_argument("--n_train_samples", type=int, default=1_000_000)
+    parser.add_argument("--n_train_samples", type=int, default=100_000)
+    parser.add_argument("--epoch_frac", type=float, default=1.0,
+                        help="Fraction of training set drawn per epoch (matches train.py --epoch_frac)")
     parser.add_argument("--output", type=str, default="curriculum.png")
     args = parser.parse_args()
 
@@ -81,8 +83,11 @@ def main():
     alpha_start = args.curriculum_alpha_start
     alphas = [alpha_start * (1.0 - e / max(num_epochs - 1, 1)) for e in range(num_epochs)]
 
+    # S = number of draws per epoch (with replacement, as in train.py)
+    samples_per_epoch = int(args.epoch_frac * N_train)
+
     bucket_probs_matrix = np.zeros((num_epochs, N_BUCKETS))   # rows=epochs, cols=buckets
-    per_jet_prob_matrix = np.zeros((num_epochs, N_BUCKETS))   # normalised per-jet prob
+    coverage_matrix = np.zeros((num_epochs, N_BUCKETS))        # P(jet drawn >= 1 time per epoch)
 
     k_vals = torch.arange(1, N_BUCKETS + 1, dtype=torch.float)
     counts_safe = bucket_counts.clamp(min=1).numpy()
@@ -91,10 +96,12 @@ def main():
         raw = torch.pow(k_vals, alpha)
         probs = (raw / raw.sum()).numpy()
         bucket_probs_matrix[e] = probs
-        per_jet_prob_matrix[e] = probs / counts_safe   # un-normalised; relative scale
-
-    # Normalise per-jet matrix row-wise so each epoch sums to 1
-    per_jet_prob_matrix /= per_jet_prob_matrix.sum(axis=1, keepdims=True).clip(min=1e-12)
+        # Per-jet single-draw probability (uniform within bucket)
+        p_per_jet = probs / counts_safe          # shape (N_BUCKETS,)
+        # P(jet drawn at least once) = 1 - (1 - p_i)^S
+        # Use log1p for numerical stability when p_i is tiny
+        log_p_miss = samples_per_epoch * np.log1p(-p_per_jet.clip(max=1 - 1e-12))
+        coverage_matrix[e] = 1.0 - np.exp(log_p_miss)
 
     # ── Colourmap shared across buckets ───────────────────────────────────
     bucket_cmap = plt.cm.get_cmap("plasma", N_BUCKETS)
@@ -156,17 +163,21 @@ def main():
     ax_alpha.set_xticks(np.linspace(0, num_epochs, 5))
     ax_alpha.set_xticklabels([f"α={a:.1f}" for a in alpha_ticks], fontsize=8)
 
-    # --- Right: effective per-jet sampling probability --------------------
+    # --- Right: P(jet seen at least once per epoch) -----------------------
     im2 = ax_eff.imshow(
-        per_jet_prob_matrix.T,
+        coverage_matrix.T,
         aspect="auto", origin="lower",
         extent=[0, num_epochs, -0.5, N_BUCKETS - 0.5],
         cmap="RdYlGn", interpolation="nearest",
+        vmin=0.0, vmax=1.0,
     )
-    fig.colorbar(im2, ax=ax_eff, label="Effective per-jet prob (normalised)", shrink=0.85)
+    fig.colorbar(im2, ax=ax_eff, label=r"$P(\text{jet seen} \geq 1\times / \text{epoch})$",
+                 shrink=0.85)
     ax_eff.set_xlabel("Epoch", fontsize=12)
     ax_eff.set_ylabel("Bucket k  (0 = sparsest)", fontsize=12)
-    ax_eff.set_title("Effective per-jet sampling probability", fontsize=12)
+    ax_eff.set_title(
+        rf"Coverage per epoch  ($S={samples_per_epoch:,}$ draws)", fontsize=12
+    )
     ax_eff.set_yticks(range(N_BUCKETS))
     ax_eff.set_yticklabels([f"k={k}  ({bucket_ranges[k]})" for k in range(N_BUCKETS)],
                             fontsize=7)
@@ -178,18 +189,20 @@ def main():
 
     fig.suptitle(
         f"Curriculum learning — {N_train:,} jets, {N_BUCKETS} buckets, "
-        f"{num_epochs} epochs",
+        f"{num_epochs} epochs  (epoch_frac={args.epoch_frac}, S={samples_per_epoch:,})",
         fontsize=13, y=1.01,
     )
 
     plt.savefig(args.output, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"Saved → {args.output}")
+    print(f"\nS = {samples_per_epoch:,} draws/epoch  (epoch_frac={args.epoch_frac}, N_train={N_train:,})")
     print(f"\nBucket summary:")
     for k in range(N_BUCKETS):
         print(f"  k={k}  particles={bucket_ranges[k]}  count={int(bucket_counts[k]):,}  "
               f"P(k,epoch=0)={bucket_probs_matrix[0, k]:.3f}  "
-              f"P(k,last epoch)={bucket_probs_matrix[-1, k]:.3f}")
+              f"coverage(epoch=0)={coverage_matrix[0, k]:.3f}  "
+              f"coverage(last)={coverage_matrix[-1, k]:.3f}")
 
 
 if __name__ == "__main__":
