@@ -170,7 +170,7 @@ def hyperbolic_loss(
     mask              : (batch, max_particles)  1 = real, 0 = padding
     Returns scalar loss.
     """
-    lam = _lambda_x(x_t, c)                                  # (batch, max_particles, 1)
+    lam = _lambda_x(x_t, c).squeeze(-1)                       # (batch, max_particles)
     diff = pred - target                                       # (batch, max_particles, d)
     # Riemannian squared norm per particle
     riem_sq = (lam ** 2) * (diff * diff).sum(dim=-1)          # (batch, max_particles)

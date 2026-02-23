@@ -47,7 +47,7 @@ _DIM_LABELS = [r"$E/c$", r"$p_x$", r"$p_y$", r"$p_z$"]
 # Step-by-step ICP recorder
 # ---------------------------------------------------------------------------
 
-def _collect_icp_frames(x_0_init: np.ndarray, x_1: np.ndarray, max_iter: int = 40):
+def _collect_icp_frames(x_0_init: np.ndarray, x_1: np.ndarray, max_iter: int = 200):
     """
     Run ICP step-by-step and return a list of frame dicts:
         x0       : (n, 4) float64  current prior-cloud positions
@@ -115,8 +115,6 @@ def _title(f):
     tag = ""
     if f.get("restored"):
         tag = "  ★ RESTORED TO BEST"
-    elif f.get("is_best"):
-        tag = "  ★ best so far"
     return (rf"ICP — iteration {f['iteration']}   "
             rf"$\Sigma\|x_0-x_1\|={f['dist']:.4f}$" + tag)
 

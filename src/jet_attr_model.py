@@ -91,7 +91,6 @@ if __name__ == "__main__":
 
     long_types = X_train[:, -1].long()
     one_hot_jets = one_hot_enc_jet_type(long_types)
-    print(one_hot_jets.shape, one_hot_jets.sum(dim=0))
 
     K = args.K
     hidden_units = args.hidden_units

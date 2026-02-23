@@ -63,15 +63,15 @@ spec:
 
               python3 data.py --jet_types g --num_particles=30 --output_path=${OUTPUT_PATH}
               python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
-              python3 cache_icp.py --output_path=${OUTPUT_PATH} --num_particles=30 --n_workers=2
+              python3 cache_icp.py --output_path=${OUTPUT_PATH} --jet_types g --num_particles=30 --n_workers=2 --cache_dir=/mnt/data/caches
               python3 train.py \
                 --jet_types g --num_particles=30 \
                 --train_space=polar --time_sampling=power_law \
-                --batch_size=16 --num_epochs=50 \
+                --batch_size=25 --num_epochs=50 \
                 --n_samples=50000 --integration_steps=256 --n_layers=3 \
                 --output_path=${OUTPUT_PATH} --use_residual \
                 --use_cosine_lr --use_time_sampling --no-use_curriculum \
-                --icp_cache_path=${OUTPUT_PATH}/icp_cache.pkl \
+                --cache_dir=/mnt/data/caches \
                 | tee -a ${OUTPUT_PATH}/logs.txt
           volumeMounts:
             - mountPath: /mnt/data

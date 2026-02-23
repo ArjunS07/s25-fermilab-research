@@ -1,3 +1,4 @@
+import os
 import pickle
 import argparse
 import logging
@@ -23,6 +24,7 @@ from util.metrics import run_save_metrics
 # from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import data_args, get_data_path
+from cache_icp import canonical_cache_path
 from util.mask_helpers import mean_std_masked_tensor
 
 RANDOM_SEED = 42
@@ -102,9 +104,10 @@ if __name__ == "__main__":
 
     # ICP cache
     parser.add_argument("--icp_cache_path", type=str, default=None,
-                        help="Path to pre-computed ICP-aligned prior cache (from cache_icp.py). "
-                             "When set, the cached x_0 is used during training instead of "
-                             "sampling a fresh prior each step.")
+                        help="Explicit path to ICP cache. If omitted, auto-discovered from "
+                             "--cache_dir/<jet_types>_p<num_particles>/icp_cache.pkl.")
+    parser.add_argument("--cache_dir", type=str, default="/mnt/data/caches",
+                        help="Root directory for shared ICP caches (used for auto-discovery).")
 
     args = parser.parse_args()
 
@@ -181,9 +184,15 @@ if __name__ == "__main__":
 
     # ── ICP cache ─────────────────────────────────────────────────────────────
     x_0_cache: torch.Tensor | None = None
-    if args.icp_cache_path is not None:
-        print(f"Loading ICP prior cache from {args.icp_cache_path} …")
-        with open(args.icp_cache_path, "rb") as f:
+    icp_cache_path = args.icp_cache_path
+    if icp_cache_path is None:
+        auto = canonical_cache_path(args.cache_dir, args.jet_types, args.num_particles)
+        if os.path.exists(auto):
+            logging.info(f"Auto-discovered ICP cache: {auto}")
+            icp_cache_path = auto
+    if icp_cache_path is not None:
+        print(f"Loading ICP prior cache from {icp_cache_path} …")
+        with open(icp_cache_path, "rb") as f:
             icp_payload = pickle.load(f)
         x_0_cache = torch.from_numpy(icp_payload["x_0_cache"]).float()
         # Validate compatibility
