@@ -155,27 +155,28 @@ def conditional_vector_field(
 def hyperbolic_loss(
     pred: torch.Tensor,
     target: torch.Tensor,
-    x_t: torch.Tensor,
+    x_t: torch.Tensor,  # kept for API compatibility; unused after metric simplification
     mask: torch.Tensor,
     c: float = 1.0,
 ) -> torch.Tensor:
     """
-    Riemannian MSE loss from Equation 14 (Chen & Lipman 2024):
+    Euclidean MSE in the ball tangent space (proxy for Riemannian FM loss).
 
-        L = E[ ||v_theta - u_t||^2_g ]
-
-    where  ||u||^2_g = lambda_x^2 * ||u||^2_E  and  lambda_x = 2 / (1 - c||x||^2).
+    The geodesic interpolant and conditional vector field are computed in the
+    Poincaré ball (preserving hyperbolic geometry), but the loss uses a plain
+    Euclidean norm rather than the Riemannian metric ||u||^2_g = λ_x^2 ||u||^2_E.
+    This avoids the λ_x^2 blowup near the ball boundary that occurs when data
+    points have large Cartesian norms (‖x‖ >> 1).
 
     pred, target, x_t : (batch, max_particles, d)
     mask              : (batch, max_particles)  1 = real, 0 = padding
     Returns scalar loss.
     """
-    lam = _lambda_x(x_t, c).squeeze(-1)                       # (batch, max_particles)
     diff = pred - target                                       # (batch, max_particles, d)
-    # Riemannian squared norm per particle
-    riem_sq = (lam ** 2) * (diff * diff).sum(dim=-1)          # (batch, max_particles)
+    # Euclidean MSE in ball tangent space — avoids λ² blowup near boundary
+    sq = (diff * diff).sum(dim=-1)                             # (batch, max_particles)
     n_real = mask.sum().clamp(min=1)
-    return (riem_sq * mask).sum() / n_real
+    return (sq * mask).sum() / n_real
 
 
 # ---------------------------------------------------------------------------

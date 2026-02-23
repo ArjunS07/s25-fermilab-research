@@ -30,7 +30,7 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
     if prior_dist == 'isotropic_com':
         n_pairs = num_particles // 2
     
-        # Generate random directions and magnitudes
+        # random directions and magnitudes
         E_c = 0.5 + 0.5 * torch.exp(0.5 * torch.randn(batch_size, n_pairs))
         theta = torch.arccos(1 - 2*torch.rand(batch_size, n_pairs))
         phi = 2*torch.pi*torch.rand(batch_size, n_pairs)
@@ -39,21 +39,19 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         p_y = E_c * torch.sin(theta) * torch.sin(phi)
         p_z = E_c * torch.cos(theta)
         
-        # pair particles with opposite momentum
+        # pair opposite momentum particles
         p_x_opp = -p_x
         p_y_opp = -p_y  
         p_z_opp = -p_z
         E_c_opp = E_c
         
-        # Interleave pairs so that the mask doesn't destroy the zero CoM structure.
-        # Use explicit slice bounds so odd num_particles doesn't cause a shape mismatch:
-        # the last slot stays zero and will be masked out by the particle mask anyway.
+        # interleave pairs consecutively to minimize the damage of the mask to the zero CoM structure
         particles = torch.zeros(batch_size, num_particles, 4, device=device)
         particles[:, 0:2*n_pairs:2] = torch.stack([E_c, p_x, p_y, p_z], dim=-1)
         particles[:, 1:2*n_pairs:2] = torch.stack([E_c_opp, p_x_opp, p_y_opp, p_z_opp], dim=-1)
 
         current_std = particles.std()
-        target_std = 1.0  # Match training data mean std
+        target_std = 1.0
         particles = particles * (target_std / current_std)
         
         return particles
