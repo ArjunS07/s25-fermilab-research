@@ -422,18 +422,8 @@ if __name__ == "__main__":
         for epoch, loss in enumerate(losses):
             f.write(f"{epoch},{loss}\n")
 
-    # Plot per-layer gradient norms over time
-    df = pd.read_csv(f"{model_output_path}/gradient_stats.csv")
-    grad_fig_out_path = f"{model_output_path}/grad_figures"
-    make_clear_folder(grad_fig_out_path)
-    layer_names = [col.replace('_norm', '') for col in df.columns if col.endswith('_norm')]
-    for layer in layer_names:
-        plt.semilogy(df[f'{layer}_norm'], label=layer, alpha=0.7)
-        plt.xlabel('Epoch')
-        plt.ylabel('Gradient Norm (log scale)')
-        plt.legend()
-        plt.savefig(f"{grad_fig_out_path}/{layer}_gradient_norm.png")
-        plt.clf()
+
+
 
     torch.save(model.state_dict(), f"{model_output_path}/models/final_model.pth")
 
