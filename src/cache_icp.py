@@ -38,7 +38,7 @@ MAX_N_PARTICLES = 150
 RANDOM_SEED = 42
 
 
-def _align_point_clouds_till_converge(x_0_orig, x1, max_iter=2_500):
+def _align_point_clouds_till_converge(x_0_orig, x1, max_iter=200):
     x_0 = x_0_orig.clone()
     i = 0
     dist = np.linalg.norm(x_0 - x1, axis=1).sum()
@@ -140,7 +140,7 @@ if __name__ == "__main__":
     parser.add_argument("--cache_filename", type=str, default="icp_cache.pkl",
                         help="Output filename inside output_path")
     parser.add_argument("--icp_max_iter", type=int, default=1000,
-                        help="Maximum ICP iterations per jet (default 1000)")
+                        help="Maximum ICP iterations per jet (default 1000 )")
     args = parser.parse_args()
 
     # ── Load and transform training data (same pipeline as train.py) ─────────
