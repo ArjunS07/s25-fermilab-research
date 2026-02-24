@@ -109,6 +109,12 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default="/mnt/data/caches",
                         help="Root directory for shared ICP caches (used for auto-discovery).")
 
+    # Resume
+    parser.add_argument("--resume_weights", type=str, default=None,
+                        help="Path to a latest_checkpoint.pth to resume training. "
+                             "Loads model, optimizer, and scheduler state. "
+                             "--num_epochs sets how many *additional* epochs to run.")
+
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -121,12 +127,14 @@ if __name__ == "__main__":
         X_test = pickle.load(f)
 
     model_output_path = f"{args.output_path}/train"
-    make_clear_folder(model_output_path)
-
-    with open(f"{model_output_path}/args.txt", "w") as f:
-        f.write(f"CLI args:\n")
-        for arg in vars(args):
-            f.write(f"{arg}: {getattr(args, arg)}\n")
+    if args.resume_weights:
+        os.makedirs(model_output_path, exist_ok=True)
+    else:
+        make_clear_folder(model_output_path)
+        with open(f"{model_output_path}/args.txt", "w") as f:
+            f.write("CLI args:\n")
+            for arg in vars(args):
+                f.write(f"{arg}: {getattr(args, arg)}\n")
 
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
     X_train_particle_transformed = X_train_particle_transformed[:args.n_train_samples]
@@ -158,13 +166,24 @@ if __name__ == "__main__":
         include_pt=True,
     ).to(device)
     
-    make_clear_folder(f"{model_output_path}/models")
-    torch.save(model.state_dict(), f"{model_output_path}/models/initial_model.pth")
+    start_epoch = 0
+    losses = []
+    if args.resume_weights:
+        os.makedirs(f"{model_output_path}/models", exist_ok=True)
+        checkpoint = torch.load(args.resume_weights, map_location=device)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        start_epoch = checkpoint["epoch"] + 1
+        losses = checkpoint.get("losses", [])
+        print(f"Resumed from checkpoint at epoch {start_epoch - 1}; "
+              f"running {args.num_epochs} more epochs ({start_epoch}→{start_epoch + args.num_epochs - 1}).")
+    else:
+        make_clear_folder(f"{model_output_path}/models")
+        torch.save(model.state_dict(), f"{model_output_path}/models/initial_model.pth")
+
     train_jet_info = X_train[:][1].to(device)
     if args.num_particles < MAX_N_PARTICLES:
         train_jet_info[:, 3] = train_jet_info[:, 3].clamp(max=args.num_particles)
     train_jet_info = train_jet_info[:args.n_train_samples]
-    losses = []
 
     # ── Curriculum: pre-compute bucket assignment for every training sample ───
     # Bucket k ∈ {0, …, N-1}, k=0 sparsest, k=N-1 densest.
@@ -228,19 +247,26 @@ if __name__ == "__main__":
             optimizer, T_0=t0, T_mult=1, eta_min=lr * 0.1
         )
 
+    if args.resume_weights:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if args.use_cosine_lr and "scheduler_state_dict" in checkpoint:
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
     epoch_fraction = args.epoch_frac
     samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
 
     
-    for epoch in range(args.num_epochs):
+    total_epochs = start_epoch + args.num_epochs
+    for epoch in range(start_epoch, total_epochs):
         epoch_loss = 0
         num_batches = 0
 
         # ── Sample epoch indices (uniform or curriculum) ─────────────────────
         if args.use_curriculum:
-            # alpha decays linearly from alpha_start (epoch 0) to 0 (epoch num_epochs-1)
+            # alpha decays linearly from alpha_start (epoch 0) to 0 (final epoch),
+            # using total_epochs so the schedule is continuous across resume boundaries.
             alpha = args.curriculum_alpha_start * (
-                1.0 - epoch / max(args.num_epochs - 1, 1)
+                1.0 - epoch / max(total_epochs - 1, 1)
             )
             # P(bucket k) \propto (k+1)^α; weight 0 for empty buckets automatically
             # because no samples belong to them.
@@ -406,26 +432,38 @@ if __name__ == "__main__":
                     torch.cuda.empty_cache()
             
                 if total_n_accumulations % 10 == 0:
-                    print(f"Epoch [{epoch+1}/{args.num_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {(epoch_loss / total_n_accumulations):.4f}")
+                    print(f"Epoch [{epoch+1}/{total_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {(epoch_loss / total_n_accumulations):.4f}")
                 
             del x_1, x_0, t, x_t, pred, loss
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
         losses.append(epoch_loss / total_n_accumulations)
+
+        # Overwrite latest checkpoint so training can be resumed at any point.
+        ckpt = {
+            "epoch": epoch,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "losses": losses,
+        }
+        if args.use_cosine_lr:
+            ckpt["scheduler_state_dict"] = scheduler.state_dict()
+        torch.save(ckpt, f"{model_output_path}/models/latest_checkpoint.pth")
+
         if args.use_cosine_lr:
             scheduler.step(epoch)
 
-    # Logging
-    with open(f"{model_output_path}/training_loss.csv", "w") as f:
-        f.write("epoch,loss\n")
-        for epoch, loss in enumerate(losses):
-            f.write(f"{epoch},{loss}\n")
-
-
-
+    # Logging — on resume, append only the newly-completed epochs.
+    write_mode = "a" if args.resume_weights else "w"
+    with open(f"{model_output_path}/training_loss.csv", write_mode) as f:
+        if not args.resume_weights:
+            f.write("epoch,loss\n")
+        for epoch_i, loss_val in enumerate(losses[start_epoch:], start=start_epoch):
+            f.write(f"{epoch_i},{loss_val}\n")
 
     torch.save(model.state_dict(), f"{model_output_path}/models/final_model.pth")
+
 
     jet_attr_model_loaded = jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device)
 
