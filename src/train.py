@@ -225,13 +225,13 @@ if __name__ == "__main__":
         x_0_cache = x_0_cache[:len(X_train_particle_transformed), :args.num_particles, :]
         print(f"ICP cache loaded: shape={tuple(x_0_cache.shape)}")
 
-    # ── Time-sampling closure (avoids repeated if/elif inside the inner loop) ─
+   
     def _sample_t(batch_size: int) -> torch.Tensor:
         mode = args.time_sampling if args.use_time_sampling else 'uniform'
         if mode == 'uniform':
             return time_dist(batch_size, device=device, mode='uniform')
         elif mode == 'power_law':
-            return time_dist(batch_size, device=device, mode='power_law', a=0.2)
+            return time_dist(batch_size, device=device, mode='power_law', a=-0.2)
         elif mode == 'lognorm':
             return time_dist(batch_size, device=device, mode='lognorm', mu=-0.5, sigma=1.0)
         else:
