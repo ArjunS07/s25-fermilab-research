@@ -123,7 +123,7 @@ def time_dist(batch_size, device='cpu', mode='power_law', **kwargs):
         # pdf = (1+a) * x^a
         # cdf = x^(a+1)
         # https://math.stackexchange.com/questions/3499892/sampling-from-a-distribution-with-given-pdf
-        a = kwargs.get('a', 0.2)
+        a = kwargs.get('a', -0.2)
         # sample x uniformly over 0, 1
         u = torch.rand(batch_size, device=device)
         return u ** (1 / (a + 1))
