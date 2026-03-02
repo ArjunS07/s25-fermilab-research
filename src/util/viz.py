@@ -8,7 +8,7 @@ from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from util import jet_attributes
 from util.file_management import make_clear_folder
 from util.distributions import gen_initial_distribution
-from util.cfg import null_vector_like
+
 
 colors = sns.color_palette("deep")
 import os
@@ -104,7 +104,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
             t = times[i].unsqueeze(0).repeat(n_viz_samples).to(device)
             final_field_conditional = final_model.forward(x_model_final, t, generated_jet_attrs, masks)
             if use_cfg:
-                null_vector = null_vector_like(generated_jet_attrs).to(device)
+                null_vector = final_model.make_null_cond(generated_jet_attrs)
                 final_field_unconditional = final_model.forward(x_model_final, t, null_vector, masks)
                 final_field = final_field_conditional + cfg_guidance_weight * (final_field_conditional - final_field_unconditional)
             else:

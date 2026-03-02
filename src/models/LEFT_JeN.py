@@ -24,7 +24,7 @@ class TimeEmbedding(nn.Module):
     Weights for the FC layers are initialized from a Xavier uniform distribution.
     """
     
-    def __init__(self, embed_dim=64, scale=16.0, seed=42):
+    def __init__(self, embed_dim=128, scale=16.0, seed=42):
         super().__init__()
         self.embed_dim = embed_dim
         self.scale = scale
@@ -90,7 +90,7 @@ class PhiMLP(nn.Module):
 
 class GlobalEmbedding(nn.Module):
     """Embeds jet type, number of constituents, and (optionally) jet pT."""
-    def __init__(self, max_num_jet_types, max_constituents=150, embed_dim=64, include_pt=False):
+    def __init__(self, max_num_jet_types, max_constituents=150, embed_dim=128, include_pt=False):
         super().__init__()
         self.max_constituents = max_constituents
         self.include_pt = include_pt
@@ -125,7 +125,7 @@ class GlobalEmbedding(nn.Module):
         return self.output_norm(x)
 
 class LorentzEquivariantLayer(nn.Module):
-    def __init__(self, embed_dim=64, message_dim=128, hidden_dim=64):
+    def __init__(self, embed_dim=128, message_dim=128, hidden_dim=128):
         super().__init__()
         self.embed_dim = embed_dim
         self.message_dim = message_dim
@@ -259,8 +259,8 @@ class LorentzEquivariantLayer(nn.Module):
         return x_new, g_new
     
 class LEFTJeN(nn.Module):
-    def __init__(self, max_num_jet_types, max_particles=150, embed_dim=64,
-                 num_layers=6, message_dim=128, hidden_dim=64,
+    def __init__(self, max_num_jet_types, max_particles=150, embed_dim=128,
+                 num_layers=6, message_dim=128, hidden_dim=128,
                  use_residual_update=True, include_pt=False):
         super().__init__()
         self.max_particles = max_particles
@@ -295,8 +295,8 @@ class LEFTJeN(nn.Module):
     def make_null_cond(self, jet_conditions: torch.Tensor) -> torch.Tensor:
         """
         Build null conditioning for CFG.
-        - Jet type and pT slots → learned null_cond parameter.
-        - n_particles slot → real value from jet_conditions (already encoded in the mask,
+        - Jet type and pT slots -> learned null_cond parameter.
+        - n_particles slot -> real value from jet_conditions (already encoded in the mask,
           so it provides no type/pT guidance and should not be nulled out).
         """
         B = jet_conditions.shape[0]
@@ -361,3 +361,9 @@ class LEFTJeN(nn.Module):
             return x_next
         else:
             raise NotImplementedError(f"Method {method} not implemented")
+        
+
+if __name__ == "__main__":
+    model = LEFTJeN(max_num_jet_types=5, max_particles=150, embed_dim=128, num_layers=6)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Total parameters in LEFT-JeN with 6 layers: {total_params:,}")
