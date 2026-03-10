@@ -86,7 +86,9 @@ if __name__ == "__main__":
     parser.add_argument("--use_cosine_lr", action=argparse.BooleanOptionalAction, default=True,
                         help="Use cosine annealing LR schedule with warm restarts (disable: --no-use_cosine_lr)")
     parser.add_argument("--lr_t0", type=int, default=0,
-                        help="Warm restart period T_0 in epochs. 0 = auto (num_epochs // 2).")
+                        help="Warm restart period T_0 in epochs. 0 = auto (num_epochs // 4).")
+    parser.add_argument("--lr_warmup_epochs", type=int, default=10,
+                        help="Number of linear warmup epochs from near-zero to lr (0 = no warmup).")
     parser.add_argument("--use_hyperbolic", action=argparse.BooleanOptionalAction, default=False,
                         help="Use Riemannian flow matching in the Poincaré ball (Chen & Lipman 2024)")
     parser.add_argument("--use_curriculum", action=argparse.BooleanOptionalAction, default=True,
@@ -237,15 +239,27 @@ if __name__ == "__main__":
         else:
             raise ValueError(f"Unknown time_sampling: {mode}")
 
-    lr = 3e-4
+    lr = 6e-4
     weight_decay = 1e-6
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     if args.use_cosine_lr:
         t0 = args.lr_t0 if args.lr_t0 > 0 else (args.num_epochs // 4) if args.num_epochs >= 20 else max(1, args.num_epochs // 2)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer, T_0=t0, T_mult=1, eta_min=lr * 0.1
+        cosine_sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer, T_0=t0, T_mult=1, eta_min=lr * 0.3
         )
+        if args.lr_warmup_epochs > 0:
+            warmup_sched = torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=1e-6, end_factor=1.0,
+                total_iters=args.lr_warmup_epochs
+            )
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer,
+                schedulers=[warmup_sched, cosine_sched],
+                milestones=[args.lr_warmup_epochs]
+            )
+        else:
+            scheduler = cosine_sched
 
     if args.resume_weights:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -452,7 +466,7 @@ if __name__ == "__main__":
         torch.save(ckpt, f"{model_output_path}/models/latest_checkpoint.pth")
 
         if args.use_cosine_lr:
-            scheduler.step(epoch)
+            scheduler.step()
 
     # Logging — on resume, append only the newly-completed epochs.
     write_mode = "a" if args.resume_weights else "w"
@@ -479,7 +493,8 @@ if __name__ == "__main__":
             n_jet_types=len(args.jet_types),
             n_particles_per_jet=args.num_particles,
             n_features_per_particle=NUM_PARTICLE_FEATURES,
-            n_viz_samples=args.n_viz_samples,
+            # set to 100 viz samples if 150 particle jets
+            n_viz_samples=args.n_viz_samples if args.num_particles < MAX_N_PARTICLES else 100,
             integration_steps=args.integration_steps,
             use_cfg=True,
             cfg_guidance_weight=2.0
@@ -493,7 +508,7 @@ if __name__ == "__main__":
             n_jet_types=len(args.jet_types),
             n_particles_per_jet=args.num_particles,
             n_features_per_particle=NUM_PARTICLE_FEATURES,
-            n_viz_samples=args.n_viz_samples,
+            n_viz_samples=args.n_viz_samples if args.num_particles < MAX_N_PARTICLES else 100,
             integration_steps=args.integration_steps,
             use_cfg=False,
         )
@@ -513,7 +528,7 @@ if __name__ == "__main__":
             n_samples=args.n_samples,
             n_jet_types=len(args.jet_types),
             device=device,
-            batch_size=args.batch_size,
+            batch_size=args.batch_size if args.num_particles < MAX_N_PARTICLES else 16, 
             use_cfg=False
         )
     except Exception as e:
