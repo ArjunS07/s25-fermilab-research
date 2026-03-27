@@ -46,12 +46,17 @@ RANDOM_SEED = 42
 
 def _align_point_clouds_till_converge(x_0_orig, x1, max_iter=200):
     x_0 = x_0_orig.clone()
+    n_real = len(x_0)
     i = 0
     dist = np.linalg.norm(x_0 - x1, axis=1).sum()
     dist_delta = np.inf
 
+    perm_cumulative = np.arange(n_real, dtype=np.int32)
+    rot_cumulative = np.eye(3, dtype=np.float64)
     best_dist = dist
     best_x_0 = x_0.clone()
+    best_perm = perm_cumulative.copy()
+    best_rot = rot_cumulative.copy()
 
     while i < max_iter and dist_delta > 1e-8:
         cost = cdist(x_0, x1, metric='euclidean')
@@ -59,10 +64,13 @@ def _align_point_clouds_till_converge(x_0_orig, x1, max_iter=200):
         cost = cost * (1_000. / cost.max())
         _, col_ind = linear_sum_assignment(cost)
 
+        perm_cumulative = perm_cumulative[col_ind]
         x_0 = x_0[col_ind]
         # Align cartesian 3-momenta
         rot, _, _ = R.align_vectors(x1[:, 1:4], x_0[:, 1:4], return_sensitivity=True)
-        x_0[:, 1:4] = x_0[:, 1:4] @ rot.as_matrix().T
+        rot_mat = rot.as_matrix()
+        rot_cumulative = rot_mat @ rot_cumulative
+        x_0[:, 1:4] = x_0[:, 1:4] @ rot_mat.T
 
         dist_new = np.linalg.norm(x_0 - x1, axis=1).sum()
         dist_delta = np.abs(dist_new - dist)
@@ -72,21 +80,25 @@ def _align_point_clouds_till_converge(x_0_orig, x1, max_iter=200):
         if dist_new < best_dist:
             best_dist = dist_new
             best_x_0 = x_0.clone()
+            best_perm = perm_cumulative.copy()
+            best_rot = rot_cumulative.copy()
 
-    return best_x_0
+    return best_x_0, best_perm, best_rot
 
-# must be top-level for multiprocessing 
+# must be top-level for multiprocessing
 def _icp_permute_worker(task):
     """
-    Align x_0 to x_1 for the real (unmasked) particles of one jet using the
-    alternating permutation + rotation ICP algorithm (Algorithm 3,
-    https://arxiv.org/abs/2312.07168):
+    Find the net permutation and net rotation that align x_0 to x_1 for the
+    real (unmasked) particles of one jet using the alternating permutation +
+    rotation ICP algorithm (Algorithm 3, https://arxiv.org/abs/2312.07168):
 
         while not converged:
             Π  = argmin_Π  ||Π(Rz)^T - y^T||   (Hungarian assignment)
             R  = argmin_R  ||R(Πz)^T - y^T||   (Kabsch / align_vectors)
 
-    Rotation is applied to the 3-momentum components (px, py, pz) only.
+    Both the net permutation and the cumulative rotation matrix are cached.
+    At training time a fresh x_0 is drawn from the prior, the stored permutation
+    is applied, then the stored rotation is applied to the 3-momenta.
 
     task : (idx, x_0_full, x_1_full, n_real, max_iter)
         idx       – global index in the cache array (returned to reconstruct order)
@@ -95,12 +107,18 @@ def _icp_permute_worker(task):
         n_real    – number of real particles (rest is zero-padding)
         max_iter  – maximum ICP iterations
 
-    Returns (idx, x_0_aligned_full)
+    Returns (idx, perm_full, rot) where:
+        perm_full  – (max_particles,) int32: net permutation (identity for padding)
+        rot        – (3, 3) float32: cumulative rotation matrix for 3-momenta
     """
     idx, x_0_full, x_1_full, n_real, max_iter = task
 
+    max_particles = x_0_full.shape[0]
+    perm_full = np.arange(max_particles, dtype=np.int32)
+    rot = np.eye(3, dtype=np.float32)
+
     if n_real == 0:
-        return idx, x_0_full.copy()
+        return idx, perm_full, rot
 
     x_0_real = x_0_full[:n_real]   # (n_real, 4)
     x_1_real = x_1_full[:n_real]   # (n_real, 4)
@@ -110,11 +128,11 @@ def _icp_permute_worker(task):
     x_0_t = torch.from_numpy(x_0_real.astype(np.float64))
     x_1_t = torch.from_numpy(x_1_real.astype(np.float64))
 
-    x_0_aligned = _align_point_clouds_till_converge(x_0_t, x_1_t, max_iter=max_iter)
+    _x_0_aligned, best_perm, best_rot = _align_point_clouds_till_converge(x_0_t, x_1_t, max_iter=max_iter)
 
-    x_0_out = np.zeros_like(x_0_full)
-    x_0_out[:n_real] = x_0_aligned.numpy().astype(np.float32)
-    return idx, x_0_out
+    perm_full[:n_real] = best_perm
+    rot = best_rot.astype(np.float32)
+    return idx, perm_full, rot
 
 
 def _compute_scale(X_transformed):
@@ -158,9 +176,18 @@ if __name__ == "__main__":
     cache_path = canonical_cache_path(args.cache_dir, args.jet_types, args.num_particles)
     logging.info(f"Cache target: {cache_path}")
 
-    if args.skip_if_exists and os.path.exists(cache_path):
-        logging.info("Cache already exists — skipping computation (--no-skip_if_exists to force).")
-        raise SystemExit(0)
+    if os.path.exists(cache_path):
+        with open(cache_path, "rb") as _f:
+            _existing = pickle.load(_f)
+        if "perm_cache" in _existing:
+            if args.skip_if_exists:
+                logging.info("Cache already exists — skipping computation (--no-skip_if_exists to force).")
+                raise SystemExit(0)
+        else:
+            logging.warning(
+                "Existing cache at %s is old format (x_0_cache). Deleting and recomputing.", cache_path
+            )
+            os.remove(cache_path)
 
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
@@ -210,21 +237,23 @@ if __name__ == "__main__":
         for i in range(n_total)
     ]
 
-    cache = np.zeros((n_total, args.num_particles, 4), dtype=np.float32)
+    perm_cache = np.zeros((n_total, args.num_particles), dtype=np.int32)
+    rot_cache = np.zeros((n_total, 3, 3), dtype=np.float32)
 
-    logging.info(f"Running Hungarian assignment on {n_total} jets "
-                 f"with {args.n_workers} workers …")
+    logging.info(f"Running ICP on {n_total} jets with {args.n_workers} workers …")
     with Pool(processes=args.n_workers) as pool:
-        for idx, x_0_permuted in tqdm(
+        for idx, perm_full, rot in tqdm(
             pool.imap_unordered(_icp_permute_worker, tasks, chunksize=64),
             total=n_total,
             desc="ICP",
         ):
-            cache[idx] = x_0_permuted
+            perm_cache[idx] = perm_full
+            rot_cache[idx] = rot
 
     # ── Save ──────────────────────────────────────────────────────────────────
     payload = {
-        "x_0_cache": cache,
+        "perm_cache": perm_cache,
+        "rot_cache": rot_cache,
         "final_scale": final_scale,
         "num_particles": args.num_particles,
         "n_samples": n_total,
@@ -232,4 +261,4 @@ if __name__ == "__main__":
     with open(cache_path, "wb") as f:
         pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    logging.info(f"Saved ICP cache → {cache_path}  shape={cache.shape}")
+    logging.info(f"Saved ICP cache → {cache_path}  perm={perm_cache.shape}  rot={rot_cache.shape}")

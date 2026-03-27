@@ -7,6 +7,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from contextlib import nullcontext
 import random
 from torch.utils.data import DataLoader
 
@@ -35,17 +38,19 @@ TRAIN_SPLIT = 0.7
 # SCALE = 2000
 
 class PairedDataset(torch.utils.data.Dataset):
-    def __init__(self, jet_info, particle_data, x_0_cache=None):
+    def __init__(self, jet_info, particle_data, perm_cache=None, rot_cache=None):
         self.jet_info = jet_info
         self.particle_data = particle_data
-        self.x_0_cache = x_0_cache   # optional (N, P, 4) tensor of ICP-aligned priors
+        self.perm_cache = perm_cache   # optional (N, P) int64 — ICP permutation indices
+        self.rot_cache = rot_cache     # optional (N, 3, 3) float32 — ICP rotation matrices
 
     def __len__(self):
         return len(self.particle_data)
 
     def __getitem__(self, idx):
-        x_0 = self.x_0_cache[idx] if self.x_0_cache is not None else torch.zeros(1)
-        return self.jet_info[idx], self.particle_data[idx], x_0
+        perm = self.perm_cache[idx] if self.perm_cache is not None else torch.zeros(1, dtype=torch.long)
+        rot = self.rot_cache[idx] if self.rot_cache is not None else torch.zeros(1)
+        return self.jet_info[idx], self.particle_data[idx], perm, rot
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)    
@@ -117,10 +122,27 @@ if __name__ == "__main__":
                              "Loads model, optimizer, and scheduler state. "
                              "--num_epochs sets how many *additional* epochs to run.")
 
+    parser.add_argument("--distributed", action="store_true", default=False)
+
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using {device} device")
+    _is_torchrun = "RANK" in os.environ and "WORLD_SIZE" in os.environ
+    args.distributed = args.distributed or _is_torchrun
+
+    if args.distributed:
+        dist.init_process_group(backend="nccl")
+        local_rank = int(os.environ["LOCAL_RANK"])
+        rank       = dist.get_rank()
+        world_size = dist.get_world_size()
+        device = torch.device(f"cuda:{local_rank}")
+        torch.cuda.set_device(device)
+    else:
+        rank, world_size = 0, 1
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    is_rank0 = (rank == 0)
+    if is_rank0:
+        print(f"Using {device} device (world_size={world_size})")
 
     data_path = get_data_path(args.output_path)
     with open(f"{data_path}/x_train.pkl", "rb") as f:
@@ -129,14 +151,17 @@ if __name__ == "__main__":
         X_test = pickle.load(f)
 
     model_output_path = f"{args.output_path}/train"
-    if args.resume_weights:
-        os.makedirs(model_output_path, exist_ok=True)
-    else:
-        make_clear_folder(model_output_path)
-        with open(f"{model_output_path}/args.txt", "w") as f:
-            f.write("CLI args:\n")
-            for arg in vars(args):
-                f.write(f"{arg}: {getattr(args, arg)}\n")
+    if is_rank0:
+        if args.resume_weights:
+            os.makedirs(model_output_path, exist_ok=True)
+        else:
+            make_clear_folder(model_output_path)
+            with open(f"{model_output_path}/args.txt", "w") as f:
+                f.write("CLI args:\n")
+                for arg in vars(args):
+                    f.write(f"{arg}: {getattr(args, arg)}\n")
+    if args.distributed:
+        dist.barrier()  # ranks 1..N-1 wait for rank 0 to create the output dir
 
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
     X_train_particle_transformed = X_train_particle_transformed[:args.n_train_samples]
@@ -152,13 +177,15 @@ if __name__ == "__main__":
     p_z = np.array(X_train_particle_transformed[:, :, 3].flatten())[mask_flat]
     scales = [np.std(e_c), np.std(p_x), np.std(p_y), np.std(p_z)]
     final_scale = np.mean(scales)
-    with open(f"{model_output_path}/scale.txt", "w") as f:
-        f.write(f"{final_scale}\n")
+    if is_rank0:
+        with open(f"{model_output_path}/scale.txt", "w") as f:
+            f.write(f"{final_scale}\n")
     X_train_particle_transformed[:, :, :4] = (1/final_scale) * X_train_particle_transformed[:, :, :4]
-    print(f"{X_train_particle_transformed[:, :, 0].mean()=} {X_train_particle_transformed[:, :, 1].mean()=} {X_train_particle_transformed[:, :, 2].mean()=} {X_train_particle_transformed[:, :, 3].mean()=}")
-    print(f"{X_train_particle_transformed[:, :, 0].std()=} {X_train_particle_transformed[:, :, 1].std()=} {X_train_particle_transformed[:, :, 2].std()=} {X_train_particle_transformed[:, :, 3].std()=}")
-    print(f"{X_train_particle_transformed[:, :, 0].max()=} {X_train_particle_transformed[:, :, 1].max()=} {X_train_particle_transformed[:, :, 2].max()=} {X_train_particle_transformed[:, :, 3].max()=}")
-    print(f"{X_train_particle_transformed[:, :, 0].min()=} {X_train_particle_transformed[:, :, 1].min()=} {X_train_particle_transformed[:, :, 2].min()=} {X_train_particle_transformed[:, :, 3].min()=}")
+    if is_rank0:
+        print(f"{X_train_particle_transformed[:, :, 0].mean()=} {X_train_particle_transformed[:, :, 1].mean()=} {X_train_particle_transformed[:, :, 2].mean()=} {X_train_particle_transformed[:, :, 3].mean()=}")
+        print(f"{X_train_particle_transformed[:, :, 0].std()=} {X_train_particle_transformed[:, :, 1].std()=} {X_train_particle_transformed[:, :, 2].std()=} {X_train_particle_transformed[:, :, 3].std()=}")
+        print(f"{X_train_particle_transformed[:, :, 0].max()=} {X_train_particle_transformed[:, :, 1].max()=} {X_train_particle_transformed[:, :, 2].max()=} {X_train_particle_transformed[:, :, 3].max()=}")
+        print(f"{X_train_particle_transformed[:, :, 0].min()=} {X_train_particle_transformed[:, :, 1].min()=} {X_train_particle_transformed[:, :, 2].min()=} {X_train_particle_transformed[:, :, 3].min()=}")
     model: LEFTJeN = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=args.num_particles,
@@ -171,16 +198,27 @@ if __name__ == "__main__":
     start_epoch = 0
     losses = []
     if args.resume_weights:
-        os.makedirs(f"{model_output_path}/models", exist_ok=True)
         checkpoint = torch.load(args.resume_weights, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
         start_epoch = checkpoint["epoch"] + 1
         losses = checkpoint.get("losses", [])
-        print(f"Resumed from checkpoint at epoch {start_epoch - 1}; "
-              f"running {args.num_epochs} more epochs ({start_epoch}→{start_epoch + args.num_epochs - 1}).")
+        if is_rank0:
+            print(f"Resumed from checkpoint at epoch {start_epoch - 1}; "
+                  f"running {args.num_epochs} more epochs ({start_epoch}→{start_epoch + args.num_epochs - 1}).")
+
+    if args.distributed:
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+    raw_model = model.module if args.distributed else model
+
+    if not args.resume_weights:
+        if is_rank0:
+            make_clear_folder(f"{model_output_path}/models")
+            torch.save(raw_model.state_dict(), f"{model_output_path}/models/initial_model.pth")
+        if args.distributed:
+            dist.barrier()
     else:
-        make_clear_folder(f"{model_output_path}/models")
-        torch.save(model.state_dict(), f"{model_output_path}/models/initial_model.pth")
+        if is_rank0:
+            os.makedirs(f"{model_output_path}/models", exist_ok=True)
 
     train_jet_info = X_train[:][1].to(device)
     if args.num_particles < MAX_N_PARTICLES:
@@ -200,11 +238,13 @@ if __name__ == "__main__":
     bucket_assignments = bucket_assignments.clamp(0, N_CURRICULUM_BUCKETS - 1)
     bucket_counts = torch.bincount(bucket_assignments, minlength=N_CURRICULUM_BUCKETS).float()
     n_nonempty = (bucket_counts > 0).sum().item()
-    print(f"Curriculum: {N_CURRICULUM_BUCKETS} buckets, {int(n_nonempty)} non-empty, "
-          f"alpha_start={args.curriculum_alpha_start:.2f}")
+    if is_rank0:
+        print(f"Curriculum: {N_CURRICULUM_BUCKETS} buckets, {int(n_nonempty)} non-empty, "
+              f"alpha_start={args.curriculum_alpha_start:.2f}")
 
     # ── ICP cache ─────────────────────────────────────────────────────────────
-    x_0_cache: torch.Tensor | None = None
+    perm_cache: torch.Tensor | None = None
+    rot_cache: torch.Tensor | None = None
     icp_cache_path = args.icp_cache_path
     if icp_cache_path is None:
         auto = canonical_cache_path(args.cache_dir, args.jet_types, args.num_particles)
@@ -212,20 +252,30 @@ if __name__ == "__main__":
             logging.info(f"Auto-discovered ICP cache: {auto}")
             icp_cache_path = auto
     if icp_cache_path is not None:
-        print(f"Loading ICP prior cache from {icp_cache_path} …")
+        if is_rank0:
+            print(f"Loading ICP cache from {icp_cache_path} …")
         with open(icp_cache_path, "rb") as f:
             icp_payload = pickle.load(f)
-        x_0_cache = torch.from_numpy(icp_payload["x_0_cache"]).float()
-        # Validate compatibility
-        assert x_0_cache.shape[0] >= len(X_train_particle_transformed), (
-            f"ICP cache has {x_0_cache.shape[0]} entries but training set needs "
-            f"{len(X_train_particle_transformed)}"
+        if "perm_cache" not in icp_payload:
+            raise ValueError(
+                f"ICP cache at '{icp_cache_path}' is old format (x_0_cache key). "
+                "Re-run cache_icp.py — it will auto-detect, delete, and recompute the cache."
+            )
+        n_train = len(X_train_particle_transformed)
+        perm_cache = torch.from_numpy(icp_payload["perm_cache"]).long()
+        assert perm_cache.shape[0] >= n_train, (
+            f"ICP cache has {perm_cache.shape[0]} entries but training set needs {n_train}"
         )
-        assert x_0_cache.shape[1] >= args.num_particles, (
-            f"ICP cache has {x_0_cache.shape[1]} particles but --num_particles={args.num_particles}"
+        assert perm_cache.shape[1] >= args.num_particles, (
+            f"ICP cache has {perm_cache.shape[1]} particles but --num_particles={args.num_particles}"
         )
-        x_0_cache = x_0_cache[:len(X_train_particle_transformed), :args.num_particles, :]
-        print(f"ICP cache loaded: shape={tuple(x_0_cache.shape)}")
+        perm_cache = perm_cache[:n_train, :args.num_particles]
+        if "rot_cache" in icp_payload:
+            rot_cache = torch.from_numpy(icp_payload["rot_cache"]).float()
+            rot_cache = rot_cache[:n_train]
+        if is_rank0:
+            print(f"ICP cache loaded: perm={tuple(perm_cache.shape)}"
+                  + (f"  rot={tuple(rot_cache.shape)}" if rot_cache is not None else "  (no rot)"))
 
    
     def _sample_t(batch_size: int) -> torch.Tensor:
@@ -276,6 +326,12 @@ if __name__ == "__main__":
         num_batches = 0
 
         # ── Sample epoch indices (uniform or curriculum) ─────────────────────
+        # All ranks produce the same indices via a deterministic seed, then each
+        # takes its own contiguous slice so every rank sees a diverse bucket mix.
+        _epoch_seed = RANDOM_SEED + epoch * 1000
+        _rng = torch.get_rng_state()
+        torch.manual_seed(_epoch_seed)
+
         if args.use_curriculum:
             # alpha decays linearly from alpha_start (epoch 0) to 0 (final epoch),
             # using total_epochs so the schedule is continuous across resume boundaries.
@@ -301,12 +357,20 @@ if __name__ == "__main__":
                 len(X_train_particle_transformed)
             )[:samples_per_epoch]
 
+        torch.set_rng_state(_rng)  # restore so training noise is unaffected
+
+        if args.distributed:
+            shard_size = len(epoch_indices) // world_size
+            epoch_indices = epoch_indices[:shard_size * world_size]
+            epoch_indices = epoch_indices[rank::world_size]  # stride split → diverse bucket mix
+
         X_train_epoch = torch.utils.data.Subset(X_train_particle_transformed, epoch_indices)
         train_jet_info_epoch = train_jet_info[epoch_indices]
-        x_0_cache_epoch = x_0_cache[epoch_indices] if x_0_cache is not None else None
+        perm_cache_epoch = perm_cache[epoch_indices] if perm_cache is not None else None
+        rot_cache_epoch = rot_cache[epoch_indices] if rot_cache is not None else None
 
         paired_dataset = PairedDataset(
-            train_jet_info_epoch, X_train_epoch, x_0_cache=x_0_cache_epoch
+            train_jet_info_epoch, X_train_epoch, perm_cache=perm_cache_epoch, rot_cache=rot_cache_epoch
         )
         train_loader = DataLoader(
             paired_dataset,
@@ -321,7 +385,7 @@ if __name__ == "__main__":
         accumulated_loss = 0
         total_n_accumulations = 0
 
-        for i, (batch_jet_info, batch_particle_info, batch_x_0_cached) in enumerate(train_loader):
+        for i, (batch_jet_info, batch_particle_info, batch_perm_cached, batch_rot_cached) in enumerate(train_loader):
 
             batch_jet_info = batch_jet_info.to(device)
             batch_particle_info = batch_particle_info.to(device)
@@ -342,7 +406,7 @@ if __name__ == "__main__":
             # the unconditional-conditional gap.
             dropout_mask = torch.rand(batch_jet_info_cropped.shape[0], device=device) < args.cfg_null_dropout_rate
             if dropout_mask.any():
-                null_for_batch = model.make_null_cond(batch_jet_info_cropped)
+                null_for_batch = raw_model.make_null_cond(batch_jet_info_cropped)
                 batch_jet_info_cropped = torch.where(
                     dropout_mask.unsqueeze(-1), null_for_batch, batch_jet_info_cropped
                 )
@@ -353,10 +417,19 @@ if __name__ == "__main__":
             # TODO: Boost before, can't boost scaled data
             # x_1 = boost_to_com_frame(x_1, mask=true_masks)
             # x_1 = (1/SCALE) * x_1
-            if x_0_cache is not None:
-                x_0 = batch_x_0_cached.to(device)
-            else:
-                x_0 = gen_initial_distribution(x_1=x_1).to(device)
+            x_0 = gen_initial_distribution(x_1=x_1).to(device)
+            if perm_cache is not None:
+                # Apply the ICP-derived permutation then rotation to the fresh prior sample.
+                # Permutation: gather along particle dim using (B, P, 4) index.
+                batch_perm = batch_perm_cached.to(device)
+                x_0 = torch.gather(x_0, 1, batch_perm.unsqueeze(-1).expand(-1, -1, x_0.shape[-1]))
+                if rot_cache is not None:
+                    # Rotate 3-momenta (indices 1:4): (B, P, 3) @ (B, 3, 3)^T
+                    batch_rot = batch_rot_cached.to(device)
+                    x_0 = torch.cat([
+                        x_0[:, :, :1],
+                        torch.bmm(x_0[:, :, 1:4], batch_rot.transpose(1, 2)),
+                    ], dim=-1)
 
             mask_exp = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
             x_1 = mask_exp * x_1
@@ -401,14 +474,17 @@ if __name__ == "__main__":
                 n_real = true_masks.sum().clamp(min=1)
                 loss = ((conditional_u_t - pred).square() * mask_exp).sum() / (n_real * NUM_PARTICLE_FEATURES)
 
-            loss.backward()
+            is_last_accum_step = ((i + 1) % accumulation_steps == 0)
+            ctx = model.no_sync() if (args.distributed and not is_last_accum_step) else nullcontext()
+            with ctx:
+                loss.backward()
             # Divide by accumulation_steps here so accumulated_loss is the running average,
             # not the sum. This keeps epoch_loss in the same units as the per-batch loss.
             accumulated_loss += loss.item() / accumulation_steps
 
             if (i + 1) % accumulation_steps == 0:
                 grad_stats = {}
-                for name, param in model.named_parameters():
+                for name, param in raw_model.named_parameters():
                     if param.grad is not None:
                         current_weight = param.data.norm(2).item()
                         grad_norm = param.grad.norm(2).item()
@@ -420,13 +496,13 @@ if __name__ == "__main__":
                             'update_ratio': grad_norm / (current_weight + 1e-8)
                         }
                 
-                if total_n_accumulations % 10 == 0:
+                if is_rank0 and total_n_accumulations % 10 == 0:
                     with open(f"{model_output_path}/gradient_stats.csv", "a") as f:
                         if epoch == 0 and total_n_accumulations == 0:
-                            f.write("epoch,step," + ",".join([f"{name}_grad_norm,{name}_mean,{name}_update_ratio" 
+                            f.write("epoch,step," + ",".join([f"{name}_grad_norm,{name}_mean,{name}_update_ratio"
                                                             for name in grad_stats.keys()]) + "\n")
                         row = f"{epoch},{total_n_accumulations},"
-                        row += ",".join([f"{s['norm']},{s['mean']},{s['update_ratio']}" 
+                        row += ",".join([f"{s['norm']},{s['mean']},{s['update_ratio']}"
                                         for s in grad_stats.values()])
                         f.write(row + "\n")
 
@@ -445,107 +521,118 @@ if __name__ == "__main__":
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             
-                if total_n_accumulations % 10 == 0:
+                if is_rank0 and total_n_accumulations % 10 == 0:
                     print(f"Epoch [{epoch+1}/{total_epochs}], Step [{i+1}/{len(train_loader)}], Loss: {(epoch_loss / total_n_accumulations):.4f}")
                 
             del x_1, x_0, t, x_t, pred, loss
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-        losses.append(epoch_loss / total_n_accumulations)
+        if args.distributed:
+            loss_tensor = torch.tensor(epoch_loss / total_n_accumulations, device=device)
+            dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
+            epoch_mean_loss = loss_tensor.item()
+        else:
+            epoch_mean_loss = epoch_loss / total_n_accumulations
+        losses.append(epoch_mean_loss)
 
         # Overwrite latest checkpoint so training can be resumed at any point.
-        ckpt = {
-            "epoch": epoch,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "losses": losses,
-        }
-        if args.use_cosine_lr:
-            ckpt["scheduler_state_dict"] = scheduler.state_dict()
-        torch.save(ckpt, f"{model_output_path}/models/latest_checkpoint.pth")
+        if is_rank0:
+            ckpt = {
+                "epoch": epoch,
+                "model_state_dict": raw_model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "losses": losses,
+            }
+            if args.use_cosine_lr:
+                ckpt["scheduler_state_dict"] = scheduler.state_dict()
+            torch.save(ckpt, f"{model_output_path}/models/latest_checkpoint.pth")
 
         if args.use_cosine_lr:
             scheduler.step()
 
-    # Logging — on resume, append only the newly-completed epochs.
-    write_mode = "a" if args.resume_weights else "w"
-    with open(f"{model_output_path}/training_loss.csv", write_mode) as f:
-        if not args.resume_weights:
-            f.write("epoch,loss\n")
-        for epoch_i, loss_val in enumerate(losses[start_epoch:], start=start_epoch):
-            f.write(f"{epoch_i},{loss_val}\n")
+    if args.distributed:
+        dist.barrier()          # all ranks finish training before rank 0 does inference
+        dist.destroy_process_group()
 
-    torch.save(model.state_dict(), f"{model_output_path}/models/final_model.pth")
+    if is_rank0:
+        # Logging — on resume, append only the newly-completed epochs.
+        write_mode = "a" if args.resume_weights else "w"
+        with open(f"{model_output_path}/training_loss.csv", write_mode) as f:
+            if not args.resume_weights:
+                f.write("epoch,loss\n")
+            for epoch_i, loss_val in enumerate(losses[start_epoch:], start=start_epoch):
+                f.write(f"{epoch_i},{loss_val}\n")
 
+        torch.save(raw_model.state_dict(), f"{model_output_path}/models/final_model.pth")
 
-    jet_attr_model_loaded = jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device)
+        jet_attr_model_loaded = jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device)
 
-    try:
-        make_clear_folder(f"{model_output_path}/vf_viz_cfg")
-        make_clear_folder(f"{model_output_path}/vf_viz_nocfg")
-        generate_model_vector_field(
-            out_dir=f"{model_output_path}/vf_viz_cfg",
-            final_model=model,
-            jet_attr_model=jet_attr_model_loaded,
-            X_test=X_test,
-            scale=final_scale,
-            n_jet_types=len(args.jet_types),
-            n_particles_per_jet=args.num_particles,
-            n_features_per_particle=NUM_PARTICLE_FEATURES,
-            # set to 100 viz samples if 150 particle jets
-            n_viz_samples=args.n_viz_samples if args.num_particles < MAX_N_PARTICLES else 100,
-            integration_steps=args.integration_steps,
-            use_cfg=True,
-            cfg_guidance_weight=2.0
-        )
-        generate_model_vector_field(
-            out_dir=f"{model_output_path}/vf_viz_nocfg",
-            final_model=model,
-            jet_attr_model=jet_attr_model_loaded,
-            X_test=X_test,
-            scale=final_scale,
-            n_jet_types=len(args.jet_types),
-            n_particles_per_jet=args.num_particles,
-            n_features_per_particle=NUM_PARTICLE_FEATURES,
-            n_viz_samples=args.n_viz_samples if args.num_particles < MAX_N_PARTICLES else 100,
-            integration_steps=args.integration_steps,
-            use_cfg=False,
-        )
-    except Exception as e:
-        print(f"Error occurred while generating model vector field: {e}")
-        with open(f"{model_output_path}/error_log.txt", "a") as f:
-            f.write(f"Error occurred while generating model vector field: {e}\n")
+        try:
+            make_clear_folder(f"{model_output_path}/vf_viz_cfg")
+            make_clear_folder(f"{model_output_path}/vf_viz_nocfg")
+            generate_model_vector_field(
+                out_dir=f"{model_output_path}/vf_viz_cfg",
+                final_model=raw_model,
+                jet_attr_model=jet_attr_model_loaded,
+                X_test=X_test,
+                scale=final_scale,
+                n_jet_types=len(args.jet_types),
+                n_particles_per_jet=args.num_particles,
+                n_features_per_particle=NUM_PARTICLE_FEATURES,
+                # set to 100 viz samples if 150 particle jets
+                n_viz_samples=args.n_viz_samples if args.num_particles < MAX_N_PARTICLES else 100,
+                integration_steps=args.integration_steps,
+                use_cfg=True,
+                cfg_guidance_weight=2.0
+            )
+            generate_model_vector_field(
+                out_dir=f"{model_output_path}/vf_viz_nocfg",
+                final_model=raw_model,
+                jet_attr_model=jet_attr_model_loaded,
+                X_test=X_test,
+                scale=final_scale,
+                n_jet_types=len(args.jet_types),
+                n_particles_per_jet=args.num_particles,
+                n_features_per_particle=NUM_PARTICLE_FEATURES,
+                n_viz_samples=args.n_viz_samples if args.num_particles < MAX_N_PARTICLES else 100,
+                integration_steps=args.integration_steps,
+                use_cfg=False,
+            )
+        except Exception as e:
+            print(f"Error occurred while generating model vector field: {e}")
+            with open(f"{model_output_path}/error_log.txt", "a") as f:
+                f.write(f"Error occurred while generating model vector field: {e}\n")
 
-    try:
-        samples = generate_samples(
-            model=model,
-            jet_attr_model=jet_attr_model_loaded,
-            root_output_path=model_output_path,
-            max_particles_per_jet=args.num_particles,
-            final_scale=final_scale,
-            integration_steps=args.integration_steps,
-            n_samples=args.n_samples,
-            n_jet_types=len(args.jet_types),
-            device=device,
-            batch_size=args.batch_size if args.num_particles < MAX_N_PARTICLES else 16, 
-            use_cfg=False
-        )
-    except Exception as e:
-        print(f"Error occurred while generating samples: {e}")
-        with open(f"{model_output_path}/error_log.txt", "a") as f:
-            f.write(f"Error occurred while generating samples: {e}\n")
-        exit(1)
-    
-    try:
-        run_save_metrics(
-            X_test=X_test,
-            jet_types=args.jet_types,
-            gen_samples=samples,
-            output_path=model_output_path,
-            device=device
-        )
-    except Exception as e:
-        print(f"Error occurred while running/saving metrics: {e}")
-        with open(f"{model_output_path}/error_log.txt", "a") as f:
-            f.write(f"Error occurred while running/saving metrics: {e}\n")
+        try:
+            samples = generate_samples(
+                model=raw_model,
+                jet_attr_model=jet_attr_model_loaded,
+                root_output_path=model_output_path,
+                max_particles_per_jet=args.num_particles,
+                final_scale=final_scale,
+                integration_steps=args.integration_steps,
+                n_samples=args.n_samples,
+                n_jet_types=len(args.jet_types),
+                device=device,
+                batch_size=args.batch_size if args.num_particles < MAX_N_PARTICLES else 16,
+                use_cfg=False
+            )
+        except Exception as e:
+            print(f"Error occurred while generating samples: {e}")
+            with open(f"{model_output_path}/error_log.txt", "a") as f:
+                f.write(f"Error occurred while generating samples: {e}\n")
+            exit(1)
+
+        try:
+            run_save_metrics(
+                X_test=X_test,
+                jet_types=args.jet_types,
+                gen_samples=samples,
+                output_path=model_output_path,
+                device=device
+            )
+        except Exception as e:
+            print(f"Error occurred while running/saving metrics: {e}")
+            with open(f"{model_output_path}/error_log.txt", "a") as f:
+                f.write(f"Error occurred while running/saving metrics: {e}\n")
