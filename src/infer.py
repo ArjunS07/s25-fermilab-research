@@ -7,8 +7,8 @@ Loads a trained checkpoint and runs any combination of:
   2. Sample generation           (skip with --skip_samples)
   3. Metric calculation          (skip with --skip_metrics)
 
-Each stage is wrapped in try/except.  On failure a pdb breakpoint is
-dropped so you can inspect local state interactively (Ctrl-D to exit).
+Each stage is wrapped in try/except.  Samples are always saved as samples.pt
+before metrics are attempted.
 
 Example usage:
     python infer.py \\
@@ -17,6 +17,9 @@ Example usage:
         --num_particles   30 \\
         --vf_mode         both \\
         --n_samples       10000
+
+    # Riemannian integration:
+    python infer.py ... --use_hyperbolic
 """
 
 import os
@@ -74,6 +77,10 @@ def parse_args():
     parser.add_argument("--integration_steps", type=int, default=16)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--cfg_guidance_weight", type=float, default=2.0)
+
+    # Hyperbolic sampling
+    parser.add_argument("--use_hyperbolic", action=argparse.BooleanOptionalAction, default=False,
+                        help="Use Riemannian (Poincaré ball) integration for sampling")
 
     # Stage selection
     parser.add_argument("--vf_mode", type=str, default="both",
@@ -172,12 +179,12 @@ def main():
                 integration_steps=args.integration_steps,
                 use_cfg=True,
                 cfg_guidance_weight=args.cfg_guidance_weight,
+                use_hyperbolic=args.use_hyperbolic,
             )
             print("CFG vector field done.")
         except Exception as e:
             print(f"\n[ERROR] CFG vector field failed: {e}")
             traceback.print_exc()
-            breakpoint()  # inspect locals; Ctrl-D / 'c' to continue
 
     if run_nocfg:
         try:
@@ -196,12 +203,12 @@ def main():
                 n_viz_samples=args.n_viz_samples,
                 integration_steps=args.integration_steps,
                 use_cfg=False,
+                use_hyperbolic=args.use_hyperbolic,
             )
             print("No-CFG vector field done.")
         except Exception as e:
             print(f"\n[ERROR] No-CFG vector field failed: {e}")
             traceback.print_exc()
-            breakpoint()
 
     # ── Stage 2: Sample generation ─────────────────────────────────────────────
     samples = None
@@ -220,18 +227,20 @@ def main():
                 device=device,
                 batch_size=args.batch_size,
                 use_cfg=False,
+                use_hyperbolic=args.use_hyperbolic,
             )
             print(f"Sample generation done. Shape: {samples.shape}")
+            pt_path = os.path.join(out_dir, "samples.pt")
+            torch.save(samples.cpu(), pt_path)
+            print(f"Saved samples → {pt_path}")
         except Exception as e:
             print(f"\n[ERROR] Sample generation failed: {e}")
             traceback.print_exc()
-            breakpoint()
 
     # ── Stage 3: Metric calculation ────────────────────────────────────────────
     if not args.skip_metrics:
         if samples is None:
-            print("\n[WARN] No samples available — skipping metrics. "
-                  "Run without --skip_samples or re-run with samples already generated.")
+            print("\n[WARN] No samples available — skipping metrics.")
         else:
             try:
                 print("\n=== Metric calculation ===")
@@ -246,7 +255,6 @@ def main():
             except Exception as e:
                 print(f"\n[ERROR] Metric calculation failed: {e}")
                 traceback.print_exc()
-                breakpoint()
 
     print(f"\nAll stages complete. Outputs in: {out_dir}")
 

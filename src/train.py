@@ -584,7 +584,8 @@ if __name__ == "__main__":
                 n_viz_samples=args.n_viz_samples if args.num_particles < MAX_N_PARTICLES else 100,
                 integration_steps=args.integration_steps,
                 use_cfg=True,
-                cfg_guidance_weight=2.0
+                cfg_guidance_weight=2.0,
+                use_hyperbolic=args.use_hyperbolic,
             )
             generate_model_vector_field(
                 out_dir=f"{model_output_path}/vf_viz_nocfg",
@@ -598,6 +599,7 @@ if __name__ == "__main__":
                 n_viz_samples=args.n_viz_samples if args.num_particles < MAX_N_PARTICLES else 100,
                 integration_steps=args.integration_steps,
                 use_cfg=False,
+                use_hyperbolic=args.use_hyperbolic,
             )
         except Exception as e:
             print(f"Error occurred while generating model vector field: {e}")
@@ -616,7 +618,8 @@ if __name__ == "__main__":
                 n_jet_types=len(args.jet_types),
                 device=device,
                 batch_size=args.batch_size if args.num_particles < MAX_N_PARTICLES else 16,
-                use_cfg=False
+                use_cfg=False,
+                use_hyperbolic=args.use_hyperbolic,
             )
         except Exception as e:
             print(f"Error occurred while generating samples: {e}")

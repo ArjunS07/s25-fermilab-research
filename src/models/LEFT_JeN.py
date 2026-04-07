@@ -335,6 +335,51 @@ class LEFTJeN(nn.Module):
         velocity = x - x0
         return velocity * mask.unsqueeze(-1)
         
+    def step_hyperbolic(
+        self,
+        y_t: torch.Tensor,
+        jet_conditions: torch.Tensor,
+        mask: torch.Tensor,
+        t_start: torch.Tensor,
+        t_end: torch.Tensor,
+        c: float = 1.0,
+        use_cfg: bool = False,
+        guidance_weight: float = 2.0,
+    ) -> torch.Tensor:
+        """
+        Riemannian Euler step in the Poincaré ball.
+
+        y_t  : (batch, particles, 4)  current state IN THE BALL
+        Returns next state IN THE BALL.
+        """
+        from util.hyperbolic import from_poincare_ball, exp_map, pushforward, clamp_to_ball
+
+        batch_size = y_t.shape[0]
+        t_batch = t_start.unsqueeze(0).expand(batch_size)
+
+        # Map ball → Cartesian for model input
+        x_t = from_poincare_ball(y_t, c=c)
+
+        # Model predicts velocity in Cartesian space
+        vel_cartesian = self.forward(x=x_t, t=t_batch, jet_conditions=jet_conditions, mask=mask)
+
+        # CFG in Cartesian space, before pushforward
+        if use_cfg:
+            null_cond = self.make_null_cond(jet_conditions)
+            vel_uncond = self.forward(x=x_t, t=t_batch, jet_conditions=null_cond, mask=mask)
+            vel_cartesian = vel_cartesian + guidance_weight * (vel_cartesian - vel_uncond)
+
+        # Push Cartesian velocity to ball tangent space at y_t
+        vel_ball = pushforward(x_t, vel_cartesian, c=c)
+        vel_ball = vel_ball * mask.unsqueeze(-1)
+
+        # Geodesic step: y_{t+dt} = exp_{y_t}(v_ball * dt)
+        dt = t_end - t_start
+        y_next = exp_map(y_t, vel_ball * dt, c=c)
+        y_next = clamp_to_ball(y_next, c=c)
+
+        return y_next * mask.unsqueeze(-1)
+
     def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler', use_cfg=False, guidance_weight=2.0):
         """
         Calculate the probability density at a particular time step

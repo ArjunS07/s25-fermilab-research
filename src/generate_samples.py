@@ -8,6 +8,8 @@ from models.LEFT_JeN import LEFTJeN
 from util import jet_attributes
 from util.file_management import make_clear_folder
 from util.distributions import gen_initial_distribution
+from util.hyperbolic import to_poincare_ball, from_poincare_ball
+from util.hyperbolic import to_poincare_ball, from_poincare_ball
 
 plt.rc("mathtext", fontset="cm")
 sns.set_style("whitegrid")
@@ -26,7 +28,9 @@ def generate_samples(
         batch_size,
         n_jet_types=3,
         use_cfg=False,
-        cfg_guidance_weight=2.0
+        cfg_guidance_weight=2.0,
+        use_hyperbolic=False,
+        hyperbolic_c=1.0,
 ):
     
 
@@ -73,9 +77,24 @@ def generate_samples(
                 gen_pt.unsqueeze(-1),
             ], dim=-1).to(device)
 
-            for i in range(integration_steps):
-                x = model.step(x, cond, masks, times[i], times[i + 1],
-                               use_cfg=use_cfg, guidance_weight=cfg_guidance_weight)
+            if use_hyperbolic:
+                y = to_poincare_ball(x, c=hyperbolic_c)
+                for i in range(integration_steps):
+                    y = model.step_hyperbolic(
+                        y_t=y,
+                        jet_conditions=cond,
+                        mask=masks,
+                        t_start=times[i],
+                        t_end=times[i + 1],
+                        c=hyperbolic_c,
+                        use_cfg=use_cfg,
+                        guidance_weight=cfg_guidance_weight,
+                    )
+                x = from_poincare_ball(y, c=hyperbolic_c)
+            else:
+                for i in range(integration_steps):
+                    x = model.step(x, cond, masks, times[i], times[i + 1],
+                                   use_cfg=use_cfg, guidance_weight=cfg_guidance_weight)
 
             scaled_x = final_scale * x * masks.unsqueeze(-1)   # zero-out padded slots
             # torch.save(scaled_x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
