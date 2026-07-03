@@ -38,8 +38,6 @@ spec:
         pip install jupyter ipython
         
         # Set debugging environment variables
-        export CUDA_LAUNCH_BLOCKING=1
-        export TORCH_USE_CUDA_DSA=1
         
         
         echo "Run: kubectl port-forward as-jet-debug-pod 8888:8888"

@@ -51,8 +51,6 @@ spec:
               fi
 
               echo "=== Environment setup complete, starting training ==="
-              export CUDA_LAUNCH_BLOCKING=1
-              export TORCH_USE_CUDA_DSA=1
 
               cd /mnt/data/src
 
@@ -69,7 +67,7 @@ spec:
                 --num_particles=30 \
                 --train_space=polar --time_sampling=power_law \
                 --batch_size=50 --num_epochs=200 \
-                --n_samples=50000 --integration_steps=256 --n_layers=3 \
+                --n_samples=50000 --integration_steps=64 --n_layers=3 \
                 --output_path=${OUTPUT_PATH} --use_residual \
                 --use_cosine_lr --use_time_sampling --no-use_curriculum \
                 | tee -a ${OUTPUT_PATH}/logs.txt
