@@ -84,7 +84,39 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
 
         stacked = torch.stack([eta, phi, pt, p0], axis=-1)
         return EtaPhiPtE_to_cartesian(stacked)
-    
+
+    elif prior_dist == 'axis_aligned':
+        # Collimated, positive-energy, (near-)lightlike prior around the jet axis. Shortens
+        # the transport path vs. an isotropic prior. Like jet_ref_frame but with a small
+        # angular spread, then normalized to unit std so it lives in the scaled particle
+        # space (matching isotropic_com and the final_scale normalization of x_1).
+        assert jet_features is not None, "jet_features must be provided for axis_aligned prior"
+        device = jet_features.device
+        angular_spread = 0.15  # radians/eta units; << jet_ref_frame's 0.8 => collimated
+        eta_rel = torch.normal(0, angular_spread, size=(batch_size, num_particles), device=device)
+        phi_rel = torch.normal(0, angular_spread, size=(batch_size, num_particles), device=device)
+        pt_rel = torch.exp(torch.randn(batch_size, num_particles, device=device))
+
+        jet_eta = jet_features[:, 0]
+        jet_phi = (2 * torch.pi) * torch.rand(batch_size, device=device)
+        jet_pt = jet_features[:, 1]
+
+        pt = pt_rel * jet_pt.unsqueeze(1)
+        eta = eta_rel + jet_eta.unsqueeze(1)
+        phi = phi_rel + jet_phi.unsqueeze(1)
+        p0 = pt * torch.cosh(eta)  # massless => E = |p| > 0 (positive-energy, lightlike)
+
+        stacked = torch.stack([eta, phi, pt, p0], axis=-1)
+        particles = EtaPhiPtE_to_cartesian(stacked)
+
+        # Normalize to unit std (scalar, direction-preserving) to match the scaled space.
+        current_std = particles.std().clamp(min=1e-8)
+        return particles * (1.0 / current_std)
+
+    else:
+        raise ValueError(f"Unknown prior_dist: {prior_dist}")
+
+
 
 def hyperbolic_interpolant(x_0, x_1, t, c=1.0):
     """
