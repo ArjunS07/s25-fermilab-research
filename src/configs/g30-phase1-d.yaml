@@ -1,0 +1,23 @@
+# Phase-1 ablation grid run D: full — references + node scalars + axis-aligned prior.
+data:
+  jet_types: ["g"]
+  num_particles: 30
+
+model:
+  use_residual: true
+  use_reference_vectors: true
+  use_node_scalars: true
+
+training:
+  train_space: polar
+  time_sampling: power_law
+  batch_size: 50
+  num_epochs: 200
+  use_cosine_lr: true
+  use_time_sampling: true
+  use_curriculum: false
+  prior_dist: axis_aligned
+
+inference:
+  n_samples: 50000
+  integration_steps: 64

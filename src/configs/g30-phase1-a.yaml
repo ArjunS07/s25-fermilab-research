@@ -1,0 +1,22 @@
+# Phase-1 ablation grid run A: baseline (current model) — no references, no
+# node scalars, isotropic prior.
+data:
+  jet_types: ["g"]
+  num_particles: 30
+
+model:
+  use_residual: true
+
+training:
+  train_space: polar
+  time_sampling: power_law
+  batch_size: 50
+  num_epochs: 200
+  use_cosine_lr: true
+  use_time_sampling: true
+  use_curriculum: false
+  prior_dist: isotropic_com
+
+inference:
+  n_samples: 50000
+  integration_steps: 64

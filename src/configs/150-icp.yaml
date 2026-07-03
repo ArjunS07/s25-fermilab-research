@@ -1,0 +1,21 @@
+data:
+  num_particles: 150
+
+model:
+  use_residual: true
+
+training:
+  train_space: polar
+  time_sampling: power_law
+  batch_size: 25
+  num_epochs: 50
+  use_cosine_lr: true
+  use_time_sampling: true
+  use_curriculum: false
+
+inference:
+  n_samples: 50000
+  integration_steps: 64
+
+paths:
+  cache_dir: /mnt/data/caches

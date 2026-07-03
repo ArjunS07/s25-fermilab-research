@@ -1,0 +1,15 @@
+# Base config for the Euclidean-vs-hyperbolic inference comparison job.
+# checkpoint_path / output_path / out_dir / model.use_hyperbolic are set per
+# invocation via --set at launch time (see nrp/as-jet-infer-job-30-icp-hyperbolic-compare.yaml).
+data:
+  num_particles: 30
+
+model:
+  n_layers: 5
+  use_residual: true
+
+inference:
+  n_samples: 250000
+  integration_steps: 64
+  batch_size: 256
+  vf_mode: none
