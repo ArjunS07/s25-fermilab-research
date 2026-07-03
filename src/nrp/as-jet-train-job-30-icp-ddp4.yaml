@@ -62,7 +62,9 @@ spec:
               python3 data.py --num_particles=30 --output_path=${OUTPUT_PATH}
               python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
               python3 cache_icp.py --output_path=${OUTPUT_PATH} --num_particles=30 --n_workers=4 --cache_dir=/mnt/data/caches
-              torchrun --standalone --nproc_per_node=4 train.py \
+              NGPU=$(python3 -c "import torch; print(torch.cuda.device_count())")
+              echo "Launching training on ${NGPU:-1} GPU(s) via torchrun"
+              torchrun --standalone --nproc_per_node=${NGPU:-1} train.py \
                 --num_particles=30 \
                 --train_space=polar --time_sampling=power_law \
                 --batch_size=50 --num_epochs=200 \
