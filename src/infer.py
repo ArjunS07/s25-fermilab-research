@@ -23,6 +23,7 @@ Example usage:
 """
 
 import os
+import sys
 import pickle
 import argparse
 import traceback
@@ -39,6 +40,7 @@ from util.viz import generate_model_vector_field
 from util.metrics import run_save_metrics
 from generate_samples import generate_samples
 from data import get_data_path
+from config import InferRunConfig, build_config, parse_config_cli, infer_config_to_namespace
 
 MAX_N_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4
@@ -47,6 +49,16 @@ NUM_PARTICLE_FEATURES = 4
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def parse_args():
+    if "--config" in sys.argv:
+        config_path, overrides = parse_config_cli()
+        cfg = build_config(InferRunConfig, config_path, overrides)
+        args = infer_config_to_namespace(cfg)
+        if not args.checkpoint_path:
+            raise ValueError("paths.checkpoint_path must be set in the config (--checkpoint_path is required)")
+        if not args.output_path:
+            raise ValueError("paths.output_path must be set in the config (--output_path is required)")
+        return args
+
     parser = argparse.ArgumentParser(
         description="LEFTJeN standalone inference: VF visualisation + sample generation + metrics"
     )
@@ -106,9 +118,37 @@ def parse_args():
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+_ARCH_KEYS = ("n_hidden", "n_layers", "use_residual", "use_reference_vectors",
+              "use_node_scalars", "use_adaln", "use_hyperbolic")
+
+
+def _resolve_architecture(args, ckpt):
+    """If the checkpoint carries a self-describing `full_config` (written by
+    train.py's config path), use its model architecture and warn if it
+    disagrees with any values the user explicitly passed. Falls back to
+    `args` unchanged for older checkpoints without `full_config`."""
+    if not isinstance(ckpt, dict):
+        return args
+    full_config = ckpt.get("full_config")
+    if not full_config:
+        return args
+
+    ckpt_model = full_config.get("model", {})
+    mism = {k: (getattr(args, k, None), ckpt_model[k])
+            for k in _ARCH_KEYS if k in ckpt_model and getattr(args, k, None) != ckpt_model[k]}
+    if mism:
+        print(f"WARNING: CLI/config architecture flags differ from checkpoint: {mism}. "
+              f"Using checkpoint's architecture (loaded weights would otherwise not match).")
+    for k in _ARCH_KEYS:
+        if k in ckpt_model:
+            setattr(args, k, ckpt_model[k])
+    print("Loaded model architecture from checkpoint config.")
+    return args
+
+
 def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
                      num_particles, device, use_reference_vectors=False, use_node_scalars=False,
-                     use_adaln=False):
+                     use_adaln=False, preloaded_ckpt=None):
     model = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=num_particles,
@@ -121,7 +161,7 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
         use_adaln=use_adaln,
     ).to(device)
 
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    ckpt = preloaded_ckpt if preloaded_ckpt is not None else torch.load(checkpoint_path, map_location=device)
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
         model.load_state_dict(ckpt["model_state_dict"])
         print(f"Loaded checkpoint (epoch {ckpt.get('epoch', '?')}) from {checkpoint_path}")
@@ -162,6 +202,9 @@ def main():
     jet_attr_model.eval()
     print("Loaded jet attribute model")
 
+    ckpt = torch.load(args.checkpoint_path, map_location=device)
+    args = _resolve_architecture(args, ckpt)
+
     model = _load_main_model(
         checkpoint_path=args.checkpoint_path,
         n_hidden=args.n_hidden,
@@ -172,6 +215,7 @@ def main():
         use_reference_vectors=args.use_reference_vectors,
         use_node_scalars=args.use_node_scalars,
         use_adaln=args.use_adaln,
+        preloaded_ckpt=ckpt,
     )
 
     # ── Stage 1: Vector field visualisation ───────────────────────────────────

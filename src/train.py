@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import pickle
 import argparse
@@ -31,6 +32,7 @@ from generate_samples import generate_samples
 from data import data_args, get_data_path
 from cache_icp import canonical_cache_path
 from util.mask_helpers import mean_std_masked_tensor
+from config import TrainRunConfig, build_config, parse_config_cli, train_config_to_namespace
 
 RANDOM_SEED = 42
 MAX_N_PARTICLES = 150
@@ -60,95 +62,104 @@ if __name__ == "__main__":
     np.random.seed(RANDOM_SEED)
     random.seed(RANDOM_SEED)
 
-    # JetNet data download args
-    parser = argparse.ArgumentParser(description="Train LEJetGeneratorFM on JetNet dataset")
-    parser.add_argument("--output_path", type=str, default="/mnt/data/output", help="Path to save the output files")
+    if "--config" in sys.argv:
+        config_path, overrides = parse_config_cli()
+        cfg = build_config(TrainRunConfig, config_path, overrides)
+        args = train_config_to_namespace(cfg)
+    else:
+        cfg = None
 
-    # Data
-    parser.add_argument("--jet_types", type=str, nargs="+", default=data_args["jet_type"])
-    parser.add_argument("--num_particles", type=int, default=data_args["num_particles"], help="Number of particles in each jet")
+        # JetNet data download args
+        parser = argparse.ArgumentParser(description="Train LEJetGeneratorFM on JetNet dataset")
+        parser.add_argument("--output_path", type=str, default="/mnt/data/output", help="Path to save the output files")
 
-    # Network hyperparameters
-    parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
-    parser.add_argument("--n_layers", type=int, default=3, help="Number of layers in the network")
-    parser.add_argument("--use_residual", action="store_true", help="Use residual connections in the network")
-    
-    # Training
-    parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
-    parser.add_argument("--target_batch_size", type=int, default=256, help="Virtual batch size for accumulation of gradients for backprop")
-    parser.add_argument('--cfg_null_dropout_rate', type=float, default=0.2, help='Probability of dropping out jet information and using null vector')
-    parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
-    parser.add_argument("--epoch_frac", type=float, default=1.0, help="Fraction of training dataset to use per epoch")
-    parser.add_argument("--sigma_min", type=float, default=1e-4, help="Tolerance around target for flow map")
-    parser.add_argument("--train_space", type=str, default='cartesian', choices=['cartesian', 'polar'], help="Coordinate space in which to interpolate points")
-    parser.add_argument("--time_sampling", type=str, default='power_law', choices=['uniform', 'power_law', 'lognorm'], help="Method to sample time steps during training")
+        # Data
+        parser.add_argument("--jet_types", type=str, nargs="+", default=data_args["jet_type"])
+        parser.add_argument("--num_particles", type=int, default=data_args["num_particles"], help="Number of particles in each jet")
 
-    # Inference
-    parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
-    parser.add_argument("--n_viz_samples", type=int, default=1000, help="Number of samples to generate for VF visualization")
-    parser.add_argument("--integration_steps", type=int, default=16, help="Number of integration steps for ODE solver")
+        # Network hyperparameters
+        parser.add_argument("--n_hidden", type=int, default=128, help="Number of hidden units in the network")
+        parser.add_argument("--n_layers", type=int, default=3, help="Number of layers in the network")
+        parser.add_argument("--use_residual", action="store_true", help="Use residual connections in the network")
 
-    # Ablation flags (all True by default; disable with --no-<flag>)
-    parser.add_argument("--use_cosine_lr", action=argparse.BooleanOptionalAction, default=True,
-                        help="Use cosine annealing LR schedule with warm restarts (disable: --no-use_cosine_lr)")
-    parser.add_argument("--lr_t0", type=int, default=0,
-                        help="Warm restart period T_0 in epochs. 0 = auto (num_epochs // 4).")
-    parser.add_argument("--lr_warmup_epochs", type=int, default=10,
-                        help="Number of linear warmup epochs from near-zero to lr (0 = no warmup).")
-    parser.add_argument("--use_hyperbolic", action=argparse.BooleanOptionalAction, default=False,
-                        help="Use Riemannian flow matching in the Poincaré ball (Chen & Lipman 2024)")
-    parser.add_argument("--use_curriculum", action=argparse.BooleanOptionalAction, default=True,
-                        help="Use curriculum learning (disable: --no-use_curriculum)")
-    parser.add_argument("--use_time_sampling", action=argparse.BooleanOptionalAction, default=True,
-                        help="Use the --time_sampling method; when False, always use uniform "
-                             "(disable: --no-use_time_sampling)")
+        # Training
+        parser.add_argument("--n_train_samples", type=int, default=1000_000, help="Number of training samples to use")
+        parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training")
+        parser.add_argument("--target_batch_size", type=int, default=256, help="Virtual batch size for accumulation of gradients for backprop")
+        parser.add_argument('--cfg_null_dropout_rate', type=float, default=0.2, help='Probability of dropping out jet information and using null vector')
+        parser.add_argument("--num_epochs", type=int, default=100, help="Number of epochs to train the model")
+        parser.add_argument("--epoch_frac", type=float, default=1.0, help="Fraction of training dataset to use per epoch")
+        parser.add_argument("--sigma_min", type=float, default=1e-4, help="Tolerance around target for flow map")
+        parser.add_argument("--train_space", type=str, default='cartesian', choices=['cartesian', 'polar'], help="Coordinate space in which to interpolate points")
+        parser.add_argument("--time_sampling", type=str, default='power_law', choices=['uniform', 'power_law', 'lognorm'], help="Method to sample time steps during training")
 
-    # Phase 1 symmetry-breaking flags (both default off → run A of the ablation grid)
-    parser.add_argument("--use_reference_vectors", action=argparse.BooleanOptionalAction, default=False,
-                        help="Add e_t=(1,0,0,0) and the jet 4-momentum as unmasked reference "
-                             "virtual particles (breaks isotropy down to SO(2) about the jet axis).")
-    parser.add_argument("--use_node_scalars", action=argparse.BooleanOptionalAction, default=False,
-                        help="LorentzNet-style per-node scalar hidden state h_i (seeded from "
-                             "Minkowski invariants of each particle and the references).")
-    parser.add_argument("--prior_dist", type=str, default="isotropic_com",
-                        choices=["isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned"],
-                        help="Prior distribution for x_0. 'axis_aligned' is collimated around the jet axis.")
-    parser.add_argument("--eta_min_factor", type=float, default=0.3,
-                        help="CosineAnnealingWarmRestarts eta_min as a fraction of lr "
-                             "(re-sweep from scratch post-Phase-1; see experiment plan 2.4).")
+        # Inference
+        parser.add_argument("--n_samples", type=int, default=50_000, help="Number of samples to generate during inference")
+        parser.add_argument("--n_viz_samples", type=int, default=1000, help="Number of samples to generate for VF visualization")
+        parser.add_argument("--integration_steps", type=int, default=16, help="Number of integration steps for ODE solver")
 
-    # Phase 2 (flag-gated; default off keeps the Phase-1 grid unchanged)
-    parser.add_argument("--use_ema", action=argparse.BooleanOptionalAction, default=False,
-                        help="Track an EMA of the weights and sample from it (experiment plan 2.1).")
-    parser.add_argument("--ema_decay", type=float, default=0.999, help="EMA decay factor.")
-    parser.add_argument("--use_adaln", action=argparse.BooleanOptionalAction, default=False,
-                        help="FiLM/adaLN conditioning instead of concatenating g/t into every "
-                             "pairwise message (experiment plan 2.2). Cuts message-tensor memory.")
+        # Ablation flags (all True by default; disable with --no-<flag>)
+        parser.add_argument("--use_cosine_lr", action=argparse.BooleanOptionalAction, default=True,
+                            help="Use cosine annealing LR schedule with warm restarts (disable: --no-use_cosine_lr)")
+        parser.add_argument("--lr_t0", type=int, default=0,
+                            help="Warm restart period T_0 in epochs. 0 = auto (num_epochs // 4).")
+        parser.add_argument("--lr_warmup_epochs", type=int, default=10,
+                            help="Number of linear warmup epochs from near-zero to lr (0 = no warmup).")
+        parser.add_argument("--use_hyperbolic", action=argparse.BooleanOptionalAction, default=False,
+                            help="Use Riemannian flow matching in the Poincaré ball (Chen & Lipman 2024)")
+        parser.add_argument("--use_curriculum", action=argparse.BooleanOptionalAction, default=True,
+                            help="Use curriculum learning (disable: --no-use_curriculum)")
+        parser.add_argument("--use_time_sampling", action=argparse.BooleanOptionalAction, default=True,
+                            help="Use the --time_sampling method; when False, always use uniform "
+                                 "(disable: --no-use_time_sampling)")
 
-    # Curriculum settings
-    parser.add_argument("--curriculum_alpha_start", type=float, default=2.0,
-                        help="Initial power-law exponent alpha (positive → oversample dense jets). "
-                             "Decays linearly to 0 by the final epoch.")
-    parser.add_argument("--n_curriculum_buckets", type=int, default=10,
-                        help="Number of particle-count buckets for curriculum")
+        # Phase 1 symmetry-breaking flags (both default off → run A of the ablation grid)
+        parser.add_argument("--use_reference_vectors", action=argparse.BooleanOptionalAction, default=False,
+                            help="Add e_t=(1,0,0,0) and the jet 4-momentum as unmasked reference "
+                                 "virtual particles (breaks isotropy down to SO(2) about the jet axis).")
+        parser.add_argument("--use_node_scalars", action=argparse.BooleanOptionalAction, default=False,
+                            help="LorentzNet-style per-node scalar hidden state h_i (seeded from "
+                                 "Minkowski invariants of each particle and the references).")
+        parser.add_argument("--prior_dist", type=str, default="isotropic_com",
+                            choices=["isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned"],
+                            help="Prior distribution for x_0. 'axis_aligned' is collimated around the jet axis.")
+        parser.add_argument("--eta_min_factor", type=float, default=0.3,
+                            help="CosineAnnealingWarmRestarts eta_min as a fraction of lr "
+                                 "(re-sweep from scratch post-Phase-1; see experiment plan 2.4).")
 
-    # ICP cache
-    parser.add_argument("--icp_cache_path", type=str, default=None,
-                        help="Explicit path to ICP cache. If omitted, auto-discovered from "
-                             "--cache_dir/<jet_types>_p<num_particles>/icp_cache.pkl.")
-    parser.add_argument("--cache_dir", type=str, default="/mnt/data/caches",
-                        help="Root directory for shared ICP caches (used for auto-discovery).")
+        # Phase 2 (flag-gated; default off keeps the Phase-1 grid unchanged)
+        parser.add_argument("--use_ema", action=argparse.BooleanOptionalAction, default=False,
+                            help="Track an EMA of the weights and sample from it (experiment plan 2.1).")
+        parser.add_argument("--ema_decay", type=float, default=0.999, help="EMA decay factor.")
+        parser.add_argument("--use_adaln", action=argparse.BooleanOptionalAction, default=False,
+                            help="FiLM/adaLN conditioning instead of concatenating g/t into every "
+                                 "pairwise message (experiment plan 2.2). Cuts message-tensor memory.")
 
-    # Resume
-    parser.add_argument("--resume_weights", type=str, default=None,
-                        help="Path to a latest_checkpoint.pth to resume training. "
-                             "Loads model, optimizer, and scheduler state. "
-                             "--num_epochs sets how many *additional* epochs to run.")
+        # Curriculum settings
+        parser.add_argument("--curriculum_alpha_start", type=float, default=2.0,
+                            help="Initial power-law exponent alpha (positive → oversample dense jets). "
+                                 "Decays linearly to 0 by the final epoch.")
+        parser.add_argument("--n_curriculum_buckets", type=int, default=10,
+                            help="Number of particle-count buckets for curriculum")
 
-    parser.add_argument("--distributed", action="store_true", default=False)
+        # ICP cache
+        parser.add_argument("--icp_cache_path", type=str, default=None,
+                            help="Explicit path to ICP cache. If omitted, auto-discovered from "
+                                 "--cache_dir/<jet_types>_p<num_particles>/icp_cache.pkl.")
+        parser.add_argument("--cache_dir", type=str, default="/mnt/data/caches",
+                            help="Root directory for shared ICP caches (used for auto-discovery).")
 
-    args = parser.parse_args()
+        # Resume
+        parser.add_argument("--resume_weights", type=str, default=None,
+                            help="Path to a latest_checkpoint.pth to resume training. "
+                                 "Loads model, optimizer, and scheduler state. "
+                                 "--num_epochs sets how many *additional* epochs to run.")
+
+        parser.add_argument("--distributed", action="store_true", default=False)
+
+        args = parser.parse_args()
+        args.lr = 6e-4
+        args.weight_decay = 1e-6
 
     _is_torchrun = "RANK" in os.environ and "WORLD_SIZE" in os.environ
     args.distributed = args.distributed or _is_torchrun
@@ -260,6 +271,9 @@ if __name__ == "__main__":
         "jet_types": args.jet_types,
         "final_scale": float(final_scale),
     }
+    # Full config (all sections), embedded alongside the legacy architecture-only
+    # `config` dict so infer.py can auto-load every knob a run was trained with.
+    full_config = cfg.model_dump() if cfg is not None else None
     if args.resume_weights and is_rank0:
         prev = checkpoint.get("config")
         if prev is not None:
@@ -349,8 +363,8 @@ if __name__ == "__main__":
         else:
             raise ValueError(f"Unknown time_sampling: {mode}")
 
-    lr = 6e-4
-    weight_decay = 1e-6
+    lr = args.lr
+    weight_decay = args.weight_decay
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     if args.use_cosine_lr:
@@ -618,6 +632,7 @@ if __name__ == "__main__":
                 "optimizer_state_dict": optimizer.state_dict(),
                 "losses": losses,
                 "config": run_config,
+                "full_config": full_config,
             }
             if args.use_cosine_lr:
                 ckpt["scheduler_state_dict"] = scheduler.state_dict()
@@ -651,6 +666,7 @@ if __name__ == "__main__":
             "optimizer_state_dict": optimizer.state_dict(),
             "losses": losses,
             "config": run_config,
+            "full_config": full_config,
         }
         if args.use_cosine_lr:
             final_ckpt["scheduler_state_dict"] = scheduler.state_dict()
@@ -758,6 +774,7 @@ if __name__ == "__main__":
                 "num_epochs": total_epochs,
                 "git_commit": git_commit,
                 "config": run_config,
+                "full_config": full_config,
                 "metrics": {k: eval_info.get(k) for k in (
                     "w1m", "w1p", "w1efp", "fpd",
                     "frac_negative_energy", "frac_spacelike", "msq_median",

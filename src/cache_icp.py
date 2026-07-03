@@ -20,6 +20,7 @@ import argparse
 import logging
 import os
 import pickle
+import sys
 from multiprocessing import Pool
 
 import numpy as np
@@ -31,6 +32,7 @@ from tqdm import tqdm
 
 
 from data import data_args, get_data_path
+from config import CacheRunConfig, build_config, parse_config_cli, cache_config_to_namespace
 
 
 def canonical_cache_path(cache_dir: str, jet_types: list, num_particles: int) -> str:
@@ -151,26 +153,31 @@ if __name__ == "__main__":
     torch.manual_seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
 
-    parser = argparse.ArgumentParser(description="Pre-compute ICP-aligned prior cache")
-    parser.add_argument("--output_path", type=str, default="/mnt/data/output",
-                        help="Run output path — used to locate x_train.pkl (same as data.py)")
-    parser.add_argument("--jet_types", type=str, nargs="+", default=data_args["jet_type"],
-                        help="Jet types used in this run — determines the cache subdirectory name")
-    parser.add_argument("--num_particles", type=int, default=data_args["num_particles"],
-                        help="Max particles per jet (must match the train.py run)")
-    parser.add_argument("--cache_dir", type=str, default="/mnt/data/caches",
-                        help="Root directory for shared ICP caches. "
-                             "Cache is written to <cache_dir>/<jet_types>_p<num_particles>/icp_cache.pkl")
-    parser.add_argument("--n_samples", type=int, default=None,
-                        help="Cap the number of jets to process (default: all training jets)")
-    parser.add_argument("--n_workers", type=int,
-                        default=max(1, (os.cpu_count() or 2) // 2),
-                        help="Number of parallel worker processes")
-    parser.add_argument("--icp_max_iter", type=int, default=1000,
-                        help="Maximum ICP iterations per jet (default 1000)")
-    parser.add_argument("--skip_if_exists", action=argparse.BooleanOptionalAction, default=True,
-                        help="Skip computation if cache file already exists (default: True)")
-    args = parser.parse_args()
+    if "--config" in sys.argv:
+        config_path, overrides = parse_config_cli()
+        cfg = build_config(CacheRunConfig, config_path, overrides)
+        args = cache_config_to_namespace(cfg)
+    else:
+        parser = argparse.ArgumentParser(description="Pre-compute ICP-aligned prior cache")
+        parser.add_argument("--output_path", type=str, default="/mnt/data/output",
+                            help="Run output path — used to locate x_train.pkl (same as data.py)")
+        parser.add_argument("--jet_types", type=str, nargs="+", default=data_args["jet_type"],
+                            help="Jet types used in this run — determines the cache subdirectory name")
+        parser.add_argument("--num_particles", type=int, default=data_args["num_particles"],
+                            help="Max particles per jet (must match the train.py run)")
+        parser.add_argument("--cache_dir", type=str, default="/mnt/data/caches",
+                            help="Root directory for shared ICP caches. "
+                                 "Cache is written to <cache_dir>/<jet_types>_p<num_particles>/icp_cache.pkl")
+        parser.add_argument("--n_samples", type=int, default=None,
+                            help="Cap the number of jets to process (default: all training jets)")
+        parser.add_argument("--n_workers", type=int,
+                            default=max(1, (os.cpu_count() or 2) // 2),
+                            help="Number of parallel worker processes")
+        parser.add_argument("--icp_max_iter", type=int, default=1000,
+                            help="Maximum ICP iterations per jet (default 1000)")
+        parser.add_argument("--skip_if_exists", action=argparse.BooleanOptionalAction, default=True,
+                            help="Skip computation if cache file already exists (default: True)")
+        args = parser.parse_args()
 
     # ── Compute canonical cache path ──────────────────────────────────────────
     cache_path = canonical_cache_path(args.cache_dir, args.jet_types, args.num_particles)
