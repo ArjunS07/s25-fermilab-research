@@ -52,6 +52,27 @@ locally.
   `final_checkpoint.pth` (full resume state + self-describing `config`), `samples_subset.pt`.
   `integration_steps=64`, debug env flags removed.
 
+## Run configuration (`src/config.py`, `src/configs/`)
+
+Runs are now driven by one YAML file per experiment instead of long CLI flag lists.
+`train.py`/`infer.py`/`cache_icp.py` each take `--config configs/<run>.yaml [--set
+key.subkey=value ...]`; the legacy per-flag argparse interface has been removed.
+
+- Typed config: nested pydantic models (`DataConfig`, `ModelConfig`, `TrainingConfig`,
+  `InferenceConfig`, `PathConfig`, `CacheConfig`) in `src/config.py`, composed into
+  `TrainRunConfig` / `InferRunConfig` / `CacheRunConfig`. Every default matches the
+  pre-refactor argparse default exactly (`src/tests/test_config.py`).
+- `src/configs/*.yaml` — one file per existing NRP job: the phase1 ablation grid
+  (`g30-phase1-{a..f}.yaml`), 30/150-particle baseline/ICP/hyperbolic training,
+  the ICP cache job, and the Euclidean-vs-hyperbolic inference comparison.
+- `train.py` embeds the full config dict (`full_config`) in every checkpoint/summary
+  alongside the pre-existing architecture-only `config` dict. `infer.py` reads
+  `full_config` back out of the checkpoint to auto-populate model architecture
+  (warns on mismatch instead of silently using stale CLI defaults).
+- `src/nrp/*.yaml` job manifests launch via `--config configs/<run>.yaml --set
+  paths.output_path=${OUTPUT_PATH}` (plus per-invocation overrides for
+  checkpoint_path/out_dir/worker count); no inline flag lists remain.
+
 ## Remaining / not yet implemented
 
 - **Phase 2 leftovers**: LR re-sweep run (knob exists, sweep not run — must be *after*
