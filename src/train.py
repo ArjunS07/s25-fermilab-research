@@ -21,6 +21,7 @@ from util.distributions import gen_initial_distribution, time_dist, hyperbolic_i
 from util.hyperbolic import pushforward, hyperbolic_loss
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian, jacobian_epp_etaphipte
 from jetnet.utils import EtaPhiPtE_to_cartesian, cartesian_to_EtaPhiPtE
+from util.ema import ModelEMA
 from util.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
 from util.metrics import run_save_metrics
@@ -115,6 +116,11 @@ if __name__ == "__main__":
     parser.add_argument("--eta_min_factor", type=float, default=0.3,
                         help="CosineAnnealingWarmRestarts eta_min as a fraction of lr "
                              "(re-sweep from scratch post-Phase-1; see experiment plan 2.4).")
+
+    # Phase 2 (flag-gated; default off keeps the Phase-1 grid unchanged)
+    parser.add_argument("--use_ema", action=argparse.BooleanOptionalAction, default=False,
+                        help="Track an EMA of the weights and sample from it (experiment plan 2.1).")
+    parser.add_argument("--ema_decay", type=float, default=0.999, help="EMA decay factor.")
 
     # Curriculum settings
     parser.add_argument("--curriculum_alpha_start", type=float, default=2.0,
@@ -225,6 +231,15 @@ if __name__ == "__main__":
     if args.distributed:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank)
     raw_model = model.module if args.distributed else model
+
+    # EMA of weights (Phase 2.1). Shadow starts from the (possibly resumed) weights.
+    ema = None
+    if args.use_ema:
+        ema = ModelEMA(raw_model, decay=args.ema_decay)
+        if args.resume_weights and "ema_state_dict" in checkpoint:
+            ema.load_state_dict(checkpoint["ema_state_dict"], device=device)
+            if is_rank0:
+                print("Resumed EMA shadow weights from checkpoint.")
 
     if not args.resume_weights:
         if is_rank0:
@@ -541,6 +556,8 @@ if __name__ == "__main__":
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
                 optimizer.step()
                 optimizer.zero_grad()
+                if ema is not None:
+                    ema.update(raw_model)
 
                 epoch_loss += accumulated_loss  # already averaged over accumulation_steps
                 total_n_accumulations += 1
@@ -574,6 +591,8 @@ if __name__ == "__main__":
             }
             if args.use_cosine_lr:
                 ckpt["scheduler_state_dict"] = scheduler.state_dict()
+            if ema is not None:
+                ckpt["ema_state_dict"] = ema.state_dict()
             torch.save(ckpt, f"{model_output_path}/models/latest_checkpoint.pth")
 
         if args.use_cosine_lr:
@@ -593,6 +612,12 @@ if __name__ == "__main__":
                 f.write(f"{epoch_i},{loss_val}\n")
 
         torch.save(raw_model.state_dict(), f"{model_output_path}/models/final_model.pth")
+
+        # If EMA is active, save the shadow and use it for all downstream sampling/metrics.
+        if ema is not None:
+            ema.copy_to(raw_model)
+            torch.save(raw_model.state_dict(), f"{model_output_path}/models/ema_model.pth")
+            print("Using EMA weights for sample generation and metrics.")
 
         jet_attr_model_loaded = jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device)
 
