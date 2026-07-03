@@ -505,31 +505,33 @@ class LEFTJeN(nn.Module):
 
         return y_next * mask.unsqueeze(-1)
 
+    def _guided_velocity(self, x, t_scalar, jet_conditions, mask, use_cfg,
+                         guidance_weight, ref_vectors, null_jet_conditions):
+        """CFG-guided velocity at a single (scalar) time, used by the samplers."""
+        t_batch = t_scalar.unsqueeze(0).expand(x.shape[0])
+        vel = self.forward(x=x, t=t_batch, jet_conditions=jet_conditions, mask=mask, ref_vectors=ref_vectors)
+        if use_cfg:
+            vel_uncond = self.forward(x=x, t=t_batch, jet_conditions=null_jet_conditions, mask=mask, ref_vectors=ref_vectors)
+            vel = vel + guidance_weight * (vel - vel_uncond)
+        return vel
+
     def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler', use_cfg=False, guidance_weight=2.0, ref_vectors=None):
         """
-        Calculate the probability density at a particular time step
+        One ODE integration step. method='euler' (default) or 'heun' (2nd-order midpoint).
         """
-        batch_size = x_t.shape[0]
-        if use_cfg:
-            null_jet_conditions = self.make_null_cond(jet_conditions)
+        null_jet_conditions = self.make_null_cond(jet_conditions) if use_cfg else None
+        dt = t_end - t_start
 
+        v1 = self._guided_velocity(x_t, t_start, jet_conditions, mask, use_cfg,
+                                   guidance_weight, ref_vectors, null_jet_conditions)
         if method == 'euler':
-            t_batch = t_start.unsqueeze(0).expand(batch_size)
-            vel = self.forward(x=x_t, t=t_batch, jet_conditions=jet_conditions, mask=mask, ref_vectors=ref_vectors)
-            if use_cfg:
-                unconditional_vel = self.forward(
-                    x=x_t,
-                    t=t_batch,
-                    jet_conditions=null_jet_conditions,
-                    mask=mask,
-                    ref_vectors=ref_vectors
-                )
-                guided_vel = vel + guidance_weight * (vel - unconditional_vel)
-                vel = guided_vel
-            x_next = x_t + vel * (t_end - t_start)
-            # Correct x_next to CoM frame
-            # x_next = enforce_com_frame(x_next, mask)
-            return x_next
+            return x_t + v1 * dt
+        elif method == 'heun':
+            # Trapezoidal RK2: average the slope at the start and at the Euler-predicted end.
+            x_euler = x_t + v1 * dt
+            v2 = self._guided_velocity(x_euler, t_end, jet_conditions, mask, use_cfg,
+                                       guidance_weight, ref_vectors, null_jet_conditions)
+            return x_t + 0.5 * (v1 + v2) * dt
         else:
             raise NotImplementedError(f"Method {method} not implemented")
         

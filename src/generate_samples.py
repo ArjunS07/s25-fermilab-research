@@ -55,6 +55,7 @@ def generate_samples(
         use_hyperbolic=False,
         hyperbolic_c=1.0,
         use_reference_vectors=False,
+        sampler='euler',
 ):
 
 
@@ -124,7 +125,7 @@ def generate_samples(
                 x = from_poincare_ball(y, c=hyperbolic_c)
             else:
                 for i in range(integration_steps):
-                    x = model.step(x, cond, masks, times[i], times[i + 1],
+                    x = model.step(x, cond, masks, times[i], times[i + 1], method=sampler,
                                    use_cfg=use_cfg, guidance_weight=cfg_guidance_weight,
                                    ref_vectors=ref_vectors)
 

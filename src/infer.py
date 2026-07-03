@@ -81,6 +81,8 @@ def parse_args():
     # Hyperbolic sampling
     parser.add_argument("--use_hyperbolic", action=argparse.BooleanOptionalAction, default=False,
                         help="Use Riemannian (Poincaré ball) integration for sampling")
+    parser.add_argument("--sampler", type=str, default="euler", choices=["euler", "heun"],
+                        help="ODE integrator for Euclidean sampling (heun = 2nd-order midpoint).")
 
     # Phase 1 symmetry-breaking flags (must match the trained checkpoint)
     parser.add_argument("--use_reference_vectors", action=argparse.BooleanOptionalAction, default=False,
@@ -244,6 +246,7 @@ def main():
                 use_cfg=False,
                 use_hyperbolic=args.use_hyperbolic,
                 use_reference_vectors=args.use_reference_vectors,
+                sampler=args.sampler,
             )
             print(f"Sample generation done. Shape: {samples.shape}")
             pt_path = os.path.join(out_dir, "samples.pt")
