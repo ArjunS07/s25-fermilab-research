@@ -60,29 +60,23 @@ spec:
               mkdir -p $BASE_OUT
 
               COMMON_ARGS="
-                --checkpoint_path=${CHECKPOINT_PATH}
-                --output_path=${TRAIN_OUTPUT_PATH}
-                --num_particles=30
-                --n_layers=5
-                --use_residual
-                --n_samples=250000
-                --integration_steps=64
-                --batch_size=256
-                --vf_mode=none
+                --config configs/infer-30-icp-hyperbolic-compare.yaml
+                --set paths.checkpoint_path=${CHECKPOINT_PATH}
+                --set paths.output_path=${TRAIN_OUTPUT_PATH}
               "
 
               echo "=== Run 1: Euclidean sampling ===" | tee -a ${BASE_OUT}/logs.txt
               python3 infer.py \
                 $COMMON_ARGS \
-                --no-use_hyperbolic \
-                --out_dir=${BASE_OUT}/euclidean \
+                --set model.use_hyperbolic=false \
+                --set paths.out_dir=${BASE_OUT}/euclidean \
                 | tee -a ${BASE_OUT}/logs.txt
 
               echo "=== Run 2: Hyperbolic (Riemannian) sampling ===" | tee -a ${BASE_OUT}/logs.txt
               python3 infer.py \
                 $COMMON_ARGS \
-                --use_hyperbolic \
-                --out_dir=${BASE_OUT}/hyperbolic \
+                --set model.use_hyperbolic=true \
+                --set paths.out_dir=${BASE_OUT}/hyperbolic \
                 | tee -a ${BASE_OUT}/logs.txt
 
           volumeMounts:

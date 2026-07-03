@@ -59,11 +59,9 @@ spec:
 
               # Generate ICP cache — CPU only, use all available cores.
               python3 cache_icp.py \
-                --output_path=${OUTPUT_PATH} \
-                --num_particles=30 \
-                --n_workers=$(nproc) \
-                --icp_max_iter=1000 \
-                --cache_dir=/mnt/data/caches
+                --config configs/cache-icp-30.yaml \
+                --set paths.output_path=${OUTPUT_PATH} \
+                --set cache.n_workers=$(nproc)
 
           volumeMounts:
             - mountPath: /mnt/data
