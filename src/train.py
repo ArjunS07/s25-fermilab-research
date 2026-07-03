@@ -1,4 +1,5 @@
 import os
+import json
 import pickle
 import argparse
 import logging
@@ -245,10 +246,34 @@ if __name__ == "__main__":
             if is_rank0:
                 print("Resumed EMA shadow weights from checkpoint.")
 
+    # Self-describing model config, embedded in every checkpoint so a run can be resumed or
+    # loaded for inference without re-specifying the architecture flags on the CLI.
+    run_config = {
+        "num_particles": args.num_particles,
+        "n_layers": args.n_layers,
+        "n_hidden": args.n_hidden,
+        "use_residual": args.use_residual,
+        "include_pt": True,
+        "use_reference_vectors": args.use_reference_vectors,
+        "use_node_scalars": args.use_node_scalars,
+        "use_adaln": args.use_adaln,
+        "jet_types": args.jet_types,
+        "final_scale": float(final_scale),
+    }
+    if args.resume_weights and is_rank0:
+        prev = checkpoint.get("config")
+        if prev is not None:
+            mism = {k: (prev.get(k), run_config.get(k))
+                    for k in ("n_layers", "n_hidden", "num_particles", "use_reference_vectors",
+                              "use_node_scalars", "use_adaln")
+                    if prev.get(k) != run_config.get(k)}
+            if mism:
+                print(f"WARNING: resume architecture flags differ from checkpoint: {mism}. "
+                      f"Re-run with matching flags or the loaded weights are wrong.")
+
     if not args.resume_weights:
         if is_rank0:
             make_clear_folder(f"{model_output_path}/models")
-            torch.save(raw_model.state_dict(), f"{model_output_path}/models/initial_model.pth")
         if args.distributed:
             dist.barrier()
     else:
@@ -592,6 +617,7 @@ if __name__ == "__main__":
                 "model_state_dict": raw_model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "losses": losses,
+                "config": run_config,
             }
             if args.use_cosine_lr:
                 ckpt["scheduler_state_dict"] = scheduler.state_dict()
@@ -616,6 +642,21 @@ if __name__ == "__main__":
                 f.write(f"{epoch_i},{loss_val}\n")
 
         torch.save(raw_model.state_dict(), f"{model_output_path}/models/final_model.pth")
+
+        # Complete resume point: everything needed to continue training from the final model
+        # (raw weights, optimizer, scheduler, EMA shadow, epoch, losses, self-describing config).
+        final_ckpt = {
+            "epoch": total_epochs - 1,
+            "model_state_dict": raw_model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "losses": losses,
+            "config": run_config,
+        }
+        if args.use_cosine_lr:
+            final_ckpt["scheduler_state_dict"] = scheduler.state_dict()
+        if ema is not None:
+            final_ckpt["ema_state_dict"] = ema.state_dict()
+        torch.save(final_ckpt, f"{model_output_path}/models/final_checkpoint.pth")
 
         # If EMA is active, save the shadow and use it for all downstream sampling/metrics.
         if ema is not None:
@@ -685,15 +726,45 @@ if __name__ == "__main__":
                 f.write(f"Error occurred while generating samples: {e}\n")
             exit(1)
 
+        # Persist a small sample subset so plots/metrics can be regenerated without re-running.
         try:
-            run_save_metrics(
+            torch.save(samples[:10000].cpu(), f"{model_output_path}/samples_subset.pt")
+        except Exception as e:
+            print(f"Error saving sample subset: {e}")
+
+        eval_info = {}
+        try:
+            eval_info = run_save_metrics(
                 X_test=X_test,
                 jet_types=args.jet_types,
                 gen_samples=samples,
                 output_path=model_output_path,
                 device=device
-            )
+            ) or {}
         except Exception as e:
             print(f"Error occurred while running/saving metrics: {e}")
             with open(f"{model_output_path}/error_log.txt", "a") as f:
                 f.write(f"Error occurred while running/saving metrics: {e}\n")
+
+        # Compact run summary for at-a-glance comparison across runs.
+        try:
+            git_commit = None
+            git_commit_path = f"{args.output_path}/git_commit.txt"
+            if os.path.exists(git_commit_path):
+                with open(git_commit_path) as gf:
+                    git_commit = gf.read().strip()
+            summary = {
+                "final_loss": losses[-1] if losses else None,
+                "num_epochs": total_epochs,
+                "git_commit": git_commit,
+                "config": run_config,
+                "metrics": {k: eval_info.get(k) for k in (
+                    "w1m", "w1p", "w1efp", "fpd",
+                    "frac_negative_energy", "frac_spacelike", "msq_median",
+                )},
+            }
+            with open(f"{model_output_path}/summary.json", "w") as f:
+                json.dump(summary, f, indent=2,
+                          default=lambda o: float(o) if hasattr(o, "__float__") else str(o))
+        except Exception as e:
+            print(f"Error writing summary.json: {e}")
