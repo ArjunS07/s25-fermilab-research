@@ -126,20 +126,33 @@ class GlobalEmbedding(nn.Module):
 
 class LorentzEquivariantLayer(nn.Module):
     def __init__(self, embed_dim=128, message_dim=128, hidden_dim=128,
-                 use_node_scalars=False, node_scalar_dim=128):
+                 use_node_scalars=False, node_scalar_dim=128, use_adaln=False):
         super().__init__()
         self.embed_dim = embed_dim
         self.message_dim = message_dim
         self.use_node_scalars = use_node_scalars
         self.node_scalar_dim = node_scalar_dim
+        self.use_adaln = use_adaln
 
-        # Message computation: phi_e^l
-        # Input: psi(||x_i - x_j||), psi(<x_i, x_j>), g^0, g^l, t_emb
-        # When per-node scalars are enabled, also h_i and h_j (LorentzNet-style).
-        message_input_dim = 2 + embed_dim + embed_dim + embed_dim  # 2 + 3*embed_dim
+        # Message computation: phi_e^l.
+        # Base per-edge inputs: psi(||x_i - x_j||), psi(<x_i, x_j>) [+ h_i, h_j].
+        # Without adaLN, the global/time conditioning (g^0, g^l, t_emb) is *concatenated*
+        # into every edge (the (B,N,N,~3*embed) memory hog). With adaLN it modulates the
+        # messages via FiLM instead, so it is dropped from the per-edge input.
+        message_input_dim = 2
         if use_node_scalars:
             message_input_dim += 2 * node_scalar_dim  # h_i, h_j
+        if not use_adaln:
+            message_input_dim += 3 * embed_dim        # g^0, g^l, t_emb
         self.phi_e = PhiMLP(message_input_dim, [hidden_dim, hidden_dim], message_dim)
+
+        # FiLM/adaLN modulator: invariant conditioning -> (scale, shift) for the messages.
+        if use_adaln:
+            self.adaln_mod = PhiMLP(3 * embed_dim, [hidden_dim], 2 * message_dim)
+            # adaLN-zero init: start as identity (scale=shift=0) for stable training.
+            last_linear = [m for m in self.adaln_mod.net if isinstance(m, nn.Linear)][-1]
+            nn.init.zeros_(last_linear.weight)
+            nn.init.zeros_(last_linear.bias)
 
         # Per-node scalar update: phi_h^l — h_i <- h_i + phi_h([h_i, aggregated_messages_i])
         if use_node_scalars:
@@ -148,12 +161,13 @@ class LorentzEquivariantLayer(nn.Module):
         # Message aggregation scalar: phi_m^l — Sigmoid gives soft gate in [0,1]
         self.phi_m = PhiMLP(message_dim, [hidden_dim, hidden_dim], 1, output_activation=nn.Sigmoid())
 
-        # Global embedding update: phi_g^l
+        # Global embedding update: phi_g^l (per-jet, cheap; keeps explicit conditioning)
         global_input_dim = embed_dim + embed_dim + embed_dim + message_dim  # g^0, g^l, t_emb, aggregated_msg
         self.phi_g = PhiMLP(global_input_dim, [hidden_dim, hidden_dim], embed_dim)
 
-        # Displacement scaling: phi_x^l — no output activation; gamma controls magnitude
-        displacement_input_dim = embed_dim + embed_dim + embed_dim + message_dim  # g^0, g^l, t_emb, m_ij
+        # Displacement scaling: phi_x^l — no output activation; gamma controls magnitude.
+        # With adaLN the messages already carry the conditioning, so the globals are dropped.
+        displacement_input_dim = message_dim if use_adaln else (3 * embed_dim + message_dim)
         self.phi_x = PhiMLP(displacement_input_dim, [hidden_dim, hidden_dim], 1)
 
         # Learnable scaling parameters
@@ -203,10 +217,10 @@ class LorentzEquivariantLayer(nn.Module):
         message_parts = [
             psi_norm.unsqueeze(-1),  # (batch_size, max_particles, max_particles, 1)
             psi_inner.unsqueeze(-1), # (batch_size, max_particles, max_particles, 1)
-            g0_exp,                  # (batch_size, max_particles, max_particles, embed_dim)
-            g_prev_exp,              # (batch_size, max_particles, max_particles, embed_dim)
-            t_emb_exp                # (batch_size, max_particles, max_particles, embed_dim)
         ]
+        if not self.use_adaln:
+            # Concatenate the conditioning into every edge (the memory-heavy path).
+            message_parts.extend([g0_exp, g_prev_exp, t_emb_exp])
         if self.use_node_scalars:
             # Per-node scalars h_i, h_j on every edge (i receives, j sends).
             h_i_exp = h.unsqueeze(2).expand(-1, -1, max_particles, -1)  # (B, P, P, node_dim)
@@ -223,7 +237,17 @@ class LorentzEquivariantLayer(nn.Module):
         messages = messages * pair_mask_exp
         messages = self.message_sf(messages)
         messages = messages * pair_mask_exp
-        
+
+        if self.use_adaln:
+            # FiLM/adaLN: modulate the messages by invariant (scale, shift) derived from the
+            # global + time conditioning. Invariant coefficients => equivariance preserved.
+            cond = torch.cat([g0, g_prev, t_emb], dim=-1)  # (batch_size, 3*embed_dim)
+            scale, shift = self.adaln_mod(cond).chunk(2, dim=-1)  # each (batch_size, message_dim)
+            scale = scale.unsqueeze(1).unsqueeze(1)  # (batch_size, 1, 1, message_dim)
+            shift = shift.unsqueeze(1).unsqueeze(1)
+            messages = messages * (1 + scale) + shift
+            messages = messages * pair_mask_exp
+
         # Compute message scalings: phi_m^l  
         message_scalings = self.phi_m(messages).squeeze(-1)  # (batch_size, max_particles, max_particles)
         message_scalings = message_scalings * pair_mask
@@ -243,9 +267,12 @@ class LorentzEquivariantLayer(nn.Module):
         g_new = self.phi_g(global_input)
         g_new = self.global_sf(g_new)
         
-        # Prepare inputs for phi_x^l for all pairs.
-        # g0_exp, g_prev_exp, t_emb_exp were computed above for message_input and are still valid.
-        displacement_input = torch.cat([g0_exp, g_prev_exp, t_emb_exp, messages], dim=-1)
+        # Prepare inputs for phi_x^l for all pairs. Under adaLN the messages already carry the
+        # conditioning (via FiLM), so the globals are dropped from the displacement head too.
+        if self.use_adaln:
+            displacement_input = messages
+        else:
+            displacement_input = torch.cat([g0_exp, g_prev_exp, t_emb_exp, messages], dim=-1)
         # Shape: (batch_size, max_particles, max_particles, input_dim)
         
         # Apply phi_x^l to all pairs at once
@@ -289,7 +316,7 @@ class LEFTJeN(nn.Module):
                  num_layers=6, message_dim=128, hidden_dim=128,
                  use_residual_update=True, include_pt=False,
                  use_reference_vectors=False, use_node_scalars=False,
-                 node_scalar_dim=None):
+                 node_scalar_dim=None, use_adaln=False):
         super().__init__()
         self.max_particles = max_particles
         self.embed_dim = embed_dim
@@ -299,6 +326,7 @@ class LEFTJeN(nn.Module):
         # both disabled the model is byte-for-byte the original (run A of the ablation grid).
         self.use_reference_vectors = use_reference_vectors
         self.use_node_scalars = use_node_scalars
+        self.use_adaln = use_adaln
         self.node_scalar_dim = node_scalar_dim if node_scalar_dim is not None else embed_dim
         # Number of reference virtual particles when enabled: e_t=(1,0,0,0) and jet 4-momentum.
         self.num_references = 2
@@ -316,7 +344,8 @@ class LEFTJeN(nn.Module):
         self.layers = nn.ModuleList([
             LorentzEquivariantLayer(embed_dim, message_dim, hidden_dim,
                                     use_node_scalars=use_node_scalars,
-                                    node_scalar_dim=self.node_scalar_dim)
+                                    node_scalar_dim=self.node_scalar_dim,
+                                    use_adaln=use_adaln)
             for _ in range(num_layers)
         ])
 

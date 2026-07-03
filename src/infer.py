@@ -87,6 +87,8 @@ def parse_args():
                         help="Model was trained with reference virtual particles (e_t, jet 4-momentum).")
     parser.add_argument("--use_node_scalars", action=argparse.BooleanOptionalAction, default=False,
                         help="Model was trained with per-node scalar hidden state h_i.")
+    parser.add_argument("--use_adaln", action=argparse.BooleanOptionalAction, default=False,
+                        help="Model was trained with FiLM/adaLN conditioning.")
 
     # Stage selection
     parser.add_argument("--vf_mode", type=str, default="both",
@@ -103,7 +105,8 @@ def parse_args():
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
-                     num_particles, device, use_reference_vectors=False, use_node_scalars=False):
+                     num_particles, device, use_reference_vectors=False, use_node_scalars=False,
+                     use_adaln=False):
     model = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=num_particles,
@@ -113,6 +116,7 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
         include_pt=True,
         use_reference_vectors=use_reference_vectors,
         use_node_scalars=use_node_scalars,
+        use_adaln=use_adaln,
     ).to(device)
 
     ckpt = torch.load(checkpoint_path, map_location=device)
@@ -165,6 +169,7 @@ def main():
         device=device,
         use_reference_vectors=args.use_reference_vectors,
         use_node_scalars=args.use_node_scalars,
+        use_adaln=args.use_adaln,
     )
 
     # ── Stage 1: Vector field visualisation ───────────────────────────────────

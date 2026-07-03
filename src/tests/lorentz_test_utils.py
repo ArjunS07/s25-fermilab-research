@@ -58,7 +58,7 @@ def apply_transform(vecs: torch.Tensor, Lambda: torch.Tensor) -> torch.Tensor:
     return vecs @ Lambda.transpose(-1, -2)
 
 
-def build_model(use_reference_vectors=False, use_node_scalars=False, seed=0):
+def build_model(use_reference_vectors=False, use_node_scalars=False, seed=0, use_adaln=False):
     """Small double-precision model in eval mode (dropout off) for deterministic checks."""
     torch.manual_seed(seed)
     model = LEFTJeN(
@@ -72,6 +72,7 @@ def build_model(use_reference_vectors=False, use_node_scalars=False, seed=0):
         use_reference_vectors=use_reference_vectors,
         use_node_scalars=use_node_scalars,
         node_scalar_dim=16,
+        use_adaln=use_adaln,
     )
     return model.double().eval()
 

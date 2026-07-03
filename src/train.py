@@ -121,6 +121,9 @@ if __name__ == "__main__":
     parser.add_argument("--use_ema", action=argparse.BooleanOptionalAction, default=False,
                         help="Track an EMA of the weights and sample from it (experiment plan 2.1).")
     parser.add_argument("--ema_decay", type=float, default=0.999, help="EMA decay factor.")
+    parser.add_argument("--use_adaln", action=argparse.BooleanOptionalAction, default=False,
+                        help="FiLM/adaLN conditioning instead of concatenating g/t into every "
+                             "pairwise message (experiment plan 2.2). Cuts message-tensor memory.")
 
     # Curriculum settings
     parser.add_argument("--curriculum_alpha_start", type=float, default=2.0,
@@ -215,6 +218,7 @@ if __name__ == "__main__":
         include_pt=True,
         use_reference_vectors=args.use_reference_vectors,
         use_node_scalars=args.use_node_scalars,
+        use_adaln=args.use_adaln,
     ).to(device)
     
     start_epoch = 0
