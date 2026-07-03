@@ -102,6 +102,20 @@ if __name__ == "__main__":
                         help="Use the --time_sampling method; when False, always use uniform "
                              "(disable: --no-use_time_sampling)")
 
+    # Phase 1 symmetry-breaking flags (both default off → run A of the ablation grid)
+    parser.add_argument("--use_reference_vectors", action=argparse.BooleanOptionalAction, default=False,
+                        help="Add e_t=(1,0,0,0) and the jet 4-momentum as unmasked reference "
+                             "virtual particles (breaks isotropy down to SO(2) about the jet axis).")
+    parser.add_argument("--use_node_scalars", action=argparse.BooleanOptionalAction, default=False,
+                        help="LorentzNet-style per-node scalar hidden state h_i (seeded from "
+                             "Minkowski invariants of each particle and the references).")
+    parser.add_argument("--prior_dist", type=str, default="isotropic_com",
+                        choices=["isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned"],
+                        help="Prior distribution for x_0. 'axis_aligned' is collimated around the jet axis.")
+    parser.add_argument("--eta_min_factor", type=float, default=0.3,
+                        help="CosineAnnealingWarmRestarts eta_min as a fraction of lr "
+                             "(re-sweep from scratch post-Phase-1; see experiment plan 2.4).")
+
     # Curriculum settings
     parser.add_argument("--curriculum_alpha_start", type=float, default=2.0,
                         help="Initial power-law exponent alpha (positive → oversample dense jets). "
@@ -193,6 +207,8 @@ if __name__ == "__main__":
         hidden_dim=args.n_hidden,
         use_residual_update=args.use_residual,
         include_pt=True,
+        use_reference_vectors=args.use_reference_vectors,
+        use_node_scalars=args.use_node_scalars,
     ).to(device)
     
     start_epoch = 0
@@ -296,7 +312,7 @@ if __name__ == "__main__":
     if args.use_cosine_lr:
         t0 = args.lr_t0 if args.lr_t0 > 0 else (args.num_epochs // 4) if args.num_epochs >= 20 else max(1, args.num_epochs // 2)
         cosine_sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer, T_0=t0, T_mult=1, eta_min=lr * 0.3
+            optimizer, T_0=t0, T_mult=1, eta_min=lr * args.eta_min_factor
         )
         if args.lr_warmup_epochs > 0:
             warmup_sched = torch.optim.lr_scheduler.LinearLR(
@@ -417,7 +433,9 @@ if __name__ == "__main__":
             # TODO: Boost before, can't boost scaled data
             # x_1 = boost_to_com_frame(x_1, mask=true_masks)
             # x_1 = (1/SCALE) * x_1
-            x_0 = gen_initial_distribution(x_1=x_1).to(device)
+            x_0 = gen_initial_distribution(
+                x_1=x_1, prior_dist=args.prior_dist, jet_features=batch_jet_info, device=device,
+            ).to(device)
             if perm_cache is not None:
                 # Apply the ICP-derived permutation then rotation to the fresh prior sample.
                 # Permutation: gather along particle dim using (B, P, 4) index.
@@ -434,7 +452,17 @@ if __name__ == "__main__":
             mask_exp = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
             x_1 = mask_exp * x_1
             x_0 = mask_exp * x_0
-            
+
+            # Reference virtual particles: e_t=(1,0,0,0) and the true jet 4-momentum
+            # (sum of the target constituents, in scaled space). None when disabled.
+            ref_vectors = None
+            if args.use_reference_vectors:
+                e_t = torch.zeros(x_1.shape[0], 1, 4, device=device, dtype=x_1.dtype)
+                e_t[..., 0] = 1.0
+                jet_p4 = (x_1 * true_masks.unsqueeze(-1)).sum(dim=1, keepdim=True)  # (B, 1, 4)
+                ref_vectors = torch.cat([e_t, jet_p4], dim=1)  # (B, 2, 4)
+
+
             # mean_std_masked_tensor("x_0", x_0, true_masks)
             # mean_std_masked_tensor("x_1", x_1, true_masks)
             
@@ -449,7 +477,7 @@ if __name__ == "__main__":
                 y_t = y_t.to(device)
                 u_t_ball = u_t_ball * mask_exp   # zero out padding in target
 
-                pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
+                pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks, ref_vectors=ref_vectors)
                 pred = pred * mask_exp
 
                 # Push Cartesian model output into the ball tangent space, then compute
@@ -468,7 +496,7 @@ if __name__ == "__main__":
                 x_t = x_t.to(device)
 
                 conditional_u_t = (x_1 - ((1-args.sigma_min)*x_0)) * mask_exp
-                pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks)
+                pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks, ref_vectors=ref_vectors)
                 pred = pred * mask_exp
 
                 n_real = true_masks.sum().clamp(min=1)
@@ -620,6 +648,7 @@ if __name__ == "__main__":
                 batch_size=args.batch_size if args.num_particles < MAX_N_PARTICLES else 16,
                 use_cfg=False,
                 use_hyperbolic=args.use_hyperbolic,
+                use_reference_vectors=args.use_reference_vectors,
             )
         except Exception as e:
             print(f"Error occurred while generating samples: {e}")

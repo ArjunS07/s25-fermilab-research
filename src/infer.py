@@ -82,6 +82,12 @@ def parse_args():
     parser.add_argument("--use_hyperbolic", action=argparse.BooleanOptionalAction, default=False,
                         help="Use Riemannian (Poincaré ball) integration for sampling")
 
+    # Phase 1 symmetry-breaking flags (must match the trained checkpoint)
+    parser.add_argument("--use_reference_vectors", action=argparse.BooleanOptionalAction, default=False,
+                        help="Model was trained with reference virtual particles (e_t, jet 4-momentum).")
+    parser.add_argument("--use_node_scalars", action=argparse.BooleanOptionalAction, default=False,
+                        help="Model was trained with per-node scalar hidden state h_i.")
+
     # Stage selection
     parser.add_argument("--vf_mode", type=str, default="both",
                         choices=["cfg", "nocfg", "both", "none"],
@@ -97,7 +103,7 @@ def parse_args():
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
-                     num_particles, device):
+                     num_particles, device, use_reference_vectors=False, use_node_scalars=False):
     model = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=num_particles,
@@ -105,6 +111,8 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
         hidden_dim=n_hidden,
         use_residual_update=use_residual,
         include_pt=True,
+        use_reference_vectors=use_reference_vectors,
+        use_node_scalars=use_node_scalars,
     ).to(device)
 
     ckpt = torch.load(checkpoint_path, map_location=device)
@@ -155,6 +163,8 @@ def main():
         use_residual=args.use_residual,
         num_particles=args.num_particles,
         device=device,
+        use_reference_vectors=args.use_reference_vectors,
+        use_node_scalars=args.use_node_scalars,
     )
 
     # ── Stage 1: Vector field visualisation ───────────────────────────────────
@@ -228,6 +238,7 @@ def main():
                 batch_size=args.batch_size,
                 use_cfg=False,
                 use_hyperbolic=args.use_hyperbolic,
+                use_reference_vectors=args.use_reference_vectors,
             )
             print(f"Sample generation done. Shape: {samples.shape}")
             pt_path = os.path.join(out_dir, "samples.pt")

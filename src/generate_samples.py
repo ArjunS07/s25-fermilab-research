@@ -4,17 +4,40 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 
+from jetnet.utils import EtaPhiPtE_to_cartesian
+
 from models.LEFT_JeN import LEFTJeN
 from util import jet_attributes
 from util.file_management import make_clear_folder
 from util.distributions import gen_initial_distribution
-from util.hyperbolic import to_poincare_ball, from_poincare_ball
 from util.hyperbolic import to_poincare_ball, from_poincare_ball
 
 plt.rc("mathtext", fontset="cm")
 sns.set_style("whitegrid")
 
 features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
+
+
+def build_reference_vectors(jet_eta, jet_pt, final_scale, device):
+    """Inference reference 4-vectors: e_t=(1,0,0,0) and a reconstructed jet 4-momentum.
+
+    Mirrors util/coordinates.transform_rel_particle_coordinates_to_cartesian: the jet axis is
+    (jet_eta, random phi, jet_pt) with energy E = pt*cosh(eta), converted with the same jetnet
+    routine used to build the training particles, then divided by final_scale to enter the
+    model's scaled space. This matches train.py, where the reference is the sum of the scaled
+    constituents (= physical jet 4-momentum / final_scale). The random phi is the *chosen* jet
+    orientation the references then induce in the generated cloud.
+
+    Returns (B, 2, 4).
+    """
+    batch = jet_eta.shape[0]
+    phi = (2 * torch.pi) * torch.rand(batch, device=device)
+    energy = jet_pt * torch.cosh(jet_eta)
+    stacked = torch.stack([jet_eta, phi, jet_pt, energy], dim=-1)  # (B, 4) = (eta, phi, pt, E)
+    jet_p4 = EtaPhiPtE_to_cartesian(stacked) / final_scale         # (B, 4) scaled (E, px, py, pz)
+    e_t = torch.zeros(batch, 4, device=device, dtype=jet_p4.dtype)
+    e_t[:, 0] = 1.0
+    return torch.stack([e_t, jet_p4], dim=1)  # (B, 2, 4)
 
 def generate_samples(
         model: LEFTJeN,
@@ -31,8 +54,9 @@ def generate_samples(
         cfg_guidance_weight=2.0,
         use_hyperbolic=False,
         hyperbolic_c=1.0,
+        use_reference_vectors=False,
 ):
-    
+
 
     # make folder
     make_clear_folder(f"{root_output_path}/samples")
@@ -77,6 +101,12 @@ def generate_samples(
                 gen_pt.unsqueeze(-1),
             ], dim=-1).to(device)
 
+            # Reference virtual particles, reconstructed from the sampled jet attributes.
+            ref_vectors = None
+            if use_reference_vectors:
+                gen_eta = generated_jet_attrs[:, 5].to(device)  # jet eta (layout: [onehot(5), eta, pt, mass, n])
+                ref_vectors = build_reference_vectors(gen_eta, gen_pt, final_scale, device)
+
             if use_hyperbolic:
                 y = to_poincare_ball(x, c=hyperbolic_c)
                 for i in range(integration_steps):
@@ -89,12 +119,14 @@ def generate_samples(
                         c=hyperbolic_c,
                         use_cfg=use_cfg,
                         guidance_weight=cfg_guidance_weight,
+                        ref_vectors=ref_vectors,
                     )
                 x = from_poincare_ball(y, c=hyperbolic_c)
             else:
                 for i in range(integration_steps):
                     x = model.step(x, cond, masks, times[i], times[i + 1],
-                                   use_cfg=use_cfg, guidance_weight=cfg_guidance_weight)
+                                   use_cfg=use_cfg, guidance_weight=cfg_guidance_weight,
+                                   ref_vectors=ref_vectors)
 
             scaled_x = final_scale * x * masks.unsqueeze(-1)   # zero-out padded slots
             # torch.save(scaled_x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
