@@ -1,7 +1,7 @@
 set -euo pipefail
 
-OUTPUTS_DIR="outputs"
-ARCHIVE_DIR="archived_outputs"
+OUTPUTS_DIR="../output"
+ARCHIVE_DIR="../archived_output"
 
 mkdir -p "$ARCHIVE_DIR"
 

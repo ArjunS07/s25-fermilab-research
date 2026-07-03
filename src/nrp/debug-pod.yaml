@@ -56,11 +56,11 @@ spec:
         name: as-train-pvc
     resources:
       limits:
-        nvidia.com/gpu: 2
+        nvidia.com/gpu: 1
         memory: "16Gi"
         cpu: "2.4"
       requests:
-        nvidia.com/gpu: 2
+        nvidia.com/gpu: 1
         memory: "16Gi"
         cpu: "2"
   affinity:

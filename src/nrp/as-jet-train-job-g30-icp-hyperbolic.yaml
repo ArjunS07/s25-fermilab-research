@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-job-30-hyperbolic
+  name: as-jet-train-job-g30-icp-hyperbolic
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -57,19 +57,22 @@ spec:
               cd /mnt/data/src
 
               UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
-              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-a30-polar-icp-hyperbolic"
+              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-g30-polar-icp-curriculum"
               echo "Output path: $OUTPUT_PATH"
               mkdir $OUTPUT_PATH
 
-              python3 data.py --num_particles=30 --output_path=${OUTPUT_PATH}
+              python3 data.py --jet_types g --num_particles=30 --output_path=${OUTPUT_PATH}
               python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
+              python3 cache_icp.py --output_path=${OUTPUT_PATH} --jet_types g --num_particles=30 --n_workers=2 --cache_dir=/mnt/data/caches
               python3 train.py \
-                --num_particles=30 \
+                --jet_types g --num_particles=30 \
                 --train_space=polar --time_sampling=power_law \
                 --batch_size=50 --num_epochs=200 \
                 --n_samples=50000 --integration_steps=256 --n_layers=3 \
                 --output_path=${OUTPUT_PATH} --use_residual \
-                --use_cosine_lr --use_time_sampling --no-use_curriculum \
+                --use_cosine_lr --use_time_sampling --no_use_curriculum \
+                --use_hyperbolic\
+                --cache_dir=/mnt/data/caches \
                 | tee -a ${OUTPUT_PATH}/logs.txt
           volumeMounts:
             - mountPath: /mnt/data

@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-job-30-hyperbolic
+  name: as-jet-train-job-30-icp-ddp4
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -51,35 +51,35 @@ spec:
               fi
 
               echo "=== Environment setup complete, starting training ==="
-              export CUDA_LAUNCH_BLOCKING=1
-              export TORCH_USE_CUDA_DSA=1
 
               cd /mnt/data/src
 
               UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
-              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-a30-polar-icp-hyperbolic"
+              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-a30-polar-icp-ddp4"
               echo "Output path: $OUTPUT_PATH"
               mkdir $OUTPUT_PATH
 
               python3 data.py --num_particles=30 --output_path=${OUTPUT_PATH}
               python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
-              python3 train.py \
+              python3 cache_icp.py --output_path=${OUTPUT_PATH} --num_particles=30 --n_workers=4 --cache_dir=/mnt/data/caches
+              torchrun --standalone --nproc_per_node=4 train.py \
                 --num_particles=30 \
                 --train_space=polar --time_sampling=power_law \
                 --batch_size=50 --num_epochs=200 \
                 --n_samples=50000 --integration_steps=256 --n_layers=3 \
                 --output_path=${OUTPUT_PATH} --use_residual \
                 --use_cosine_lr --use_time_sampling --no-use_curriculum \
+                --cache_dir=/mnt/data/caches \
                 | tee -a ${OUTPUT_PATH}/logs.txt
           volumeMounts:
             - mountPath: /mnt/data
               name: as-train-pvc
           resources:
             limits:
-              nvidia.com/a40: 1
-              memory: "16Gi"
-              cpu: "2.4"
+              nvidia.com/a40: 4
+              memory: "48Gi"
+              cpu: "8"
             requests:
-              nvidia.com/a40: 1
-              memory: "16Gi"
-              cpu: "2"
+              nvidia.com/a40: 4
+              memory: "48Gi"
+              cpu: "8"

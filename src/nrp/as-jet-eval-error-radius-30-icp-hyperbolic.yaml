@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-job-30-hyperbolic
+  name: as-jet-eval-error-radius-30-icp-hyperbolic
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -14,7 +14,7 @@ spec:
             claimName: as-jet-train-pvc
 
       containers:
-        - name: train
+        - name: eval
           image: python:3.10-slim
           env:
             - name: POD_UID
@@ -27,10 +27,8 @@ spec:
             - |
               set -e
               set -ex
-              apt-get update && apt-get install -y libffi-dev gcc g++ curl git wget build-essential
 
-              mkdir -p /mnt/data
-              ls -la /mnt/data
+              apt-get update && apt-get install -y libffi-dev gcc g++ curl git wget build-essential
 
               git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
               cp -r /tmp/repo/src /mnt/data/
@@ -50,34 +48,37 @@ spec:
                 fi
               fi
 
-              echo "=== Environment setup complete, starting training ==="
+              echo "=== Environment setup complete ==="
               export CUDA_LAUNCH_BLOCKING=1
               export TORCH_USE_CUDA_DSA=1
 
               cd /mnt/data/src
 
-              UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
-              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-a30-polar-icp-hyperbolic"
-              echo "Output path: $OUTPUT_PATH"
-              mkdir $OUTPUT_PATH
+              TRAIN_OUTPUT_PATH="/mnt/data/output/2026-03-27_10-06-27--bc5696dc-6139-4b66-9916-102fbc6c13ec-a30-polar-icp-hyperbolic"
+              CHECKPOINT_PATH="${TRAIN_OUTPUT_PATH}/train/models/final_model.pth"
 
-              python3 data.py --num_particles=30 --output_path=${OUTPUT_PATH}
-              python3 jet_attr_model.py --output_path=${OUTPUT_PATH}
-              python3 train.py \
+              UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
+              OUT_DIR="/mnt/data/output/$UNIQUE_RUN_ID-a30-icp-hyperbolic-error-radius"
+              mkdir -p $OUT_DIR
+
+              python3 experiments/eval_error_by_radius.py \
+                --checkpoint_path=${CHECKPOINT_PATH} \
+                --output_path=${TRAIN_OUTPUT_PATH} \
+                --out_dir=${OUT_DIR} \
                 --num_particles=30 \
-                --train_space=polar --time_sampling=power_law \
-                --batch_size=50 --num_epochs=200 \
-                --n_samples=50000 --integration_steps=256 --n_layers=3 \
-                --output_path=${OUTPUT_PATH} --use_residual \
-                --use_cosine_lr --use_time_sampling --no-use_curriculum \
-                | tee -a ${OUTPUT_PATH}/logs.txt
+                --n_layers=5 \
+                --use_residual \
+                --batch_size=256 \
+                --n_radius_bins=25 \
+                | tee -a ${OUT_DIR}/logs.txt
+
           volumeMounts:
             - mountPath: /mnt/data
               name: as-train-pvc
           resources:
             limits:
               nvidia.com/a40: 1
-              memory: "16Gi"
+              memory: "24Gi"
               cpu: "2.4"
             requests:
               nvidia.com/a40: 1

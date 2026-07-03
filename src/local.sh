@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# local.sh — smoke-test all recent features and ablations
-# Each train.py run is tiny (100 samples, 2 epochs) so the full suite
-# completes quickly while still exercising every code path.
+# local.sh — CPU smoke-test of the training pipeline (data → jet_attr → cache_icp → train).
+# Tiny run (100 samples, 2 epochs) to exercise code paths quickly; not a real training run.
 
 set -euo pipefail
 
@@ -12,8 +11,8 @@ BASE_OUT="local_out/${UNIQUE_RUN_ID}"
 mkdir -p "${BASE_OUT}"
 echo "Output root: ${BASE_OUT}"
 
-NUM_PARTICLES=30
-JET_TYPES=g
+NUM_PARTICLES=150
+JET_TYPES='g q t'
 N_TRAIN=100
 BATCH=20
 EPOCHS=2
@@ -84,75 +83,3 @@ python3 train.py \
     --use_cosine_lr \
     --use_curriculum \
     --use_time_sampling
-
-# ── 5. With ICP cache ─────────────────────────────────────────────────────────
-echo ""
-echo "══════════════════════════════════════════"
-echo " Step 5/7  train — ICP prior cache"
-echo "   cosine LR ✓  curriculum ✓  icp_cache ✓"
-echo "══════════════════════════════════════════"
-python3 train.py \
-    "${COMMON_TRAIN[@]}" \
-    --train_space cartesian \
-    --time_sampling power_law \
-    --use_cosine_lr \
-    --use_curriculum \
-    --use_time_sampling \
-    --icp_cache_path "${ICP_CACHE}"
-
-# ── 6. Ablation: all features OFF (vanilla baseline) ─────────────────────────
-echo ""
-echo "══════════════════════════════════════════"
-echo " Step 6/7  train — all ablations OFF"
-echo "   cosine LR ✗  curriculum ✗  time-sampling ✗ (→ uniform)"
-echo "══════════════════════════════════════════"
-python3 train.py \
-    "${COMMON_TRAIN[@]}" \
-    --train_space cartesian \
-    --time_sampling power_law \
-    --no-use_cosine_lr \
-    --no-use_curriculum \
-    --no-use_time_sampling
-
-# ── 7. Individual feature ablations ───────────────────────────────────────────
-echo ""
-echo "══════════════════════════════════════════"
-echo " Step 7/7  individual ablation sweeps"
-echo "══════════════════════════════════════════"
-
-echo "  7a  no cosine LR"
-python3 train.py \
-    "${COMMON_TRAIN[@]}" \
-    --time_sampling lognorm \
-    --use_curriculum \
-    --use_time_sampling \
-    --no-use_cosine_lr
-
-echo "  7b  no curriculum"
-python3 train.py \
-    "${COMMON_TRAIN[@]}" \
-    --time_sampling lognorm \
-    --use_cosine_lr \
-    --use_time_sampling \
-    --no-use_curriculum
-
-echo "  7c  no time sampling (forced uniform)"
-python3 train.py \
-    "${COMMON_TRAIN[@]}" \
-    --time_sampling lognorm \
-    --use_cosine_lr \
-    --use_curriculum \
-    --no-use_time_sampling
-
-echo "  7d  polar interpolation + lognorm sampling"
-python3 train.py \
-    "${COMMON_TRAIN[@]}" \
-    --train_space polar \
-    --time_sampling lognorm \
-    --use_cosine_lr \
-    --use_curriculum \
-    --use_time_sampling
-
-# ── Done ──────────────────────────────────────────────────────────────────────
-echo ""
-echo "All steps completed.  Results in: ${BASE_OUT}"
