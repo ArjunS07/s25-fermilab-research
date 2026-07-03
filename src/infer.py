@@ -11,21 +11,13 @@ Each stage is wrapped in try/except.  Samples are always saved as samples.pt
 before metrics are attempted.
 
 Example usage:
-    python infer.py \\
-        --checkpoint_path /mnt/data/output/train/models/latest_checkpoint.pth \\
-        --output_path     /mnt/data/output \\
-        --num_particles   30 \\
-        --vf_mode         both \\
-        --n_samples       10000
-
-    # Riemannian integration:
-    python infer.py ... --use_hyperbolic
+    python infer.py --config configs/infer-30-icp-hyperbolic-compare.yaml \\
+        --set paths.checkpoint_path=/mnt/data/output/train/models/latest_checkpoint.pth \\
+        --set paths.output_path=/mnt/data/output
 """
 
 import os
-import sys
 import pickle
-import argparse
 import traceback
 
 import numpy as np
@@ -49,71 +41,14 @@ NUM_PARTICLE_FEATURES = 4
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def parse_args():
-    if "--config" in sys.argv:
-        config_path, overrides = parse_config_cli()
-        cfg = build_config(InferRunConfig, config_path, overrides)
-        args = infer_config_to_namespace(cfg)
-        if not args.checkpoint_path:
-            raise ValueError("paths.checkpoint_path must be set in the config (--checkpoint_path is required)")
-        if not args.output_path:
-            raise ValueError("paths.output_path must be set in the config (--output_path is required)")
-        return args
-
-    parser = argparse.ArgumentParser(
-        description="LEFTJeN standalone inference: VF visualisation + sample generation + metrics"
-    )
-
-    # Required
-    parser.add_argument("--checkpoint_path", type=str, required=True,
-                        help="Path to checkpoint .pth (latest_checkpoint.pth or final_model.pth)")
-    parser.add_argument("--output_path", type=str, required=True,
-                        help="Base output dir that contains data/, jet_attr_model.pth, train/scale.txt")
-
-    # Output
-    parser.add_argument("--out_dir", type=str, default=None,
-                        help="Where to write inference outputs. Default: <output_path>/inference/")
-
-    # Model architecture — must match the checkpoint
-    parser.add_argument("--n_hidden", type=int, default=128)
-    parser.add_argument("--n_layers", type=int, default=3)
-    parser.add_argument("--use_residual", action="store_true")
-    parser.add_argument("--num_particles", type=int, default=30,
-                        help="Max particles per jet (must match training)")
-    parser.add_argument("--jet_types", type=str, nargs="+", default=["g", "q", "t"])
-
-    # Inference knobs
-    parser.add_argument("--n_samples", type=int, default=50_000,
-                        help="Jets to generate for sample generation / metrics")
-    parser.add_argument("--n_viz_samples", type=int, default=1000,
-                        help="Jets to use for VF visualisation")
-    parser.add_argument("--integration_steps", type=int, default=16)
-    parser.add_argument("--batch_size", type=int, default=256)
-    parser.add_argument("--cfg_guidance_weight", type=float, default=2.0)
-
-    # Hyperbolic sampling
-    parser.add_argument("--use_hyperbolic", action=argparse.BooleanOptionalAction, default=False,
-                        help="Use Riemannian (Poincaré ball) integration for sampling")
-    parser.add_argument("--sampler", type=str, default="euler", choices=["euler", "heun"],
-                        help="ODE integrator for Euclidean sampling (heun = 2nd-order midpoint).")
-
-    # Phase 1 symmetry-breaking flags (must match the trained checkpoint)
-    parser.add_argument("--use_reference_vectors", action=argparse.BooleanOptionalAction, default=False,
-                        help="Model was trained with reference virtual particles (e_t, jet 4-momentum).")
-    parser.add_argument("--use_node_scalars", action=argparse.BooleanOptionalAction, default=False,
-                        help="Model was trained with per-node scalar hidden state h_i.")
-    parser.add_argument("--use_adaln", action=argparse.BooleanOptionalAction, default=False,
-                        help="Model was trained with FiLM/adaLN conditioning.")
-
-    # Stage selection
-    parser.add_argument("--vf_mode", type=str, default="both",
-                        choices=["cfg", "nocfg", "both", "none"],
-                        help="Which VF passes to run (none to skip entirely)")
-    parser.add_argument("--skip_samples", action="store_true",
-                        help="Skip sample generation")
-    parser.add_argument("--skip_metrics", action="store_true",
-                        help="Skip metric calculation")
-
-    return parser.parse_args()
+    config_path, overrides = parse_config_cli()
+    cfg = build_config(InferRunConfig, config_path, overrides)
+    args = infer_config_to_namespace(cfg)
+    if not args.checkpoint_path:
+        raise ValueError("paths.checkpoint_path must be set in the config")
+    if not args.output_path:
+        raise ValueError("paths.output_path must be set in the config")
+    return args
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
