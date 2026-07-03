@@ -125,16 +125,26 @@ class GlobalEmbedding(nn.Module):
         return self.output_norm(x)
 
 class LorentzEquivariantLayer(nn.Module):
-    def __init__(self, embed_dim=128, message_dim=128, hidden_dim=128):
+    def __init__(self, embed_dim=128, message_dim=128, hidden_dim=128,
+                 use_node_scalars=False, node_scalar_dim=128):
         super().__init__()
         self.embed_dim = embed_dim
         self.message_dim = message_dim
-        
+        self.use_node_scalars = use_node_scalars
+        self.node_scalar_dim = node_scalar_dim
+
         # Message computation: phi_e^l
         # Input: psi(||x_i - x_j||), psi(<x_i, x_j>), g^0, g^l, t_emb
+        # When per-node scalars are enabled, also h_i and h_j (LorentzNet-style).
         message_input_dim = 2 + embed_dim + embed_dim + embed_dim  # 2 + 3*embed_dim
+        if use_node_scalars:
+            message_input_dim += 2 * node_scalar_dim  # h_i, h_j
         self.phi_e = PhiMLP(message_input_dim, [hidden_dim, hidden_dim], message_dim)
-        
+
+        # Per-node scalar update: phi_h^l — h_i <- h_i + phi_h([h_i, aggregated_messages_i])
+        if use_node_scalars:
+            self.phi_h = PhiMLP(node_scalar_dim + message_dim, [hidden_dim, hidden_dim], node_scalar_dim)
+
         # Message aggregation scalar: phi_m^l — Sigmoid gives soft gate in [0,1]
         self.phi_m = PhiMLP(message_dim, [hidden_dim, hidden_dim], 1, output_activation=nn.Sigmoid())
 
@@ -153,7 +163,7 @@ class LorentzEquivariantLayer(nn.Module):
         self.message_sf = nn.LayerNorm(message_dim)
         self.global_sf = nn.LayerNorm(embed_dim)
         
-    def forward(self, x, g0, g_prev, t_emb, mask):
+    def forward(self, x, g0, g_prev, t_emb, mask, h=None):
         batch_size, max_particles, _ = x.shape
         device = x.device
 
@@ -190,14 +200,20 @@ class LorentzEquivariantLayer(nn.Module):
         g0_exp = g0.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
         g_prev_exp = g_prev.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
         t_emb_exp = t_emb.unsqueeze(1).unsqueeze(1).expand(-1, max_particles, max_particles, -1)
-        message_input = torch.cat([
+        message_parts = [
             psi_norm.unsqueeze(-1),  # (batch_size, max_particles, max_particles, 1)
             psi_inner.unsqueeze(-1), # (batch_size, max_particles, max_particles, 1)
             g0_exp,                  # (batch_size, max_particles, max_particles, embed_dim)
             g_prev_exp,              # (batch_size, max_particles, max_particles, embed_dim)
             t_emb_exp                # (batch_size, max_particles, max_particles, embed_dim)
-        ], dim=-1)
-        
+        ]
+        if self.use_node_scalars:
+            # Per-node scalars h_i, h_j on every edge (i receives, j sends).
+            h_i_exp = h.unsqueeze(2).expand(-1, -1, max_particles, -1)  # (B, P, P, node_dim)
+            h_j_exp = h.unsqueeze(1).expand(-1, max_particles, -1, -1)  # (B, P, P, node_dim)
+            message_parts.extend([h_i_exp, h_j_exp])
+        message_input = torch.cat(message_parts, dim=-1)
+
         # Compute messages: phi_e^l
         messages = self.phi_e(message_input)  # (batch_size, max_particles, max_particles, message_dim)
 
@@ -256,17 +272,36 @@ class LorentzEquivariantLayer(nn.Module):
         
         x_new = x + displacement_term
         x_new = x_new * mask.unsqueeze(-1)
-        return x_new, g_new
+
+        # Per-node scalar update: aggregate incoming messages per node and update h_i.
+        if self.use_node_scalars:
+            node_message_sum = scaled_messages.sum(dim=2)  # (batch_size, max_particles, message_dim)
+            node_agg = node_message_sum / N_actual.unsqueeze(-1).clamp(min=1.0)
+            h_new = h + self.phi_h(torch.cat([h, node_agg], dim=-1))
+            h_new = h_new * mask.unsqueeze(-1)
+        else:
+            h_new = None
+
+        return x_new, g_new, h_new
     
 class LEFTJeN(nn.Module):
     def __init__(self, max_num_jet_types, max_particles=150, embed_dim=128,
                  num_layers=6, message_dim=128, hidden_dim=128,
-                 use_residual_update=True, include_pt=False):
+                 use_residual_update=True, include_pt=False,
+                 use_reference_vectors=False, use_node_scalars=False,
+                 node_scalar_dim=None):
         super().__init__()
         self.max_particles = max_particles
         self.embed_dim = embed_dim
         self.num_layers = num_layers
         self.use_residual_update = use_residual_update
+        # Symmetry-breaking / expressiveness options (Phase 1). Both default off, so with
+        # both disabled the model is byte-for-byte the original (run A of the ablation grid).
+        self.use_reference_vectors = use_reference_vectors
+        self.use_node_scalars = use_node_scalars
+        self.node_scalar_dim = node_scalar_dim if node_scalar_dim is not None else embed_dim
+        # Number of reference virtual particles when enabled: e_t=(1,0,0,0) and jet 4-momentum.
+        self.num_references = 2
 
         if use_residual_update:
             max_alpha = 0.25 + (num_layers - 1) * 0.03
@@ -279,9 +314,18 @@ class LEFTJeN(nn.Module):
         self.time_embedding = TimeEmbedding(embed_dim=embed_dim)
         self.global_embedding = GlobalEmbedding(max_num_jet_types, max_particles, embed_dim, include_pt=include_pt)
         self.layers = nn.ModuleList([
-            LorentzEquivariantLayer(embed_dim, message_dim, hidden_dim)
+            LorentzEquivariantLayer(embed_dim, message_dim, hidden_dim,
+                                    use_node_scalars=use_node_scalars,
+                                    node_scalar_dim=self.node_scalar_dim)
             for _ in range(num_layers)
         ])
+
+        # Per-node scalar seed: maps 3 Minkowski invariants -> node_scalar_dim.
+        # Invariants: [psi(m_i^2)=psi(<x,x>), psi(E_i)=psi(<x,e_t>), psi(<x,x_jet>)].
+        # Without references (run F) the last two are zeroed, so h is seeded from the true
+        # invariant m_i^2 only and the model stays exactly rotation-equivariant.
+        if use_node_scalars:
+            self.node_seed = PhiMLP(3, [hidden_dim], self.node_scalar_dim)
 
         # Learned null conditioning token. Replaces the all-zeros null vector so the
         # unconditional representation is clearly separated from low-value conditioning.
@@ -306,33 +350,84 @@ class LEFTJeN(nn.Module):
         keep[self.n_particles_idx] = 1.0
         return null_base * (1 - keep) + jet_conditions * keep
 
-    def forward(self, x, t, jet_conditions, mask):
+    def _node_seed_features(self, x_aug, refs):
+        """Per-node Minkowski-invariant seed features for the scalar channel h_i.
+
+        Returns (B, N, 3): [psi(m_i^2)=psi(<x,x>), psi(E_i)=psi(<x,e_t>), psi(<x,x_jet>)].
+        With refs=None the E and axis columns are zero, so h is seeded from the true
+        invariant m_i^2 alone and the network stays exactly rotation-equivariant (run F).
+        """
+        feat_m = psi(normsq4(x_aug))  # (B, N)
+        if refs is not None:
+            e_t = refs[:, 0:1, :]     # (B, 1, 4) — time axis (1,0,0,0); <x,e_t> = E
+            x_jet = refs[:, 1:2, :]   # (B, 1, 4) — jet 4-momentum; <x,x_jet> = axis alignment
+            feat_E = psi(dotsq4(x_aug, e_t))
+            feat_axis = psi(dotsq4(x_aug, x_jet))
+        else:
+            feat_E = torch.zeros_like(feat_m)
+            feat_axis = torch.zeros_like(feat_m)
+        return torch.stack([feat_m, feat_E, feat_axis], dim=-1)  # (B, N, 3)
+
+    def forward(self, x, t, jet_conditions, mask, ref_vectors=None):
         """
         Forward pass of the flow matching model.
+
+        Args:
+            x: (batch_size, max_particles, 4) particle 4-vectors (E, px, py, pz).
+            t: (batch_size,) time in [0, 1).
+            jet_conditions: (batch_size, cond_dim) conditioning vector.
+            mask: (batch_size, max_particles) float mask, 1=real, 0=padding.
+            ref_vectors: (batch_size, R, 4) reference 4-vectors (R=2: e_t, jet 4-momentum).
+                Required iff use_reference_vectors; ignored otherwise.
 
         Returns:
             v_theta: (batch_size, max_particles, 4) velocity field
         """
-    
-        t_emb = self.time_embedding(t) 
-        g0 = self.global_embedding(jet_conditions)  
-        # To preserve LE, pass scalar global PT value through each layer
-        # pt = jet_conditions[:, 1]
-        # print(f"{pt.shape=}")
-        
+        if self.use_reference_vectors and ref_vectors is None:
+            raise ValueError("use_reference_vectors=True requires ref_vectors of shape (B, R, 4).")
+
+        t_emb = self.time_embedding(t)
+        g0 = self.global_embedding(jet_conditions)
+
+        batch_size, num_particles, _ = x.shape
+
+        # References enter as unmasked virtual particles; build the augmented mask.
+        if self.use_reference_vectors:
+            refs = ref_vectors
+            num_refs = refs.shape[1]
+            ref_mask = torch.ones(batch_size, num_refs, device=mask.device, dtype=mask.dtype)
+            mask_aug = torch.cat([mask, ref_mask], dim=1)
+        else:
+            refs = None
+            num_refs = 0
+            mask_aug = mask
+
+        # Seed per-node scalars from the initial (augmented) state.
+        if self.use_node_scalars:
+            x_aug0 = torch.cat([x, refs], dim=1) if num_refs > 0 else x
+            seed_feats = self._node_seed_features(x_aug0, refs)     # (B, P+R, 3)
+            h = self.node_seed(seed_feats) * mask_aug.unsqueeze(-1)  # (B, P+R, node_scalar_dim)
+        else:
+            h = None
+
         x0 = x.clone()
+        x_particles = x
         g = g0.clone()
-        
+
         for i, layer in enumerate(self.layers):
-            x_new, g = layer(x, g0, g, t_emb, mask)
+            # References are fixed across layers: re-supply them unchanged each iteration and
+            # discard their displacement outputs — only real-particle rows carry state forward.
+            x_aug = torch.cat([x_particles, refs], dim=1) if num_refs > 0 else x_particles
+            x_new_aug, g, h = layer(x_aug, g0, g, t_emb, mask_aug, h)
+            x_new = x_new_aug[:, :num_particles]
             if self.use_residual_update:
                 alpha = 0.25 + i * 0.03
-                x = ((1 - alpha) * x) + (alpha * x_new)
+                x_particles = ((1 - alpha) * x_particles) + (alpha * x_new)
             else:
-                x = x_new
-            x = x * mask.unsqueeze(-1)
+                x_particles = x_new
+            x_particles = x_particles * mask.unsqueeze(-1)
 
-        velocity = x - x0
+        velocity = x_particles - x0
         return velocity * mask.unsqueeze(-1)
         
     def step_hyperbolic(
@@ -345,6 +440,7 @@ class LEFTJeN(nn.Module):
         c: float = 1.0,
         use_cfg: bool = False,
         guidance_weight: float = 2.0,
+        ref_vectors: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         Riemannian Euler step in the Poincaré ball.
@@ -361,12 +457,12 @@ class LEFTJeN(nn.Module):
         x_t = from_poincare_ball(y_t, c=c)
 
         # Model predicts velocity in Cartesian space
-        vel_cartesian = self.forward(x=x_t, t=t_batch, jet_conditions=jet_conditions, mask=mask)
+        vel_cartesian = self.forward(x=x_t, t=t_batch, jet_conditions=jet_conditions, mask=mask, ref_vectors=ref_vectors)
 
         # CFG in Cartesian space, before pushforward
         if use_cfg:
             null_cond = self.make_null_cond(jet_conditions)
-            vel_uncond = self.forward(x=x_t, t=t_batch, jet_conditions=null_cond, mask=mask)
+            vel_uncond = self.forward(x=x_t, t=t_batch, jet_conditions=null_cond, mask=mask, ref_vectors=ref_vectors)
             vel_cartesian = vel_cartesian + guidance_weight * (vel_cartesian - vel_uncond)
 
         # Push Cartesian velocity to ball tangent space at y_t
@@ -380,7 +476,7 @@ class LEFTJeN(nn.Module):
 
         return y_next * mask.unsqueeze(-1)
 
-    def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler', use_cfg=False, guidance_weight=2.0):
+    def step(self, x_t, jet_conditions, mask, t_start, t_end, method='euler', use_cfg=False, guidance_weight=2.0, ref_vectors=None):
         """
         Calculate the probability density at a particular time step
         """
@@ -390,13 +486,14 @@ class LEFTJeN(nn.Module):
 
         if method == 'euler':
             t_batch = t_start.unsqueeze(0).expand(batch_size)
-            vel = self.forward(x=x_t, t=t_batch, jet_conditions=jet_conditions, mask=mask)
+            vel = self.forward(x=x_t, t=t_batch, jet_conditions=jet_conditions, mask=mask, ref_vectors=ref_vectors)
             if use_cfg:
                 unconditional_vel = self.forward(
                     x=x_t,
                     t=t_batch,
                     jet_conditions=null_jet_conditions,
-                    mask=mask
+                    mask=mask,
+                    ref_vectors=ref_vectors
                 )
                 guided_vel = vel + guidance_weight * (vel - unconditional_vel)
                 vel = guided_vel
