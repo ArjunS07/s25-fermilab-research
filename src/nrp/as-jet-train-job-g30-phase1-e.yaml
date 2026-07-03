@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-job-g30-symbreak-b
+  name: as-jet-train-job-g30-phase1-e
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -27,7 +27,7 @@ spec:
             - |
               set -e
               set -ex
-              # Phase-1 ablation grid run B: references only (break isotropy to SO(2) about the jet axis)
+              # Phase-1 ablation grid run E: prior-only escape route: axis-aligned prior, no references/h_i
               apt-get update && apt-get install -y libffi-dev gcc g++ curl git wget build-essential
 
               mkdir -p /mnt/data
@@ -69,7 +69,7 @@ spec:
               cd /mnt/data/src
 
               UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
-              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-g30-symbreak-b"
+              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-g30-phase1-e"
               echo "Output path: $OUTPUT_PATH"
               mkdir $OUTPUT_PATH
               git -C /tmp/repo rev-parse HEAD > ${OUTPUT_PATH}/git_commit.txt
@@ -83,7 +83,7 @@ spec:
                 --n_samples=50000 --integration_steps=256 --n_layers=3 \
                 --output_path=${OUTPUT_PATH} --use_residual \
                 --use_cosine_lr --use_time_sampling --no-use_curriculum \
-                --use_reference_vectors --prior_dist=isotropic_com \
+                --prior_dist=axis_aligned \
                 | tee -a ${OUTPUT_PATH}/logs.txt
           volumeMounts:
             - mountPath: /mnt/data

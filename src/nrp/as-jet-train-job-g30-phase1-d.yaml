@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-job-g30-symbreak-d
+  name: as-jet-train-job-g30-phase1-d
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -69,7 +69,7 @@ spec:
               cd /mnt/data/src
 
               UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
-              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-g30-symbreak-d"
+              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-g30-phase1-d"
               echo "Output path: $OUTPUT_PATH"
               mkdir $OUTPUT_PATH
               git -C /tmp/repo rev-parse HEAD > ${OUTPUT_PATH}/git_commit.txt
