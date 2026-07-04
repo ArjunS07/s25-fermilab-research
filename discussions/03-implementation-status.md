@@ -39,6 +39,25 @@ locally.
   `phi_e` input 50→2 dims); verified equivariant.
 - `--sampler {euler,heun}`: Heun RK2 integrator.
 
+**Phase 3.1 — attention backbone** (flag-gated)
+- `--use_attention`: replaces the per-edge sigmoid soft-gate with a softmax over sending
+  neighbours using Lorentz-invariant per-edge logits (`masked_neighbor_softmax` in
+  `models/LEFT_JeN.py`); equivariance preserved, self-loops/padding excluded. Default off.
+
+**Phase 4 — mass-shell RFM geometry** (flag-gated, built ahead; not yet run)
+- `util/mass_shell.py`: hyperboloid model of the mass shell `H_m` (float64), separate from the
+  Poincaré `util/hyperbolic.py` so existing hyperbolic runs are unchanged. exp/log maps,
+  geodesic distance/interpolant/conditional field, tangent pushforward, masked Riemannian loss.
+- `model.hyperbolic_model = "poincare"|"mass_shell"` + `regulator_mass`. Training branch, a
+  geodesic Euler sampler (`_step_mass_shell`), and `generate_samples` integration branch all
+  wired. `cache_icp.py` gains `cache.geometry="mass_shell"` (permutation-only geodesic
+  Hungarian with the padding-at-apex masking guard). `configs/g30-mass-shell.yaml` written.
+
+**Phase 5 — results tooling**
+- `util/ks.py` (dependency-free KS) + eval-time isotropy KS in `util/metrics.py` (folded into
+  `summary.json`); `analysis/aggregate_grid.py` builds the A–F ablation table with per-run
+  PASS/ABORT verdicts (recomputes KS from `samples_subset.pt` when absent).
+
 ## Deployment (NRP / Kubernetes, `src/nrp/`)
 
 - **Phase-1 grid**: `as-jet-train-job-g30-phase1-{a..f}.yaml`. A baseline, B refs,
@@ -77,14 +96,13 @@ key.subkey=value ...]`; the legacy per-flag argparse interface has been removed.
 
 - **Phase 2 leftovers**: LR re-sweep run (knob exists, sweep not run — must be *after*
   Phase 1), curriculum re-ablation.
-- **Phase 3 — backbone**: invariant-logit softmax attention (3.1); depth/width scaling
-  (3.2). **L-GATr head-to-head (3.3) deferred** — predefine metric set first.
-- **Phase 4 — mass-shell RFM (research headline, conditional on Phase 1 success)**:
-  rewrite `util/hyperbolic.py` as hyperboloid/mass-shell (float64 by default), integrate via
-  `--use_hyperbolic`, park padding at (m,0,0,0) **with masking enforced inside the geodesic
-  ICP/OT cost**, regulator-mass ablation, geodesic ICP in `cache_icp.py`, Euclidean-vs-RFM
-  head-to-head.
-- **Phase 5**: full ablation table, steps-vs-quality curves, 150p then JetClass.
+- **Phase 3 — backbone**: attention (3.1) **built, flag-gated**; depth/width scaling (3.2) is
+  config-only. **L-GATr head-to-head (3.3) deferred** — predefine metric set first.
+- **Phase 4 — mass-shell RFM**: geometry/ICP/wiring **built and flag-gated** (see above). Still
+  to run (needs the cluster + trained models): the regulator-mass ablation and the
+  Euclidean-vs-RFM head-to-head; prioritise as the headline only if Phase 1 succeeds.
+- **Phase 5**: aggregator + isotropy KS **built**. Remaining: steps-vs-quality curves, 150p
+  then JetClass (need real runs).
 
 ## Execution order
 
