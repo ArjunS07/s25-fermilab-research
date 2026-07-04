@@ -21,6 +21,7 @@ from util.mass_shell import (
     pushforward_to_tangent,
     geodesic_interpolant,
     conditional_vector_field,
+    geodesic_cost_matrix,
     mass_shell_loss,
 )
 
@@ -133,6 +134,23 @@ def test_loss_zero_when_pred_equals_target_and_masks():
     other = u + 1.0
     mask_zero = torch.zeros_like(mask)
     assert mass_shell_loss(other, u, mask_zero).item() == pytest.approx(0.0, abs=1e-9)
+
+
+def test_geodesic_cost_matrix_matches_pairwise_distance():
+    """cost[i,j] equals the geodesic distance between shell-lifted x0_i and x1_j; diagonal of a
+    self-cost is (near) zero, so an identity assignment is optimal."""
+    g = torch.Generator().manual_seed(12)
+    n, m = 5, 0.1
+    x = torch.cat([torch.zeros(n, 1, dtype=torch.float64),
+                   (torch.rand(n, 3, generator=g, dtype=torch.float64) * 2 - 1) * 0.6], dim=-1)
+    cost = geodesic_cost_matrix(x, x, m)
+    assert cost.shape == (n, n)
+    # Diagonal (same point) is the minimum of its row.
+    assert torch.allclose(torch.diagonal(cost), cost.min(dim=1).values, atol=1e-6)
+    # Matches an explicit pairwise call.
+    expected = geodesic_distance(project_to_shell(x, m).unsqueeze(1),
+                                 project_to_shell(x, m).unsqueeze(0), m)
+    assert torch.allclose(cost, expected, atol=1e-12)
 
 
 def test_float32_in_float32_out():

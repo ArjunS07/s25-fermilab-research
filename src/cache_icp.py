@@ -29,16 +29,17 @@ from scipy.spatial.transform import Rotation as R
 from tqdm import tqdm
 
 
-from data import get_data_path
 from config import CacheRunConfig, build_config, parse_config_cli, cache_config_to_namespace
+
+# NB: data / coordinates / distributions pull in jetnet, so they are imported lazily inside
+# __main__ (below). This keeps the assignment worker functions importable — and unit-testable —
+# without a jetnet install.
 
 
 def canonical_cache_path(cache_dir: str, jet_types: list, num_particles: int) -> str:
     """Return the canonical path for an ICP cache given its config."""
     key = "_".join(sorted(jet_types)) + f"_p{num_particles}"
     return os.path.join(cache_dir, key, "icp_cache.pkl")
-from util.coordinates import transform_rel_particle_coordinates_to_cartesian
-from util.distributions import gen_initial_distribution
 
 MAX_N_PARTICLES = 150
 RANDOM_SEED = 42
@@ -85,6 +86,29 @@ def _align_point_clouds_till_converge(x_0_orig, x1, max_iter=200):
 
     return best_x_0, best_perm, best_rot
 
+def _permute_geodesic(x_0_real, x_1_real, m):
+    """Permutation-only assignment minimising total geodesic distance on the mass shell.
+
+    Both clouds are lifted onto H_m (regulator mass m), the pairwise geodesic-distance matrix
+    is built, and a single Hungarian assignment gives the net permutation. No rotation step —
+    Euclidean Kabsch is not a valid isometry of the shell (plan Phase 4).
+
+    x_0_real, x_1_real : (n_real, 4) float64 tensors (normalised space).
+    Returns (perm, rot) where perm is (n_real,) int32 and rot is the 3x3 identity (permutation
+    only), so the cache format is unchanged.
+    """
+    from util.mass_shell import geodesic_cost_matrix
+
+    n_real = x_0_real.shape[0]
+    # Pairwise geodesic cost: cost[i, j] = d(prior_i, target_j). Only real particles enter,
+    # so no real particle can ever be assigned to apex-parked padding (masking guard).
+    cost = geodesic_cost_matrix(x_0_real, x_1_real, m)             # (n, n)
+    cost_np = cost.numpy().astype(np.float64)
+    _, col_ind = linear_sum_assignment(cost_np)
+    perm = np.arange(n_real, dtype=np.int32)[col_ind]
+    return perm, np.eye(3, dtype=np.float32)
+
+
 # must be top-level for multiprocessing
 def _icp_permute_worker(task):
     """
@@ -100,18 +124,23 @@ def _icp_permute_worker(task):
     At training time a fresh x_0 is drawn from the prior, the stored permutation
     is applied, then the stored rotation is applied to the 3-momenta.
 
-    task : (idx, x_0_full, x_1_full, n_real, max_iter)
-        idx       – global index in the cache array (returned to reconstruct order)
-        x_0_full  – (max_particles, 4) float32 numpy array  (prior, normalised)
-        x_1_full  – (max_particles, 4) float32 numpy array  (target, normalised)
-        n_real    – number of real particles (rest is zero-padding)
-        max_iter  – maximum ICP iterations
+    For geometry == "mass_shell" the alternating step is replaced by a single permutation-only
+    Hungarian assignment on geodesic distance over the mass shell (rot stays identity).
+
+    task : (idx, x_0_full, x_1_full, n_real, max_iter, geometry, regulator_mass)
+        idx            – global index in the cache array (returned to reconstruct order)
+        x_0_full       – (max_particles, 4) float32 numpy array  (prior, normalised)
+        x_1_full       – (max_particles, 4) float32 numpy array  (target, normalised)
+        n_real         – number of real particles (rest is zero-padding)
+        max_iter       – maximum ICP iterations (euclidean geometry only)
+        geometry       – "euclidean" or "mass_shell"
+        regulator_mass – shell mass m (mass_shell geometry only)
 
     Returns (idx, perm_full, rot) where:
         perm_full  – (max_particles,) int32: net permutation (identity for padding)
         rot        – (3, 3) float32: cumulative rotation matrix for 3-momenta
     """
-    idx, x_0_full, x_1_full, n_real, max_iter = task
+    idx, x_0_full, x_1_full, n_real, max_iter, geometry, regulator_mass = task
 
     max_particles = x_0_full.shape[0]
     perm_full = np.arange(max_particles, dtype=np.int32)
@@ -120,15 +149,18 @@ def _icp_permute_worker(task):
     if n_real == 0:
         return idx, perm_full, rot
 
+    # Only the real particles enter the cost — padding never participates in the assignment.
     x_0_real = x_0_full[:n_real]   # (n_real, 4)
     x_1_real = x_1_full[:n_real]   # (n_real, 4)
 
-    # align_point_clouds_till_converge expects tensors (calls .clone() internally).
-    # Use float64 so scipy's Kabsch solver works without dtype promotion issues.
+    # Use float64 so the geometry / scipy Kabsch solver work without dtype promotion issues.
     x_0_t = torch.from_numpy(x_0_real.astype(np.float64))
     x_1_t = torch.from_numpy(x_1_real.astype(np.float64))
 
-    _x_0_aligned, best_perm, best_rot = _align_point_clouds_till_converge(x_0_t, x_1_t, max_iter=max_iter)
+    if geometry == "mass_shell":
+        best_perm, best_rot = _permute_geodesic(x_0_t, x_1_t, regulator_mass)
+    else:
+        _x_0_aligned, best_perm, best_rot = _align_point_clouds_till_converge(x_0_t, x_1_t, max_iter=max_iter)
 
     perm_full[:n_real] = best_perm
     rot = best_rot.astype(np.float32)
@@ -147,6 +179,12 @@ def _compute_scale(X_transformed):
 
 
 if __name__ == "__main__":
+    # Heavy, jetnet-pulling deps imported here so the module (and its worker functions) stay
+    # importable for unit tests without a jetnet install.
+    from data import get_data_path
+    from util.coordinates import transform_rel_particle_coordinates_to_cartesian
+    from util.distributions import gen_initial_distribution
+
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     torch.manual_seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
@@ -215,8 +253,11 @@ if __name__ == "__main__":
         )
     x_0_np = np.concatenate(x_0_parts, axis=0)   # (N, P, 4)
 
+    logging.info(f"ICP geometry: {args.geometry}"
+                 + (f" (regulator mass m={args.regulator_mass})" if args.geometry == "mass_shell" else ""))
     tasks = [
-        (i, x_0_np[i], x_1_np[i], int(n_real_np[i]), args.icp_max_iter)
+        (i, x_0_np[i], x_1_np[i], int(n_real_np[i]), args.icp_max_iter,
+         args.geometry, args.regulator_mass)
         for i in range(n_total)
     ]
 
@@ -240,6 +281,8 @@ if __name__ == "__main__":
         "final_scale": final_scale,
         "num_particles": args.num_particles,
         "n_samples": n_total,
+        "geometry": args.geometry,
+        "regulator_mass": args.regulator_mass,
     }
     with open(cache_path, "wb") as f:
         pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)

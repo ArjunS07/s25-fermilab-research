@@ -138,6 +138,20 @@ def conditional_vector_field(x_t: torch.Tensor, x_1: torch.Tensor, t: torch.Tens
     return log_map(x_t, x_1, m) / denom
 
 
+def geodesic_cost_matrix(x_0_real: torch.Tensor, x_1_real: torch.Tensor,
+                         m: float) -> torch.Tensor:
+    """Pairwise geodesic-distance cost for ICP assignment: cost[i, j] = d(shell(x0_i), shell(x1_j)).
+
+    Both clouds are lifted onto H_m first. Only the real particles passed in participate, so a
+    real particle can never be matched to apex-parked padding (the plan's masking guard).
+
+    x_0_real, x_1_real : (n, 4) 4-vectors (normalised space). Returns (n, n) cost, input dtype.
+    """
+    p0 = project_to_shell(x_0_real, m)
+    p1 = project_to_shell(x_1_real, m)
+    return geodesic_distance(p0.unsqueeze(1), p1.unsqueeze(0), m)
+
+
 def mass_shell_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor,
                     m: float = 1.0) -> torch.Tensor:
     """Masked Riemannian MSE on the shell: mean over real particles of ||pred - target||_g^2,

@@ -108,6 +108,11 @@ class CacheConfig(BaseModel):
     icp_max_iter: int = 1000
     skip_if_exists: bool = True
     n_samples: Optional[int] = None
+    # Geometry of the ICP assignment cost. "euclidean" = alternating permutation+Kabsch ICP
+    # (the default). "mass_shell" = permutation-only Hungarian on geodesic distance over the
+    # mass shell (Phase 4); no rotation, since Euclidean Kabsch is not valid on the shell.
+    geometry: Literal["euclidean", "mass_shell"] = "euclidean"
+    regulator_mass: float = 0.1
 
 
 class TrainRunConfig(BaseModel):
@@ -270,6 +275,8 @@ def cache_config_to_namespace(cfg: CacheRunConfig) -> argparse.Namespace:
         n_workers=cfg.cache.n_workers,
         icp_max_iter=cfg.cache.icp_max_iter,
         skip_if_exists=cfg.cache.skip_if_exists,
+        geometry=cfg.cache.geometry,
+        regulator_mass=cfg.cache.regulator_mass,
     )
 
 
