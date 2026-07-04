@@ -704,6 +704,8 @@ if __name__ == "__main__":
                 "metrics": {k: eval_info.get(k) for k in (
                     "w1m", "w1p", "w1efp", "fpd",
                     "frac_negative_energy", "frac_spacelike", "msq_median",
+                    "isotropy_ks_costheta", "isotropy_ks_costheta_p",
+                    "isotropy_ks_phi", "isotropy_ks_phi_p",
                 )},
             }
             with open(f"{model_output_path}/summary.json", "w") as f:

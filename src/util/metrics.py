@@ -7,6 +7,7 @@ from jetnet.utils import EtaPhiPtE_to_relEtaPhiPt, cartesian_to_EtaPhiPtE
 import jetnet.evaluation as jetnet_eval
 
 from util.minkowski_utils import normsq4
+from util.ks import ks_statistic_vs_uniform
 
 # Fixed seed so the random jet-phi assignment (and hence the isotropy reference) is
 # reproducible across runs — the harness is a fixed yardstick (experiment plan 0.4).
@@ -60,6 +61,18 @@ def _plot_physicality_and_isotropy(gen_cartesian, test_polar_abs, output_path):
     # --- Isotropy: cos(theta), phi of the per-jet total 3-momentum, generated vs test ---
     gen_total = gen[..., 1:4].sum(dim=1)  # (N, 3), padding already zero
     gen_cos, gen_phi = _total_momentum_direction(gen_total)
+
+    # KS of the generated jet-axis direction vs the isotropic (uniform) reference: cos(theta)
+    # ~ U[-1,1], phi ~ U[-pi, pi]. Small p => departs from isotropy (symmetry successfully
+    # broken). This is the plan's per-run abort signal — recorded in metrics.csv / summary.json.
+    ks_cos_d, ks_cos_p = ks_statistic_vs_uniform(gen_cos.numpy(), -1.0, 1.0)
+    ks_phi_d, ks_phi_p = ks_statistic_vs_uniform(gen_phi.numpy(), -np.pi, np.pi)
+    diag.update({
+        "isotropy_ks_costheta": ks_cos_d,
+        "isotropy_ks_costheta_p": ks_cos_p,
+        "isotropy_ks_phi": ks_phi_d,
+        "isotropy_ks_phi_p": ks_phi_p,
+    })
 
     eta, phi_t, pt = test_polar_abs[..., 0], test_polar_abs[..., 1], test_polar_abs[..., 2]
     test_real = pt > 0
