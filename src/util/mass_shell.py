@@ -33,6 +33,11 @@ from util.minkowski_utils import normsq4, dotsq4
 
 # Numerical stability floor (in float64 space).
 _EPS = 1e-12
+# Cap on the geodesic step argument s = ||u||/m so cosh/sinh cannot overflow float64 (which
+# happens for a near-lightlike shell, small m, under aggressive velocities such as CFG). ||u||
+# is Lorentz-invariant, so clamping s preserves covariance; a genuine trained field never
+# saturates this — it only prevents a hard NaN from a pathological step.
+_S_MAX = 30.0
 
 
 def _to_f64(*tensors):
@@ -68,9 +73,15 @@ def geodesic_distance(p: torch.Tensor, q: torch.Tensor, m: float) -> torch.Tenso
 
 
 def _tangent_norm(u64: torch.Tensor) -> torch.Tensor:
-    """||u|| = sqrt(-<u,u>) for a (float64) tangent vector, shape (..., 1)."""
+    """||u|| = sqrt(-<u,u>) for a (float64) tangent vector, shape (..., 1).
+
+    Returns the *true* norm (0 for a zero vector). Callers clamp the denominator where they
+    divide by it — keeping the norm exact matters because it multiplies sinh(s), which can be
+    huge when s is clamped; a nonzero floor here would leak macroscopically off the shell. The
+    geometry ops are used to build data-side targets/inputs and are never back-propagated
+    through, so sqrt(0) needs no gradient smoothing."""
     nsq = (-normsq4(u64)).clamp(min=0.0)
-    return torch.sqrt(nsq + _EPS).unsqueeze(-1)
+    return torch.sqrt(nsq).unsqueeze(-1)
 
 
 def exp_map(p: torch.Tensor, u: torch.Tensor, m: float) -> torch.Tensor:
@@ -80,9 +91,10 @@ def exp_map(p: torch.Tensor, u: torch.Tensor, m: float) -> torch.Tensor:
     """
     dtype = p.dtype
     p64, u64 = _to_f64(p, u)
-    un = _tangent_norm(u64)                          # (..., 1)
-    s = un / m
-    out = torch.cosh(s) * p64 + m * torch.sinh(s) * (u64 / un)
+    un = _tangent_norm(u64)                          # (..., 1), true norm (0 for zero vector)
+    s = (un / m).clamp(max=_S_MAX)                    # invariant clamp: no cosh/sinh overflow
+    direction = u64 / un.clamp(min=_EPS)             # unit tangent (0 when u is 0)
+    out = torch.cosh(s) * p64 + m * torch.sinh(s) * direction
     return out.to(dtype)
 
 
@@ -95,10 +107,10 @@ def log_map(p: torch.Tensor, q: torch.Tensor, m: float) -> torch.Tensor:
     p64, q64 = _to_f64(p, q)
     pq = dotsq4(p64, q64).unsqueeze(-1)              # (..., 1)
     w = q64 - (pq / (m * m)) * p64                   # component of q in T_pH
-    w_norm = _tangent_norm(w)                        # (..., 1)
+    w_norm = _tangent_norm(w)                        # (..., 1), true norm
     arg = torch.clamp(pq / (m * m), min=1.0 + _EPS)
     d = m * torch.acosh(arg)                         # (..., 1)
-    out = d * (w / w_norm)
+    out = d * (w / w_norm.clamp(min=_EPS))           # 0 when p == q (d -> 0, w -> 0)
     return out.to(dtype)
 
 

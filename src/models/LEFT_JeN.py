@@ -509,7 +509,7 @@ class LEFTJeN(nn.Module):
         guidance_weight: float = 2.0,
         ref_vectors: torch.Tensor = None,
         hyperbolic_model: str = "poincare",
-        regulator_mass: float = 0.1,
+        regulator_mass: float = 0.5,
     ) -> torch.Tensor:
         """
         Riemannian Euler step in the Poincaré ball (default) or on the mass shell.
@@ -567,7 +567,7 @@ class LEFTJeN(nn.Module):
         (a Cartesian on-shell 4-vector), so it is fed to the model directly; the predicted
         Cartesian velocity is projected onto the tangent space and the geodesic exp map takes
         the step. Masked/padded rows stay put (zero tangent velocity) and remain on the shell."""
-        from util.mass_shell import exp_map, pushforward_to_tangent
+        from util.mass_shell import exp_map, pushforward_to_tangent, project_to_shell
 
         batch_size = y_t.shape[0]
         t_batch = t_start.unsqueeze(0).expand(batch_size)
@@ -582,7 +582,9 @@ class LEFTJeN(nn.Module):
         vel_tan = pushforward_to_tangent(y_t, vel_cartesian, m) * mask.unsqueeze(-1)
         dt = t_end - t_start
         y_next = exp_map(y_t, vel_tan * dt, m)
-        return y_next
+        # Re-project onto H_m to kill any numerical drift off the shell accumulated over the
+        # many integration steps (the mass-shell analogue of clamp_to_ball on the Poincaré path).
+        return project_to_shell(y_next, m)
 
     def _guided_velocity(self, x, t_scalar, jet_conditions, mask, use_cfg,
                          guidance_weight, ref_vectors, null_jet_conditions):

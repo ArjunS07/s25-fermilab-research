@@ -42,7 +42,10 @@ class ModelConfig(BaseModel):
     # When use_hyperbolic, which Riemannian geometry: "poincare" (radial-tanh ball, the
     # original) or "mass_shell" (hyperboloid at <p,p>=regulator_mass^2, Phase 4).
     hyperbolic_model: Literal["poincare", "mass_shell"] = "poincare"
-    regulator_mass: float = 0.1
+    # Shell mass in normalised units (momenta are O(1) after final_scale). This is the primary
+    # Phase-4 ablation knob; smaller = more massless/relativistic but numerically stiffer
+    # (near-light-like, high curvature). 0.5 is a conditioned starting point.
+    regulator_mass: float = 0.5
 
 
 class TrainingConfig(BaseModel):
@@ -116,7 +119,7 @@ class CacheConfig(BaseModel):
     # (the default). "mass_shell" = permutation-only Hungarian on geodesic distance over the
     # mass shell (Phase 4); no rotation, since Euclidean Kabsch is not valid on the shell.
     geometry: Literal["euclidean", "mass_shell"] = "euclidean"
-    regulator_mass: float = 0.1
+    regulator_mass: float = 0.5
 
 
 class TrainRunConfig(BaseModel):

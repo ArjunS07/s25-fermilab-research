@@ -155,6 +155,22 @@ def test_geodesic_cost_matrix_matches_pairwise_distance():
     assert torch.allclose(cost, expected, atol=1e-12)
 
 
+def test_exp_map_clamps_stiff_regime():
+    """A pathologically large tangent step (small m, near-light-like shell) stays FINITE thanks
+    to the invariant clamp on s = ||u||/m (guards cosh/sinh overflow). At the resulting scale
+    (|q| ~ 1e13) the point is still on the shell in exact arithmetic, but <q,q> = m^2 is below
+    the cancellation floor of normsq4, so we only assert finiteness + that <q,q> is negligible
+    relative to |q|^2 (a near-light-like on-shell point). Tight on-shell is covered elsewhere."""
+    m = 0.05
+    p = project_to_shell(torch.tensor([[0.0, 3.0, -2.0, 1.0]], dtype=torch.float64), m)
+    v = torch.tensor([[0.0, 500.0, -400.0, 300.0]], dtype=torch.float64)  # huge -> s clamped
+    u = pushforward_to_tangent(p, v, m)
+    q = exp_map(p, u, m)
+    assert torch.isfinite(q).all()
+    assert (q.abs().max() > 1e6)  # clamp engaged, step is large but finite
+    assert normsq4(q).abs().item() < 1e-6 * float((q * q).sum())
+
+
 def test_model_mass_shell_step_stays_on_shell():
     """model.step_hyperbolic(hyperbolic_model='mass_shell') keeps real particles on H_m."""
     m = 0.1

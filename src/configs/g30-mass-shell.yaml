@@ -1,6 +1,7 @@
 # Phase 4 mass-shell RFM run (gluon-30). Flag-gated; written for a future launch, NOT yet run.
 # Pairs naturally with a mass_shell ICP cache built by cache_icp.py with
-#   --set cache.geometry=mass_shell --set cache.regulator_mass=0.1
+#   --set cache.geometry=mass_shell --set cache.regulator_mass=0.5
+# regulator_mass is the primary ablation knob (smaller = more massless but stiffer).
 data:
   jet_types: ["g"]
   num_particles: 30
@@ -9,7 +10,7 @@ model:
   use_residual: true
   use_hyperbolic: true
   hyperbolic_model: mass_shell
-  regulator_mass: 0.1
+  regulator_mass: 0.5
 
 training:
   # The shell geometry interpolates on Cartesian on-shell 4-vectors; train_space (polar vs

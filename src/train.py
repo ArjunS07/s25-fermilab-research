@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 import pickle
 import logging
 
@@ -306,6 +307,7 @@ if __name__ == "__main__":
 
     
     total_epochs = start_epoch + args.num_epochs
+    train_start_time = time.time()
     for epoch in range(start_epoch, total_epochs):
         epoch_loss = 0
         num_batches = 0
@@ -699,10 +701,15 @@ if __name__ == "__main__":
                 "final_loss": losses[-1] if losses else None,
                 "num_epochs": total_epochs,
                 "git_commit": git_commit,
+                # Provenance/scale knobs useful when comparing runs at a glance.
+                "n_parameters": sum(p.numel() for p in raw_model.parameters()),
+                "train_seconds": round(time.time() - train_start_time, 1),
+                "hyperbolic_model": args.hyperbolic_model if args.use_hyperbolic else None,
+                "regulator_mass": args.regulator_mass if (args.use_hyperbolic and args.hyperbolic_model == "mass_shell") else None,
                 "config": run_config,
                 "full_config": full_config,
                 "metrics": {k: eval_info.get(k) for k in (
-                    "w1m", "w1p", "w1efp", "fpd",
+                    "w1m", "w1p", "w1efp", "fpd", "cov_mmd",
                     "frac_negative_energy", "frac_spacelike", "msq_median",
                     "isotropy_ks_costheta", "isotropy_ks_costheta_p",
                     "isotropy_ks_phi", "isotropy_ks_phi_p",

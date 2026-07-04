@@ -55,7 +55,7 @@ def generate_samples(
         use_hyperbolic=False,
         hyperbolic_c=1.0,
         hyperbolic_model='poincare',
-        regulator_mass=0.1,
+        regulator_mass=0.5,
         use_reference_vectors=False,
         sampler='euler',
 ):
