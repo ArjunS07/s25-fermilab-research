@@ -135,6 +135,7 @@ if __name__ == "__main__":
         use_reference_vectors=args.use_reference_vectors,
         use_node_scalars=args.use_node_scalars,
         use_adaln=args.use_adaln,
+        use_attention=args.use_attention,
     ).to(device)
     
     start_epoch = 0
@@ -172,6 +173,7 @@ if __name__ == "__main__":
         "use_reference_vectors": args.use_reference_vectors,
         "use_node_scalars": args.use_node_scalars,
         "use_adaln": args.use_adaln,
+        "use_attention": args.use_attention,
         "jet_types": args.jet_types,
         "final_scale": float(final_scale),
     }
@@ -183,7 +185,7 @@ if __name__ == "__main__":
         if prev is not None:
             mism = {k: (prev.get(k), run_config.get(k))
                     for k in ("n_layers", "n_hidden", "num_particles", "use_reference_vectors",
-                              "use_node_scalars", "use_adaln")
+                              "use_node_scalars", "use_adaln", "use_attention")
                     if prev.get(k) != run_config.get(k)}
             if mism:
                 print(f"WARNING: resume architecture flags differ from checkpoint: {mism}. "

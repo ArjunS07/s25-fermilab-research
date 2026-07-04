@@ -54,7 +54,7 @@ def parse_args():
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 _ARCH_KEYS = ("n_hidden", "n_layers", "use_residual", "use_reference_vectors",
-              "use_node_scalars", "use_adaln", "use_hyperbolic")
+              "use_node_scalars", "use_adaln", "use_attention", "use_hyperbolic")
 
 
 def _resolve_architecture(args, ckpt):
@@ -83,7 +83,7 @@ def _resolve_architecture(args, ckpt):
 
 def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
                      num_particles, device, use_reference_vectors=False, use_node_scalars=False,
-                     use_adaln=False, preloaded_ckpt=None):
+                     use_adaln=False, use_attention=False, preloaded_ckpt=None):
     model = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=num_particles,
@@ -94,6 +94,7 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
         use_reference_vectors=use_reference_vectors,
         use_node_scalars=use_node_scalars,
         use_adaln=use_adaln,
+        use_attention=use_attention,
     ).to(device)
 
     ckpt = preloaded_ckpt if preloaded_ckpt is not None else torch.load(checkpoint_path, map_location=device)
@@ -150,6 +151,7 @@ def main():
         use_reference_vectors=args.use_reference_vectors,
         use_node_scalars=args.use_node_scalars,
         use_adaln=args.use_adaln,
+        use_attention=args.use_attention,
         preloaded_ckpt=ckpt,
     )
 

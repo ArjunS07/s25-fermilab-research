@@ -11,7 +11,7 @@ spec:
       volumes:
         - name: as-train-pvc
           persistentVolumeClaim:
-            claimName: as-jet-train-pvc
+            claimName: as-jet-train-pvc-2
 
       containers:
         - name: train
@@ -38,7 +38,7 @@ spec:
               # --- Frozen-harness gate (experiment plan 0.4) ---
               # Pin every Phase-1 run to one commit so grid numbers are comparable. Replace the
               # placeholder with the frozen SHA before launching; the run records it below.
-              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              GIT_COMMIT="a8f5d55fe2600c63c65bdbc2b8812b11645206ea"
               if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
                 echo "ERROR: GIT_COMMIT is not pinned. Set it to the frozen harness commit SHA"
                 echo "       before launching a Phase-1 grid run (experiment plan hard gate)."

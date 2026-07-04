@@ -11,6 +11,27 @@ def psi(p):
     p = torch.clamp(p, -1e4, 1e4)
     return torch.sign(p) * torch.log1p(torch.abs(p))
 
+
+def masked_neighbor_softmax(logits: torch.Tensor, pair_mask: torch.Tensor) -> torch.Tensor:
+    """Softmax of per-edge ``logits`` over sending neighbors j, for each receiving node i.
+
+    Self-loops (the diagonal) and padded pairs are removed from the softmax support, so the
+    weights over the real j != i neighbours sum to 1. A node with no valid neighbour (e.g. a
+    single-particle jet) softmaxes over an all-``-inf`` row → the result is set to all zeros
+    so it contributes nothing and stays finite (no NaN).
+
+    logits, pair_mask : (batch, max_particles, max_particles)
+    Returns             (batch, max_particles, max_particles) attention weights.
+    """
+    max_particles = logits.shape[1]
+    eye = torch.eye(max_particles, device=logits.device, dtype=logits.dtype).unsqueeze(0)
+    support = pair_mask * (1.0 - eye)                        # real pairs with j != i
+    neg_inf = torch.finfo(logits.dtype).min
+    masked_logits = logits.masked_fill(support == 0, neg_inf)
+    attn = torch.softmax(masked_logits, dim=2)
+    row_has_valid = support.sum(dim=2, keepdim=True) > 0
+    return torch.where(row_has_valid, attn, torch.zeros_like(attn))
+
 class TimeEmbedding(nn.Module):
     """
     Random Fourier Features for time embedding following FPCD (Mikuni et al 2023)
@@ -126,13 +147,15 @@ class GlobalEmbedding(nn.Module):
 
 class LorentzEquivariantLayer(nn.Module):
     def __init__(self, embed_dim=128, message_dim=128, hidden_dim=128,
-                 use_node_scalars=False, node_scalar_dim=128, use_adaln=False):
+                 use_node_scalars=False, node_scalar_dim=128, use_adaln=False,
+                 use_attention=False):
         super().__init__()
         self.embed_dim = embed_dim
         self.message_dim = message_dim
         self.use_node_scalars = use_node_scalars
         self.node_scalar_dim = node_scalar_dim
         self.use_adaln = use_adaln
+        self.use_attention = use_attention
 
         # Message computation: phi_e^l.
         # Base per-edge inputs: psi(||x_i - x_j||), psi(<x_i, x_j>) [+ h_i, h_j].
@@ -160,6 +183,13 @@ class LorentzEquivariantLayer(nn.Module):
 
         # Message aggregation scalar: phi_m^l — Sigmoid gives soft gate in [0,1]
         self.phi_m = PhiMLP(message_dim, [hidden_dim, hidden_dim], 1, output_activation=nn.Sigmoid())
+
+        # Attention aggregation (Phase 3.1): a Lorentz-invariant logit per edge (function of the
+        # invariant message content only) that is softmax-normalized over the sending neighbors j.
+        # Replaces the sigmoid soft-gate when enabled; equivariance is preserved because the
+        # logits are invariant. Gated by use_attention (off => byte-for-byte the sigmoid path).
+        if use_attention:
+            self.phi_attn = PhiMLP(message_dim, [hidden_dim, hidden_dim], 1)
 
         # Global embedding update: phi_g^l (per-jet, cheap; keeps explicit conditioning)
         global_input_dim = embed_dim + embed_dim + embed_dim + message_dim  # g^0, g^l, t_emb, aggregated_msg
@@ -248,8 +278,14 @@ class LorentzEquivariantLayer(nn.Module):
             messages = messages * (1 + scale) + shift
             messages = messages * pair_mask_exp
 
-        # Compute message scalings: phi_m^l  
-        message_scalings = self.phi_m(messages).squeeze(-1)  # (batch_size, max_particles, max_particles)
+        # Compute message scalings.
+        if self.use_attention:
+            # Invariant-logit softmax attention: normalize over the sending neighbors j per node i.
+            # Logits are functions of the invariant messages only → equivariance is preserved.
+            logits = self.phi_attn(messages).squeeze(-1)  # (batch_size, max_particles, max_particles)
+            message_scalings = masked_neighbor_softmax(logits, pair_mask)
+        else:
+            message_scalings = self.phi_m(messages).squeeze(-1)  # (batch_size, max_particles, max_particles)
         message_scalings = message_scalings * pair_mask
         
         # Cache message aggregation for global update
@@ -316,7 +352,7 @@ class LEFTJeN(nn.Module):
                  num_layers=6, message_dim=128, hidden_dim=128,
                  use_residual_update=True, include_pt=False,
                  use_reference_vectors=False, use_node_scalars=False,
-                 node_scalar_dim=None, use_adaln=False):
+                 node_scalar_dim=None, use_adaln=False, use_attention=False):
         super().__init__()
         self.max_particles = max_particles
         self.embed_dim = embed_dim
@@ -327,6 +363,7 @@ class LEFTJeN(nn.Module):
         self.use_reference_vectors = use_reference_vectors
         self.use_node_scalars = use_node_scalars
         self.use_adaln = use_adaln
+        self.use_attention = use_attention
         self.node_scalar_dim = node_scalar_dim if node_scalar_dim is not None else embed_dim
         # Number of reference virtual particles when enabled: e_t=(1,0,0,0) and jet 4-momentum.
         self.num_references = 2
@@ -345,7 +382,8 @@ class LEFTJeN(nn.Module):
             LorentzEquivariantLayer(embed_dim, message_dim, hidden_dim,
                                     use_node_scalars=use_node_scalars,
                                     node_scalar_dim=self.node_scalar_dim,
-                                    use_adaln=use_adaln)
+                                    use_adaln=use_adaln,
+                                    use_attention=use_attention)
             for _ in range(num_layers)
         ])
 

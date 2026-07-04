@@ -37,6 +37,7 @@ class ModelConfig(BaseModel):
     use_reference_vectors: bool = False
     use_node_scalars: bool = False
     use_adaln: bool = False
+    use_attention: bool = False
     use_hyperbolic: bool = False
 
 
@@ -215,6 +216,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         use_time_sampling=cfg.training.use_time_sampling,
         use_reference_vectors=cfg.model.use_reference_vectors,
         use_node_scalars=cfg.model.use_node_scalars,
+        use_attention=cfg.model.use_attention,
         prior_dist=cfg.training.prior_dist,
         eta_min_factor=cfg.training.eta_min_factor,
         use_ema=cfg.training.use_ema,
@@ -251,6 +253,7 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         use_reference_vectors=cfg.model.use_reference_vectors,
         use_node_scalars=cfg.model.use_node_scalars,
         use_adaln=cfg.model.use_adaln,
+        use_attention=cfg.model.use_attention,
         vf_mode=cfg.inference.vf_mode,
         skip_samples=cfg.inference.skip_samples,
         skip_metrics=cfg.inference.skip_metrics,
@@ -282,6 +285,7 @@ def run_config_dict(cfg: TrainRunConfig, final_scale: float) -> dict:
         "use_reference_vectors": cfg.model.use_reference_vectors,
         "use_node_scalars": cfg.model.use_node_scalars,
         "use_adaln": cfg.model.use_adaln,
+        "use_attention": cfg.model.use_attention,
         "jet_types": cfg.data.jet_types,
         "final_scale": float(final_scale),
     }

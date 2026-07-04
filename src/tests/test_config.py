@@ -233,8 +233,8 @@ def test_run_config_dict_matches_legacy_keys():
     d = run_config_dict(cfg, final_scale=1.2345)
     assert set(d.keys()) == {
         "num_particles", "n_layers", "n_hidden", "use_residual", "include_pt",
-        "use_reference_vectors", "use_node_scalars", "use_adaln", "jet_types",
-        "final_scale",
+        "use_reference_vectors", "use_node_scalars", "use_adaln", "use_attention",
+        "jet_types", "final_scale",
     }
     assert d["num_particles"] == 30
     assert d["jet_types"] == ["g"]
