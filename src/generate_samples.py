@@ -54,6 +54,8 @@ def generate_samples(
         cfg_guidance_weight=2.0,
         use_hyperbolic=False,
         hyperbolic_c=1.0,
+        hyperbolic_model='poincare',
+        regulator_mass=0.1,
         use_reference_vectors=False,
         sampler='euler',
 ):
@@ -108,7 +110,26 @@ def generate_samples(
                 gen_eta = generated_jet_attrs[:, 5].to(device)  # jet eta (layout: [onehot(5), eta, pt, mass, n])
                 ref_vectors = build_reference_vectors(gen_eta, gen_pt, final_scale, device)
 
-            if use_hyperbolic:
+            if use_hyperbolic and hyperbolic_model == 'mass_shell':
+                # Integrate the ODE geodesically on the mass shell. The state stays on H_m
+                # (Cartesian on-shell 4-vectors), so the final x is used directly.
+                from util.mass_shell import project_to_shell
+                y = project_to_shell(x * masks.unsqueeze(-1), regulator_mass)
+                for i in range(integration_steps):
+                    y = model.step_hyperbolic(
+                        y_t=y,
+                        jet_conditions=cond,
+                        mask=masks,
+                        t_start=times[i],
+                        t_end=times[i + 1],
+                        hyperbolic_model='mass_shell',
+                        regulator_mass=regulator_mass,
+                        use_cfg=use_cfg,
+                        guidance_weight=cfg_guidance_weight,
+                        ref_vectors=ref_vectors,
+                    )
+                x = y
+            elif use_hyperbolic:
                 y = to_poincare_ball(x, c=hyperbolic_c)
                 for i in range(integration_steps):
                     y = model.step_hyperbolic(

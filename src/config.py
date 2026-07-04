@@ -39,6 +39,10 @@ class ModelConfig(BaseModel):
     use_adaln: bool = False
     use_attention: bool = False
     use_hyperbolic: bool = False
+    # When use_hyperbolic, which Riemannian geometry: "poincare" (radial-tanh ball, the
+    # original) or "mass_shell" (hyperboloid at <p,p>=regulator_mass^2, Phase 4).
+    hyperbolic_model: Literal["poincare", "mass_shell"] = "poincare"
+    regulator_mass: float = 0.1
 
 
 class TrainingConfig(BaseModel):
@@ -217,6 +221,8 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         lr_t0=cfg.training.lr_t0,
         lr_warmup_epochs=cfg.training.lr_warmup_epochs,
         use_hyperbolic=cfg.model.use_hyperbolic,
+        hyperbolic_model=cfg.model.hyperbolic_model,
+        regulator_mass=cfg.model.regulator_mass,
         use_curriculum=cfg.training.use_curriculum,
         use_time_sampling=cfg.training.use_time_sampling,
         use_reference_vectors=cfg.model.use_reference_vectors,
@@ -254,6 +260,8 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         batch_size=cfg.inference.batch_size,
         cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
         use_hyperbolic=cfg.model.use_hyperbolic,
+        hyperbolic_model=cfg.model.hyperbolic_model,
+        regulator_mass=cfg.model.regulator_mass,
         sampler=cfg.inference.sampler,
         use_reference_vectors=cfg.model.use_reference_vectors,
         use_node_scalars=cfg.model.use_node_scalars,

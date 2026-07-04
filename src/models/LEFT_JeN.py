@@ -508,13 +508,21 @@ class LEFTJeN(nn.Module):
         use_cfg: bool = False,
         guidance_weight: float = 2.0,
         ref_vectors: torch.Tensor = None,
+        hyperbolic_model: str = "poincare",
+        regulator_mass: float = 0.1,
     ) -> torch.Tensor:
         """
-        Riemannian Euler step in the Poincaré ball.
+        Riemannian Euler step in the Poincaré ball (default) or on the mass shell.
 
-        y_t  : (batch, particles, 4)  current state IN THE BALL
-        Returns next state IN THE BALL.
+        y_t  : (batch, particles, 4)  current state IN THE BALL (poincare) or ON H_m (mass_shell)
+        Returns next state in the same space.
         """
+        if hyperbolic_model == "mass_shell":
+            return self._step_mass_shell(
+                y_t, jet_conditions, mask, t_start, t_end,
+                regulator_mass, use_cfg, guidance_weight, ref_vectors,
+            )
+
         from util.hyperbolic import from_poincare_ball, exp_map, pushforward, clamp_to_ball
 
         batch_size = y_t.shape[0]
@@ -542,6 +550,39 @@ class LEFTJeN(nn.Module):
         y_next = clamp_to_ball(y_next, c=c)
 
         return y_next * mask.unsqueeze(-1)
+
+    def _step_mass_shell(
+        self,
+        y_t: torch.Tensor,
+        jet_conditions: torch.Tensor,
+        mask: torch.Tensor,
+        t_start: torch.Tensor,
+        t_end: torch.Tensor,
+        m: float,
+        use_cfg: bool,
+        guidance_weight: float,
+        ref_vectors: torch.Tensor,
+    ) -> torch.Tensor:
+        """Riemannian Euler step on the mass shell H_m. The state y_t is already on the shell
+        (a Cartesian on-shell 4-vector), so it is fed to the model directly; the predicted
+        Cartesian velocity is projected onto the tangent space and the geodesic exp map takes
+        the step. Masked/padded rows stay put (zero tangent velocity) and remain on the shell."""
+        from util.mass_shell import exp_map, pushforward_to_tangent
+
+        batch_size = y_t.shape[0]
+        t_batch = t_start.unsqueeze(0).expand(batch_size)
+
+        vel_cartesian = self.forward(x=y_t, t=t_batch, jet_conditions=jet_conditions, mask=mask, ref_vectors=ref_vectors)
+        if use_cfg:
+            null_cond = self.make_null_cond(jet_conditions)
+            vel_uncond = self.forward(x=y_t, t=t_batch, jet_conditions=null_cond, mask=mask, ref_vectors=ref_vectors)
+            vel_cartesian = vel_cartesian + guidance_weight * (vel_cartesian - vel_uncond)
+
+        # Project onto T_{y_t}H, zero padding, then geodesic step exp_{y_t}(v_tan * dt).
+        vel_tan = pushforward_to_tangent(y_t, vel_cartesian, m) * mask.unsqueeze(-1)
+        dt = t_end - t_start
+        y_next = exp_map(y_t, vel_tan * dt, m)
+        return y_next
 
     def _guided_velocity(self, x, t_scalar, jet_conditions, mask, use_cfg,
                          guidance_weight, ref_vectors, null_jet_conditions):

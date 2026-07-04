@@ -54,7 +54,8 @@ def parse_args():
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 _ARCH_KEYS = ("n_hidden", "n_layers", "use_residual", "use_reference_vectors",
-              "use_node_scalars", "use_adaln", "use_attention", "use_hyperbolic")
+              "use_node_scalars", "use_adaln", "use_attention", "use_hyperbolic",
+              "hyperbolic_model", "regulator_mass")
 
 
 def _resolve_architecture(args, ckpt):
@@ -226,6 +227,8 @@ def main():
                 batch_size=args.batch_size,
                 use_cfg=False,
                 use_hyperbolic=args.use_hyperbolic,
+                hyperbolic_model=args.hyperbolic_model,
+                regulator_mass=args.regulator_mass,
                 use_reference_vectors=args.use_reference_vectors,
                 sampler=args.sampler,
             )

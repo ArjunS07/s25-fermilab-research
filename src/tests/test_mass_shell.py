@@ -24,6 +24,8 @@ from util.mass_shell import (
     geodesic_cost_matrix,
     mass_shell_loss,
 )
+from util.minkowski_utils import normsq4
+from tests.lorentz_test_utils import build_model, sample_inputs
 
 
 def _shell_points(batch=4, n=6, seed=0, m=1.0, dtype=torch.float64):
@@ -151,6 +153,22 @@ def test_geodesic_cost_matrix_matches_pairwise_distance():
     expected = geodesic_distance(project_to_shell(x, m).unsqueeze(1),
                                  project_to_shell(x, m).unsqueeze(0), m)
     assert torch.allclose(cost, expected, atol=1e-12)
+
+
+def test_model_mass_shell_step_stays_on_shell():
+    """model.step_hyperbolic(hyperbolic_model='mass_shell') keeps real particles on H_m."""
+    m = 0.1
+    model = build_model(use_reference_vectors=False, use_node_scalars=False, seed=0)
+    x, _, cond, mask, _ = sample_inputs(seed=2)
+    y0 = project_to_shell(x * mask.unsqueeze(-1), m)
+    t0 = torch.tensor(0.0, dtype=torch.float64)
+    t1 = torch.tensor(0.1, dtype=torch.float64)
+    y1 = model.step_hyperbolic(y0, cond, mask, t0, t1,
+                               hyperbolic_model="mass_shell", regulator_mass=m)
+    assert torch.isfinite(y1).all()
+    onshell = normsq4(y1)                                  # <y,y>
+    real = mask > 0
+    assert torch.allclose(onshell[real], torch.full_like(onshell[real], m * m), atol=1e-6)
 
 
 def test_float32_in_float32_out():

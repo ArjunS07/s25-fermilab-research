@@ -20,6 +20,11 @@ from util.jet_attributes import NUM_CLASSES
 from jet_attr_model import get_model_pth_path
 from util.distributions import gen_initial_distribution, time_dist, hyperbolic_interpolant
 from util.hyperbolic import pushforward, hyperbolic_loss
+from util.mass_shell import (
+    project_to_shell, geodesic_interpolant as ms_interpolant,
+    conditional_vector_field as ms_vector_field,
+    pushforward_to_tangent as ms_pushforward, mass_shell_loss,
+)
 from util.coordinates import transform_rel_particle_coordinates_to_cartesian, jacobian_epp_etaphipte
 from jetnet.utils import EtaPhiPtE_to_cartesian, cartesian_to_EtaPhiPtE
 from util.ema import ModelEMA
@@ -433,7 +438,20 @@ if __name__ == "__main__":
             t = _sample_t(x_0.shape[0]).to(device)
             t_viewed = t.view(-1, 1, 1)
 
-            if args.use_hyperbolic:
+            if args.use_hyperbolic and args.hyperbolic_model == "mass_shell":
+                # Riemannian flow matching on the mass shell (hyperboloid). x_0/x_1 are lifted
+                # onto H_m; the interpolant, target field and model output all live on/at the
+                # shell (Cartesian on-shell 4-vectors), so no ball<->Cartesian mapping is needed.
+                m = args.regulator_mass
+                p0 = project_to_shell(x_0, m).to(device)
+                p1 = project_to_shell(x_1, m).to(device)
+                x_t = ms_interpolant(p0, p1, t, m)
+                u_t = ms_vector_field(x_t, p1, t, m) * mask_exp   # tangent target at x_t
+
+                pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks, ref_vectors=ref_vectors)
+                pred_tan = ms_pushforward(x_t, pred, m) * mask_exp
+                loss = mass_shell_loss(pred_tan, u_t, true_masks, m)
+            elif args.use_hyperbolic:
                 # Riemannian flow matching: geodesic interpolant in the Poincaré ball.
                 # x_t is returned in Cartesian for the model; y_t and u_t_ball stay in the ball.
                 x_t, y_t, u_t_ball = hyperbolic_interpolant(x_0, x_1, t)
@@ -640,6 +658,8 @@ if __name__ == "__main__":
                 batch_size=args.batch_size if args.num_particles < MAX_N_PARTICLES else 16,
                 use_cfg=False,
                 use_hyperbolic=args.use_hyperbolic,
+                hyperbolic_model=args.hyperbolic_model,
+                regulator_mass=args.regulator_mass,
                 use_reference_vectors=args.use_reference_vectors,
             )
         except Exception as e:
