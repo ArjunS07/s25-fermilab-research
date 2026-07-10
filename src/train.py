@@ -156,7 +156,13 @@ if __name__ == "__main__":
                   f"running {args.num_epochs} more epochs ({start_epoch}→{start_epoch + args.num_epochs - 1}).")
 
     if args.distributed:
-        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+        # find_unused_parameters=True: the final layer's global/node-update sub-branch
+        # (phi_m, phi_g, global_sf, alpha, +phi_h) produces g_new/h_new that are
+        # discarded (velocity = x_particles - x0 uses only the coordinate stream), so
+        # those params get no gradient. Also covers the rare zero-dropout CFG batch
+        # where null_cond is not exercised. Output math is unchanged.
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank,
+                    find_unused_parameters=True)
     raw_model = model.module if args.distributed else model
 
     # EMA of weights (Phase 2.1). Shadow starts from the (possibly resumed) weights.
