@@ -721,10 +721,22 @@ if __name__ == "__main__":
                     "frac_negative_energy", "frac_spacelike", "msq_median",
                     "isotropy_ks_costheta", "isotropy_ks_costheta_p",
                     "isotropy_ks_phi", "isotropy_ks_phi_p",
+                    # FPND is stored per jet type under fpnd_{jet_type} (e.g. fpnd_g).
+                    *(f"fpnd_{jt}" for jt in args.jet_types),
                 )},
             }
+
+            def _json_default(o):
+                # numpy arrays (e.g. w1p, w1efp) aren't JSON-native and float() raises on them.
+                if isinstance(o, np.ndarray):
+                    return o.tolist()
+                if hasattr(o, "item"):        # numpy/torch scalar
+                    return o.item()
+                if hasattr(o, "__float__"):
+                    return float(o)
+                return str(o)
+
             with open(f"{model_output_path}/summary.json", "w") as f:
-                json.dump(summary, f, indent=2,
-                          default=lambda o: float(o) if hasattr(o, "__float__") else str(o))
+                json.dump(summary, f, indent=2, default=_json_default)
         except Exception as e:
             print(f"Error writing summary.json: {e}")
