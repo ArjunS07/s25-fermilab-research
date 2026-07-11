@@ -50,6 +50,17 @@ spec:
                 fi
               fi
 
+              # --- FPND metric dependencies (torch_geometric + compiled PyG extensions) ---
+              # Installed idempotently here (outside the cached-env branch above), since pods
+              # reuse /mnt/data/python-env and skip the setup else-block. Wheel index matches
+              # the installed torch (2.7.1, CUDA 12.6 from PyPI). Non-fatal: FPND is optional,
+              # so a wheel-install failure must not kill the run.
+              pip install torch_geometric \
+                || echo "WARN: torch_geometric install failed; FPND will be skipped"
+              pip install torch_scatter torch_sparse torch_cluster \
+                -f https://data.pyg.org/whl/torch-2.7.1+cu126.html \
+                || echo "WARN: PyG compiled extensions install failed; FPND will be skipped"
+
               echo "=== Environment setup complete, starting training ==="
 
               cd /mnt/data/src

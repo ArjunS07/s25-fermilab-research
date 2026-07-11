@@ -152,6 +152,10 @@ toml==0.10.2
 tomli==2.2.1
 toolz==1.0.0
 torch==2.7.1
+# torch_geometric enables the FPND jet metric (jetnet). Its compiled extensions
+# (torch_scatter/torch_sparse/torch_cluster) are NOT installable from PyPI and are
+# installed separately in the NRP job YAMLs from the PyG wheel index matched to torch.
+torch_geometric==2.6.1
 tornado==6.5.1
 tqdm==4.67.1
 traitlets==5.14.3
