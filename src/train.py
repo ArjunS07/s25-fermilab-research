@@ -632,6 +632,7 @@ if __name__ == "__main__":
                 use_cfg=True,
                 cfg_guidance_weight=2.0,
                 use_hyperbolic=args.use_hyperbolic,
+                use_reference_vectors=args.use_reference_vectors,
             )
             generate_model_vector_field(
                 out_dir=f"{model_output_path}/vf_viz_nocfg",
@@ -646,6 +647,7 @@ if __name__ == "__main__":
                 integration_steps=args.integration_steps,
                 use_cfg=False,
                 use_hyperbolic=args.use_hyperbolic,
+                use_reference_vectors=args.use_reference_vectors,
             )
         except Exception as e:
             print(f"Error occurred while generating model vector field: {e}")

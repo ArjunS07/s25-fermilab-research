@@ -4,7 +4,7 @@ import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from util.coordinates import transform_rel_particle_coordinates_to_cartesian
+from util.coordinates import transform_rel_particle_coordinates_to_cartesian, build_reference_vectors
 from util import jet_attributes
 from util.file_management import make_clear_folder
 from util.distributions import gen_initial_distribution
@@ -45,7 +45,7 @@ def plot_hist(X_test_samples, x_model, output_path, filename):
     plt.savefig(f"{output_path}/{filename}.png", bbox_inches='tight', dpi=300)
 
 
-def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, scale, n_jet_types, n_particles_per_jet, initial_dist_method='isotropic_com', n_features_per_particle=4, n_viz_samples=1000, zoom_in=True, save_videos=True, integration_steps=16, use_cfg=False, cfg_guidance_weight=1, use_hyperbolic=False, hyperbolic_c=1.0):
+def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, scale, n_jet_types, n_particles_per_jet, initial_dist_method='isotropic_com', n_features_per_particle=4, n_viz_samples=1000, zoom_in=True, save_videos=True, integration_steps=16, use_cfg=False, cfg_guidance_weight=1, use_hyperbolic=False, hyperbolic_c=1.0, use_reference_vectors=False):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     output_path = f"{out_dir}"
     make_clear_folder(output_path)
@@ -69,6 +69,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_model, device, n_jet_types=n_jet_types, num_jets=n_viz_samples)
         # Layout from generate_jets: [one_hot(5), eta, pt, mass, n_particles]
         jet_one_hot_enc = generated_jet_attrs[:, :5].to(device)
+        gen_eta = generated_jet_attrs[:, 5].to(device)         # jet eta (raw generate_jets layout)
         gen_pt = generated_jet_attrs[:, 6].to(device)          # normalized pT from NF
         n_gen_particles = generated_jet_attrs[:, -1].long().to(device)
 
@@ -96,6 +97,12 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         x = x * masks.unsqueeze(-1).expand(-1, -1, n_features_per_particle)
         print(f"Applied masks! {x.mean()=}, {x.std()=}")
 
+        # Symmetry-breaking reference 4-vectors (e_t + reconstructed jet p4), built from the
+        # sampled jet attrs since there are no true constituents here. Mirrors generate_samples.
+        ref_vectors = None
+        if use_reference_vectors:
+            ref_vectors = build_reference_vectors(gen_eta, gen_pt, scale, device)
+
         x_0 = x.clone()
         x_model_final = x.clone()
         # When using hyperbolic integration, maintain ball-space state alongside Cartesian for plotting
@@ -106,10 +113,10 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         sns.set_palette("deep")
         for i in range(len(times) - 1):
             t = times[i].unsqueeze(0).repeat(n_viz_samples).to(device)
-            final_field_conditional = final_model.forward(x_model_final, t, generated_jet_attrs, masks)
+            final_field_conditional = final_model.forward(x_model_final, t, generated_jet_attrs, masks, ref_vectors=ref_vectors)
             if use_cfg:
                 null_vector = final_model.make_null_cond(generated_jet_attrs)
-                final_field_unconditional = final_model.forward(x_model_final, t, null_vector, masks)
+                final_field_unconditional = final_model.forward(x_model_final, t, null_vector, masks, ref_vectors=ref_vectors)
                 final_field = final_field_conditional + cfg_guidance_weight * (final_field_conditional - final_field_unconditional)
             else:
                 final_field = final_field_conditional

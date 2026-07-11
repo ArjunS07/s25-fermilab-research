@@ -40,6 +40,28 @@ def transform_rel_particle_coordinates_to_cartesian(X):
     return torch.cat([cartesian_feats, masks.unsqueeze(-1)], dim=-1)
 
 
+def build_reference_vectors(jet_eta, jet_pt, final_scale, device):
+    """Inference reference 4-vectors: e_t=(1,0,0,0) and a reconstructed jet 4-momentum.
+
+    Mirrors transform_rel_particle_coordinates_to_cartesian: the jet axis is
+    (jet_eta, random phi, jet_pt) with energy E = pt*cosh(eta), converted with the same jetnet
+    routine used to build the training particles, then divided by final_scale to enter the
+    model's scaled space. This matches train.py, where the reference is the sum of the scaled
+    constituents (= physical jet 4-momentum / final_scale). The random phi is the *chosen* jet
+    orientation the references then induce in the generated cloud.
+
+    Returns (B, 2, 4).
+    """
+    batch = jet_eta.shape[0]
+    phi = (2 * torch.pi) * torch.rand(batch, device=device)
+    energy = jet_pt * torch.cosh(jet_eta)
+    stacked = torch.stack([jet_eta, phi, jet_pt, energy], dim=-1)  # (B, 4) = (eta, phi, pt, E)
+    jet_p4 = EtaPhiPtE_to_cartesian(stacked) / final_scale         # (B, 4) scaled (E, px, py, pz)
+    e_t = torch.zeros(batch, 4, device=device, dtype=jet_p4.dtype)
+    e_t[:, 0] = 1.0
+    return torch.stack([e_t, jet_p4], dim=1)  # (B, 2, 4)
+
+
 def jacobian_epp_etaphipte(eppp):
     """
     Returns Jacobian for converting a Cartesian vector at Cartesian cooordinates E, p_x, p_y, p_z to a polar vector eta, phi, p_T, E

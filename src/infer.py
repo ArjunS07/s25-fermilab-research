@@ -179,6 +179,7 @@ def main():
                 use_cfg=True,
                 cfg_guidance_weight=args.cfg_guidance_weight,
                 use_hyperbolic=args.use_hyperbolic,
+                use_reference_vectors=args.use_reference_vectors,
             )
             print("CFG vector field done.")
         except Exception as e:
@@ -203,6 +204,7 @@ def main():
                 integration_steps=args.integration_steps,
                 use_cfg=False,
                 use_hyperbolic=args.use_hyperbolic,
+                use_reference_vectors=args.use_reference_vectors,
             )
             print("No-CFG vector field done.")
         except Exception as e:

@@ -11,33 +11,13 @@ from util import jet_attributes
 from util.file_management import make_clear_folder
 from util.distributions import gen_initial_distribution
 from util.hyperbolic import to_poincare_ball, from_poincare_ball
+from util.coordinates import build_reference_vectors
 
 plt.rc("mathtext", fontset="cm")
 sns.set_style("whitegrid")
 
 features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 
-
-def build_reference_vectors(jet_eta, jet_pt, final_scale, device):
-    """Inference reference 4-vectors: e_t=(1,0,0,0) and a reconstructed jet 4-momentum.
-
-    Mirrors util/coordinates.transform_rel_particle_coordinates_to_cartesian: the jet axis is
-    (jet_eta, random phi, jet_pt) with energy E = pt*cosh(eta), converted with the same jetnet
-    routine used to build the training particles, then divided by final_scale to enter the
-    model's scaled space. This matches train.py, where the reference is the sum of the scaled
-    constituents (= physical jet 4-momentum / final_scale). The random phi is the *chosen* jet
-    orientation the references then induce in the generated cloud.
-
-    Returns (B, 2, 4).
-    """
-    batch = jet_eta.shape[0]
-    phi = (2 * torch.pi) * torch.rand(batch, device=device)
-    energy = jet_pt * torch.cosh(jet_eta)
-    stacked = torch.stack([jet_eta, phi, jet_pt, energy], dim=-1)  # (B, 4) = (eta, phi, pt, E)
-    jet_p4 = EtaPhiPtE_to_cartesian(stacked) / final_scale         # (B, 4) scaled (E, px, py, pz)
-    e_t = torch.zeros(batch, 4, device=device, dtype=jet_p4.dtype)
-    e_t[:, 0] = 1.0
-    return torch.stack([e_t, jet_p4], dim=1)  # (B, 2, 4)
 
 def generate_samples(
         model: LEFTJeN,
