@@ -87,30 +87,12 @@ spec:
                   continue
                 fi
 
-                # Extract architecture and prior from the training summary.
-                # Python's json.loads rejects NaN literals that train.py may write,
-                # so we parse with parse_constant to tolerate NaN/Infinity.
-                read USE_REFS USE_SCALARS USE_ADALN USE_ATTENTION PRIOR_DIST N_LAYERS N_HIDDEN USE_RESIDUAL \
-                  <<< "$(python3 -c "
-import json, sys, math
-with open('$TRAIN_SUMMARY') as f:
-    s = json.loads(f.read(), parse_constant=lambda x: None)
-m = (s.get('full_config') or {}).get('model') or {}
-t = (s.get('full_config') or {}).get('training') or {}
-print(
-    str(m.get('use_reference_vectors', False)).lower(),
-    str(m.get('use_node_scalars', False)).lower(),
-    str(m.get('use_adaln', False)).lower(),
-    str(m.get('use_attention', False)).lower(),
-    t.get('prior_dist', 'isotropic_com'),
-    m.get('n_layers', 3),
-    m.get('n_hidden', 128),
-    str(m.get('use_residual', False)).lower(),
-)
-" 2>&1)" || {
-                  echo "WARN: failed to parse summary.json in $RUN_DIR, skipping" | tee -a "${BASE_OUT}/logs.txt"
+                # Extract architecture and prior (tolerates NaN literals in JSON).
+                SUMMARY_LINE=$(python3 -m analysis.read_train_summary "$TRAIN_SUMMARY" 2>&1) || {
+                  echo "WARN: failed to parse summary.json in $RUN_DIR ($SUMMARY_LINE), skipping" | tee -a "${BASE_OUT}/logs.txt"
                   continue
                 }
+                read USE_REFS USE_SCALARS USE_ADALN USE_ATTENTION PRIOR_DIST N_LAYERS N_HIDDEN USE_RESIDUAL <<< "$SUMMARY_LINE"
 
                 CHECKPOINT="${RUN_DIR}/train/models/final_model.pth"
                 if [ ! -f "$CHECKPOINT" ]; then
