@@ -87,21 +87,30 @@ spec:
                   continue
                 fi
 
-                # Validate JSON before extracting fields.
-                if ! jq empty "$TRAIN_SUMMARY" 2>/dev/null; then
-                  echo "WARN: truncated/invalid summary.json in $RUN_DIR, skipping" | tee -a "${BASE_OUT}/logs.txt"
-                  continue
-                fi
-
                 # Extract architecture and prior from the training summary.
-                USE_REFS=$(jq -r '.full_config.model.use_reference_vectors // false' "$TRAIN_SUMMARY")
-                USE_SCALARS=$(jq -r '.full_config.model.use_node_scalars // false' "$TRAIN_SUMMARY")
-                USE_ADALN=$(jq -r '.full_config.model.use_adaln // false' "$TRAIN_SUMMARY")
-                USE_ATTENTION=$(jq -r '.full_config.model.use_attention // false' "$TRAIN_SUMMARY")
-                PRIOR_DIST=$(jq -r '.full_config.training.prior_dist // "isotropic_com"' "$TRAIN_SUMMARY")
-                N_LAYERS=$(jq -r '.full_config.model.n_layers // 3' "$TRAIN_SUMMARY")
-                N_HIDDEN=$(jq -r '.full_config.model.n_hidden // 128' "$TRAIN_SUMMARY")
-                USE_RESIDUAL=$(jq -r '.full_config.model.use_residual // false' "$TRAIN_SUMMARY")
+                # Python's json.loads rejects NaN literals that train.py may write,
+                # so we parse with parse_constant to tolerate NaN/Infinity.
+                read USE_REFS USE_SCALARS USE_ADALN USE_ATTENTION PRIOR_DIST N_LAYERS N_HIDDEN USE_RESIDUAL \
+                  <<< "$(python3 -c "
+import json, sys, math
+with open('$TRAIN_SUMMARY') as f:
+    s = json.loads(f.read(), parse_constant=lambda x: None)
+m = (s.get('full_config') or {}).get('model') or {}
+t = (s.get('full_config') or {}).get('training') or {}
+print(
+    str(m.get('use_reference_vectors', False)).lower(),
+    str(m.get('use_node_scalars', False)).lower(),
+    str(m.get('use_adaln', False)).lower(),
+    str(m.get('use_attention', False)).lower(),
+    t.get('prior_dist', 'isotropic_com'),
+    m.get('n_layers', 3),
+    m.get('n_hidden', 128),
+    str(m.get('use_residual', False)).lower(),
+)
+" 2>&1)" || {
+                  echo "WARN: failed to parse summary.json in $RUN_DIR, skipping" | tee -a "${BASE_OUT}/logs.txt"
+                  continue
+                }
 
                 CHECKPOINT="${RUN_DIR}/train/models/final_model.pth"
                 if [ ! -f "$CHECKPOINT" ]; then
