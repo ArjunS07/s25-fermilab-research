@@ -38,6 +38,7 @@ def generate_samples(
         regulator_mass=0.5,
         use_reference_vectors=False,
         sampler='euler',
+        prior_dist='isotropic_com',
 ):
 
 
@@ -52,25 +53,35 @@ def generate_samples(
         model.eval()
         jet_attr_model.eval()
 
-        times = torch.linspace(0, 1, integration_steps + 1).to(device)
+        times = torch.linspace(0, 1 - 1e-5, integration_steps + 1).to(device)
 
         for start_idx in range(0, n_samples, batch_size):
             current_batch_size = min(batch_size, n_samples - start_idx)
-            x = gen_initial_distribution(
-                batch_size=current_batch_size,
-                num_particles=max_particles_per_jet,
-                device=device
-            )
-            x = x.to(device)
 
             generated_jet_attrs, _ = jet_attributes.generate_jets(
-                jet_attr_model, device, n_jet_types=n_jet_types, num_jets=x.shape[0]
+                jet_attr_model, device, n_jet_types=n_jet_types, num_jets=current_batch_size
             )
             # generated_jet_attrs layout: [one_hot(5), eta, pt, mass, n_particles]
             jet_one_hot_enc = generated_jet_attrs[:, :5].to(device)
             gen_pt = generated_jet_attrs[:, 6].to(device)   # normalized pT from NF
             gen_n_particles = generated_jet_attrs[:, -1].long().to(device)
             gen_n_particles = gen_n_particles.clamp(max=max_particles_per_jet)
+
+            # Build jet_features for priors that need jet-axis info.
+            jet_features = None
+            if prior_dist in ('axis_aligned', 'jet_ref_frame'):
+                gen_eta = generated_jet_attrs[:, 5].to(device)
+                gen_pt_prior = gen_pt
+                jet_features = torch.stack([gen_eta, gen_pt_prior], dim=-1)
+
+            x = gen_initial_distribution(
+                batch_size=current_batch_size,
+                num_particles=max_particles_per_jet,
+                prior_dist=prior_dist,
+                jet_features=jet_features,
+                device=device
+            )
+            x = x.to(device)
 
             masks = jet_attributes.generate_masks(
                 gen_n_particles,
@@ -130,6 +141,7 @@ def generate_samples(
                                    use_cfg=use_cfg, guidance_weight=cfg_guidance_weight,
                                    ref_vectors=ref_vectors)
 
+            x = x.clamp(-50, 50)
             scaled_x = final_scale * x * masks.unsqueeze(-1)   # zero-out padded slots
             # torch.save(scaled_x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
 

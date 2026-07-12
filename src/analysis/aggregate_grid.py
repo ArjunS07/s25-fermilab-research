@@ -55,6 +55,17 @@ def verdict(is_expected_break: bool, ks_p, threshold: float = DEFAULT_KS_THRESHO
     return "OK (isotropic as expected)" if not departs else "NOTE (departs without a mechanism)"
 
 
+def verdict_gen_vs_data(is_expected_break: bool, gvd_p, threshold: float = 0.05) -> str:
+    """Verdict using gen-vs-data two-sample KS. A matching distribution (high p) is good;
+    a run with a break mechanism should match the data's anisotropy."""
+    if gvd_p is None or (isinstance(gvd_p, float) and gvd_p != gvd_p):
+        return "NO DATA"
+    matches_data = gvd_p >= threshold
+    if is_expected_break:
+        return "PASS (matches data)" if matches_data else "DRIFT (gen ≠ data)"
+    return "OK (both isotropic)" if matches_data else "NOTE (gen ≠ data, no mechanism)"
+
+
 def recompute_isotropy_ks(samples_path: str):
     """Recompute (D, p) of the generated jet-axis cos(theta) vs uniform from samples_subset.pt.
     Lazy-imports torch so the summary-only path needs no torch. Returns (nan, nan) if absent."""
@@ -88,6 +99,14 @@ def load_run(label: str, run_dir: str, ks_threshold: float = DEFAULT_KS_THRESHOL
         ks_d, ks_p = recompute_isotropy_ks(os.path.join(run_dir, "samples_subset.pt"))
 
     is_break = expected_break(config, prior_dist)
+
+    # Prefer gen-vs-data two-sample KS for verdict when available.
+    gvd_p = metrics.get("isotropy_gen_vs_data_cos_p")
+    if gvd_p is not None and not (isinstance(gvd_p, float) and gvd_p != gvd_p):
+        primary_verdict = verdict_gen_vs_data(is_break, gvd_p)
+    else:
+        primary_verdict = verdict(is_break, ks_p, ks_threshold)
+
     row = {
         "label": label,
         "status": "ok",
@@ -101,8 +120,9 @@ def load_run(label: str, run_dir: str, ks_threshold: float = DEFAULT_KS_THRESHOL
         "git_commit": summary.get("git_commit"),
         "isotropy_ks_costheta": ks_d,
         "isotropy_ks_costheta_p": ks_p,
+        "isotropy_gen_vs_data_cos_p": gvd_p,
         "expected_break": is_break,
-        "verdict": verdict(is_break, ks_p, ks_threshold),
+        "verdict": primary_verdict,
     }
     for k in ("w1m", "fpd", "frac_negative_energy", "frac_spacelike"):
         row[k] = metrics.get(k)

@@ -1,0 +1,138 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-eval-grid-phase1
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: as-train-pvc
+          persistentVolumeClaim:
+            claimName: as-jet-train-pvc-2
+
+      containers:
+        - name: eval
+          image: python:3.10-slim
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              set -ex
+
+              apt-get update && apt-get install -y libffi-dev gcc g++ curl git wget build-essential jq
+
+              # Pin to the fix commit (frozen-harness gate).
+              git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
+              cd /tmp/repo && git checkout FIXME_PIN_COMMIT_HASH && cd /
+              cp -r /tmp/repo/src /mnt/data/
+
+              if [ -d "/mnt/data/python-env" ] && /mnt/data/python-env/bin/python -c "import torch; print('Environment OK')" 2>/dev/null; then
+                echo "=== Existing environment is working, skipping setup ==="
+                source /mnt/data/python-env/bin/activate
+              else
+                rm -rf /mnt/data/python-env
+                python -m venv /mnt/data/python-env
+                source /mnt/data/python-env/bin/activate
+                pip install torch --index-url https://download.pytorch.org/whl/cu121
+                if [ -f /mnt/data/src/requirements.txt ]; then
+                  pip install -r /mnt/data/src/requirements.txt
+                else
+                  echo "No requirements.txt found, skipping pip install"
+                fi
+              fi
+
+              # FPND metric dependencies (non-fatal).
+              pip install torch_geometric \
+                || echo "WARN: torch_geometric install failed; FPND will be skipped"
+              pip install torch_scatter torch_sparse torch_cluster \
+                -f https://data.pyg.org/whl/torch-2.7.1+cu126.html \
+                || echo "WARN: PyG compiled extensions install failed; FPND will be skipped"
+
+              echo "=== Environment setup complete ==="
+
+              cd /mnt/data/src
+
+              UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
+              BASE_OUT="/mnt/data/output/${UNIQUE_RUN_ID}-g30-phase1-eval-grid"
+              mkdir -p "$BASE_OUT"
+
+              # Iterate over the six Phase-1 training runs.
+              for RUN_DIR in /mnt/data/output/*g30-phase1-[a-f]; do
+                [ -d "$RUN_DIR" ] || continue
+                LABEL=$(echo "$RUN_DIR" | grep -oP 'phase1-\K[a-f]')
+                echo "=== Evaluating run $LABEL ($RUN_DIR) ===" | tee -a "${BASE_OUT}/logs.txt"
+
+                TRAIN_SUMMARY="${RUN_DIR}/train/summary.json"
+                if [ ! -f "$TRAIN_SUMMARY" ]; then
+                  echo "WARN: no train/summary.json in $RUN_DIR, skipping" | tee -a "${BASE_OUT}/logs.txt"
+                  continue
+                fi
+
+                # Extract architecture and prior from the training summary.
+                USE_REFS=$(jq -r '.full_config.model.use_reference_vectors // false' "$TRAIN_SUMMARY")
+                USE_SCALARS=$(jq -r '.full_config.model.use_node_scalars // false' "$TRAIN_SUMMARY")
+                USE_ADALN=$(jq -r '.full_config.model.use_adaln // false' "$TRAIN_SUMMARY")
+                USE_ATTENTION=$(jq -r '.full_config.model.use_attention // false' "$TRAIN_SUMMARY")
+                PRIOR_DIST=$(jq -r '.full_config.training.prior_dist // "isotropic_com"' "$TRAIN_SUMMARY")
+                N_LAYERS=$(jq -r '.full_config.model.n_layers // 3' "$TRAIN_SUMMARY")
+                N_HIDDEN=$(jq -r '.full_config.model.n_hidden // 128' "$TRAIN_SUMMARY")
+                USE_RESIDUAL=$(jq -r '.full_config.model.use_residual // false' "$TRAIN_SUMMARY")
+
+                CHECKPOINT="${RUN_DIR}/train/models/final_model.pth"
+                if [ ! -f "$CHECKPOINT" ]; then
+                  echo "WARN: no final_model.pth in $RUN_DIR, skipping" | tee -a "${BASE_OUT}/logs.txt"
+                  continue
+                fi
+
+                python3 infer.py \
+                  --config configs/infer-g30-phase1.yaml \
+                  --set paths.checkpoint_path="$CHECKPOINT" \
+                  --set paths.output_path="$RUN_DIR" \
+                  --set paths.out_dir="${BASE_OUT}/${LABEL}" \
+                  --set model.use_reference_vectors="$USE_REFS" \
+                  --set model.use_node_scalars="$USE_SCALARS" \
+                  --set model.use_adaln="$USE_ADALN" \
+                  --set model.use_attention="$USE_ATTENTION" \
+                  --set model.n_layers="$N_LAYERS" \
+                  --set model.n_hidden="$N_HIDDEN" \
+                  --set model.use_residual="$USE_RESIDUAL" \
+                  --set inference.prior_dist="$PRIOR_DIST" \
+                  2>&1 | tee -a "${BASE_OUT}/logs.txt"
+
+                # Sanity checks.
+                [ -f "${BASE_OUT}/${LABEL}/metrics.csv" ] || echo "ERROR: metrics.csv missing for $LABEL"
+                [ -f "${BASE_OUT}/${LABEL}/summary.json" ] || echo "ERROR: summary.json missing for $LABEL"
+              done
+
+              echo "=== Aggregating grid ===" | tee -a "${BASE_OUT}/logs.txt"
+              python3 -m analysis.aggregate_grid --base "$BASE_OUT" --out "$BASE_OUT" \
+                2>&1 | tee -a "${BASE_OUT}/logs.txt"
+
+              # Final assertion: 6 rows in ablation table.
+              N_ROWS=$(tail -n +3 "${BASE_OUT}/ablation_table.md" | wc -l)
+              echo "Ablation table has $N_ROWS rows" | tee -a "${BASE_OUT}/logs.txt"
+              [ "$N_ROWS" -eq 6 ] || echo "WARNING: expected 6 rows, got $N_ROWS"
+
+              echo "=== Phase-1 eval grid complete ===" | tee -a "${BASE_OUT}/logs.txt"
+
+          volumeMounts:
+            - mountPath: /mnt/data
+              name: as-train-pvc
+          resources:
+            limits:
+              nvidia.com/a40: 1
+              memory: "48Gi"
+              cpu: "2.4"
+            requests:
+              nvidia.com/a40: 1
+              memory: "36Gi"
+              cpu: "2"

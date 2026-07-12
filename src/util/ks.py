@@ -26,6 +26,24 @@ def ks_pvalue(d: float, n: int) -> float:
     return float(min(max(terms.sum(), 0.0), 1.0))
 
 
+def ks_two_sample(samples_a, samples_b):
+    """Two-sample KS test. Returns (D, p). Either input empty → (nan, nan)."""
+    a = np.sort(np.asarray(samples_a, dtype=np.float64).ravel())
+    b = np.sort(np.asarray(samples_b, dtype=np.float64).ravel())
+    a = a[np.isfinite(a)]
+    b = b[np.isfinite(b)]
+    n1, n2 = a.size, b.size
+    if n1 == 0 or n2 == 0:
+        return float("nan"), float("nan")
+    all_vals = np.concatenate([a, b])
+    all_vals.sort()
+    cdf1 = np.searchsorted(a, all_vals, side="right") / n1
+    cdf2 = np.searchsorted(b, all_vals, side="right") / n2
+    d = float(np.max(np.abs(cdf1 - cdf2)))
+    n_eff = int(round(n1 * n2 / (n1 + n2)))
+    return d, ks_pvalue(d, n_eff)
+
+
 def ks_statistic_vs_uniform(samples, low: float, high: float):
     """Two-sided KS statistic D and p-value of ``samples`` against Uniform[low, high].
 

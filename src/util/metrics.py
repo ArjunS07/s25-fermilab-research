@@ -7,7 +7,7 @@ from jetnet.utils import EtaPhiPtE_to_relEtaPhiPt, cartesian_to_EtaPhiPtE
 import jetnet.evaluation as jetnet_eval
 
 from util.minkowski_utils import normsq4
-from util.ks import ks_statistic_vs_uniform
+from util.ks import ks_statistic_vs_uniform, ks_two_sample
 
 # Fixed seed so the random jet-phi assignment (and hence the isotropy reference) is
 # reproducible across runs — the harness is a fixed yardstick (experiment plan 0.4).
@@ -81,6 +81,16 @@ def _plot_physicality_and_isotropy(gen_cartesian, test_polar_abs, output_path):
     pz = (pt * torch.sinh(eta)) * test_real
     test_total = torch.stack([px.sum(1), py.sum(1), pz.sum(1)], dim=-1)
     test_cos, test_phi = _total_momentum_direction(test_total)
+
+    # Gen-vs-data two-sample KS (more discriminating than vs-uniform).
+    gvd_cos_d, gvd_cos_p = ks_two_sample(gen_cos.numpy(), test_cos.numpy())
+    gvd_phi_d, gvd_phi_p = ks_two_sample(gen_phi.numpy(), test_phi.numpy())
+    diag.update({
+        "isotropy_gen_vs_data_cos_ks": gvd_cos_d,
+        "isotropy_gen_vs_data_cos_p": gvd_cos_p,
+        "isotropy_gen_vs_data_phi_ks": gvd_phi_d,
+        "isotropy_gen_vs_data_phi_p": gvd_phi_p,
+    })
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
     fig.suptitle("Isotropy of generated jet axis vs. data", fontsize=14)

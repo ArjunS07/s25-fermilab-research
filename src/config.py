@@ -95,6 +95,9 @@ class InferenceConfig(BaseModel):
     vf_mode: Literal["cfg", "nocfg", "both", "none"] = "both"
     skip_samples: bool = False
     skip_metrics: bool = False
+    prior_dist: Literal[
+        "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned"
+    ] = "isotropic_com"
 
 
 class PathConfig(BaseModel):
@@ -273,6 +276,7 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         vf_mode=cfg.inference.vf_mode,
         skip_samples=cfg.inference.skip_samples,
         skip_metrics=cfg.inference.skip_metrics,
+        prior_dist=cfg.inference.prior_dist,
     )
 
 

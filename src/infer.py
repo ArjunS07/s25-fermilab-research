@@ -16,8 +16,10 @@ Example usage:
         --set paths.output_path=/mnt/data/output
 """
 
+import json
 import os
 import pickle
+import subprocess
 import traceback
 
 import numpy as np
@@ -233,6 +235,7 @@ def main():
                 regulator_mass=args.regulator_mass,
                 use_reference_vectors=args.use_reference_vectors,
                 sampler=args.sampler,
+                prior_dist=args.prior_dist,
             )
             print(f"Sample generation done. Shape: {samples.shape}")
             pt_path = os.path.join(out_dir, "samples.pt")
@@ -243,13 +246,14 @@ def main():
             traceback.print_exc()
 
     # ── Stage 3: Metric calculation ────────────────────────────────────────────
+    eval_info = None
     if not args.skip_metrics:
         if samples is None:
             print("\n[WARN] No samples available — skipping metrics.")
         else:
             try:
                 print("\n=== Metric calculation ===")
-                run_save_metrics(
+                eval_info = run_save_metrics(
                     X_test=X_test,
                     jet_types=args.jet_types,
                     gen_samples=samples,
@@ -260,6 +264,46 @@ def main():
             except Exception as e:
                 print(f"\n[ERROR] Metric calculation failed: {e}")
                 traceback.print_exc()
+
+    # ── Stage 4: Write summary.json ───────────────────────────────────────────
+    try:
+        git_commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+    except Exception:
+        git_commit = None
+
+    # Read source run's training summary for final_loss and full_config.
+    train_summary_path = os.path.join(args.output_path, "train", "summary.json")
+    train_summary = {}
+    if os.path.exists(train_summary_path):
+        with open(train_summary_path) as f:
+            train_summary = json.load(f)
+
+    summary = {
+        "final_loss": train_summary.get("final_loss"),
+        "prior_dist": args.prior_dist,
+        "git_commit": git_commit,
+        "config": train_summary.get("config"),
+        "full_config": train_summary.get("full_config"),
+        "metrics": eval_info,
+    }
+
+    def _json_default(obj):
+        if isinstance(obj, (np.integer,)):
+            return int(obj)
+        if isinstance(obj, (np.floating,)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if hasattr(obj, "item"):
+            return obj.item()
+        return str(obj)
+
+    summary_path = os.path.join(out_dir, "summary.json")
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2, default=_json_default)
+    print(f"Summary written → {summary_path}")
 
     print(f"\nAll stages complete. Outputs in: {out_dir}")
 
