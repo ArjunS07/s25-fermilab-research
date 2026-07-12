@@ -65,15 +65,31 @@ spec:
               BASE_OUT="/mnt/data/output/${UNIQUE_RUN_ID}-g30-phase1-eval-grid"
               mkdir -p "$BASE_OUT"
 
-              # Iterate over the six Phase-1 training runs.
+              # Pick the latest run dir per label (multiple dirs may exist from retries).
+              declare -A LATEST_DIR
               for RUN_DIR in /mnt/data/output/*g30-phase1-[a-f]; do
                 [ -d "$RUN_DIR" ] || continue
                 LABEL=$(echo "$RUN_DIR" | grep -oP 'phase1-\K[a-f]')
+                LATEST_DIR[$LABEL]="$RUN_DIR"
+              done
+
+              for LABEL in a b c d e f; do
+                RUN_DIR="${LATEST_DIR[$LABEL]:-}"
+                if [ -z "$RUN_DIR" ]; then
+                  echo "WARN: no run dir found for label $LABEL, skipping" | tee -a "${BASE_OUT}/logs.txt"
+                  continue
+                fi
                 echo "=== Evaluating run $LABEL ($RUN_DIR) ===" | tee -a "${BASE_OUT}/logs.txt"
 
                 TRAIN_SUMMARY="${RUN_DIR}/train/summary.json"
                 if [ ! -f "$TRAIN_SUMMARY" ]; then
                   echo "WARN: no train/summary.json in $RUN_DIR, skipping" | tee -a "${BASE_OUT}/logs.txt"
+                  continue
+                fi
+
+                # Validate JSON before extracting fields.
+                if ! jq empty "$TRAIN_SUMMARY" 2>/dev/null; then
+                  echo "WARN: truncated/invalid summary.json in $RUN_DIR, skipping" | tee -a "${BASE_OUT}/logs.txt"
                   continue
                 fi
 
