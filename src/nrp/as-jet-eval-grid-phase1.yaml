@@ -130,9 +130,9 @@ spec:
           resources:
             limits:
               nvidia.com/a40: 1
-              memory: "48Gi"
+              memory: "16Gi"
               cpu: "2.4"
             requests:
               nvidia.com/a40: 1
-              memory: "36Gi"
+              memory: "16Gi"
               cpu: "2"
