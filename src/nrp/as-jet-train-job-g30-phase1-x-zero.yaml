@@ -39,7 +39,7 @@ spec:
               # --- Frozen-harness gate (experiment plan 0.4) ---
               # Pin every Phase-1 run to one commit so grid numbers are comparable. Replace the
               # placeholder with the frozen SHA before launching; the run records it below.
-              GIT_COMMIT="ba09a38583c26c8213a98034d448464c99c53bd9"
+              GIT_COMMIT="b854a6a080eb18954db17a49558f69c4c0cbd16d"
               if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
                 echo "ERROR: GIT_COMMIT is not pinned. Set it to the frozen harness commit SHA"
                 echo "       before launching a Phase-1 grid run (experiment plan hard gate)."
