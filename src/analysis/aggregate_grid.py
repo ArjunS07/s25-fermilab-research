@@ -25,6 +25,17 @@ from util.ks import ks_statistic_vs_uniform
 ISOTROPIC_PRIORS = {"isotropic_com", "isotropic_lognorm"}
 DEFAULT_KS_THRESHOLD = 1e-3
 
+# Fallback A-F ablation flags for eval-only grid dirs (no train summary.json colocated).
+# Mirrors configs/g30-phase1-{a..f}.yaml overrides.
+PHASE1_LABEL_MAP = {
+    "a": {"use_reference_vectors": False, "use_node_scalars": False, "prior_dist": "isotropic_com"},
+    "b": {"use_reference_vectors": True,  "use_node_scalars": False, "prior_dist": "isotropic_com"},
+    "c": {"use_reference_vectors": True,  "use_node_scalars": True,  "prior_dist": "isotropic_com"},
+    "d": {"use_reference_vectors": True,  "use_node_scalars": True,  "prior_dist": "axis_aligned"},
+    "e": {"use_reference_vectors": False, "use_node_scalars": False, "prior_dist": "axis_aligned"},
+    "f": {"use_reference_vectors": False, "use_node_scalars": True,  "prior_dist": "isotropic_com"},
+}
+
 # Columns pulled from summary["metrics"] for the table, in order.
 METRIC_COLUMNS = ["final_loss", "w1m", "fpd", "frac_negative_energy", "frac_spacelike",
                   "isotropy_ks_costheta_p"]
@@ -79,18 +90,72 @@ def recompute_isotropy_ks(samples_path: str):
     return ks_statistic_vs_uniform(cos_theta, -1.0, 1.0)
 
 
+def _load_from_eval_pkl(label: str, run_dir: str) -> tuple:
+    """Fallback for eval-only grid dirs: metrics come from eval_info.pkl (values are Python
+    scalars / (mean, std) tuples / numpy arrays), config comes from the A-F label map."""
+    pkl_path = os.path.join(run_dir, "eval_info.pkl")
+    if not os.path.exists(pkl_path):
+        return None
+    key = label.lower()
+    if key not in PHASE1_LABEL_MAP:
+        return None
+    import pickle
+    with open(pkl_path, "rb") as f:
+        raw = pickle.load(f)
+
+    def _mean(v):
+        # (mean, std) tuple => mean; numpy array => mean; scalar => scalar; None => None
+        if v is None:
+            return None
+        if isinstance(v, tuple):
+            v = v[0]
+        try:
+            import numpy as np
+            if isinstance(v, np.ndarray):
+                return float(np.asarray(v).mean())
+        except ImportError:
+            pass
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    metrics = {
+        "w1m": _mean(raw.get("w1m")),
+        "fpd": _mean(raw.get("fpd")),
+        "frac_negative_energy": _mean(raw.get("frac_negative_energy")),
+        "frac_spacelike": _mean(raw.get("frac_spacelike")),
+        "isotropy_ks_costheta": _mean(raw.get("isotropy_ks_costheta")),
+        "isotropy_ks_costheta_p": _mean(raw.get("isotropy_ks_costheta_p")),
+        "isotropy_gen_vs_data_cos_p": _mean(raw.get("isotropy_gen_vs_data_cos_p")),
+    }
+    config = dict(PHASE1_LABEL_MAP[key])
+    prior_dist = config.pop("prior_dist")
+    return {"config": config, "metrics": metrics, "prior_dist": prior_dist,
+            "final_loss": None, "git_commit": None}
+
+
 def load_run(label: str, run_dir: str, ks_threshold: float = DEFAULT_KS_THRESHOLD) -> dict:
     """Load one run's summary into a flat row dict. Missing summary => a 'MISSING' row."""
     summary_path = os.path.join(run_dir, "summary.json")
-    if not os.path.exists(summary_path):
-        return {"label": label, "status": "MISSING", "dir": run_dir}
-
-    with open(summary_path) as f:
-        summary = json.load(f)
-
-    config = summary.get("config") or {}
-    metrics = summary.get("metrics") or {}
-    prior_dist = _get_prior_dist(summary)
+    if os.path.exists(summary_path):
+        with open(summary_path) as f:
+            summary = json.load(f)
+        config = summary.get("config") or {}
+        metrics = summary.get("metrics") or {}
+        prior_dist = _get_prior_dist(summary)
+        final_loss = summary.get("final_loss")
+        git_commit = summary.get("git_commit")
+    else:
+        fallback = _load_from_eval_pkl(label, run_dir)
+        if fallback is None:
+            return {"label": label, "status": "MISSING", "dir": run_dir}
+        config = fallback["config"]
+        metrics = fallback["metrics"]
+        prior_dist = fallback["prior_dist"]
+        final_loss = fallback["final_loss"]
+        git_commit = fallback["git_commit"]
+        summary = None
 
     ks_p = metrics.get("isotropy_ks_costheta_p")
     ks_d = metrics.get("isotropy_ks_costheta")
@@ -116,8 +181,8 @@ def load_run(label: str, run_dir: str, ks_threshold: float = DEFAULT_KS_THRESHOL
         "use_node_scalars": bool(config.get("use_node_scalars")),
         "use_adaln": bool(config.get("use_adaln")),
         "use_attention": bool(config.get("use_attention")),
-        "final_loss": summary.get("final_loss"),
-        "git_commit": summary.get("git_commit"),
+        "final_loss": final_loss,
+        "git_commit": git_commit,
         "isotropy_ks_costheta": ks_d,
         "isotropy_ks_costheta_p": ks_p,
         "isotropy_gen_vs_data_cos_p": gvd_p,
