@@ -140,6 +140,7 @@ if __name__ == "__main__":
         include_pt=True,
         use_reference_vectors=args.use_reference_vectors,
         use_node_scalars=args.use_node_scalars,
+        node_scalar_seed=args.node_scalar_seed,
         use_adaln=args.use_adaln,
         use_attention=args.use_attention,
     ).to(device)

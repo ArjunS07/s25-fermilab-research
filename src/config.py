@@ -36,6 +36,11 @@ class ModelConfig(BaseModel):
     use_residual: bool = False
     use_reference_vectors: bool = False
     use_node_scalars: bool = False
+    # Source for the initial per-node scalar h_i (only used when use_node_scalars=True).
+    # "physics" — [ψ(m²), ψ(⟨x,e_t⟩)=E, ψ(⟨x,x_jet⟩)]; grid default (with cols 2–3 zeroed
+    # when refs off). "zero" — h_i seeded as zeros (blank channel, purely learned via
+    # message passing). "conditions" — jet_conditions (7-dim) broadcast per particle.
+    node_scalar_seed: Literal["physics", "zero", "conditions"] = "physics"
     use_adaln: bool = False
     use_attention: bool = False
     use_hyperbolic: bool = False
@@ -92,7 +97,7 @@ class InferenceConfig(BaseModel):
     cfg_guidance_weight: float = 2.0
     batch_size: int = 256
     sampler: Literal["euler", "heun"] = "euler"
-    vf_mode: Literal["cfg", "nocfg", "both", "none"] = "both"
+    vf_mode: Literal["cfg", "nocfg", "both", "none"] = "none"
     skip_samples: bool = False
     skip_metrics: bool = False
     prior_dist: Literal[
@@ -223,6 +228,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         n_samples=cfg.inference.n_samples,
         n_viz_samples=cfg.inference.n_viz_samples,
         integration_steps=cfg.inference.integration_steps,
+        vf_mode=cfg.inference.vf_mode,
         use_cosine_lr=cfg.training.use_cosine_lr,
         lr_t0=cfg.training.lr_t0,
         lr_warmup_epochs=cfg.training.lr_warmup_epochs,
@@ -233,6 +239,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         use_time_sampling=cfg.training.use_time_sampling,
         use_reference_vectors=cfg.model.use_reference_vectors,
         use_node_scalars=cfg.model.use_node_scalars,
+        node_scalar_seed=cfg.model.node_scalar_seed,
         use_attention=cfg.model.use_attention,
         prior_dist=cfg.training.prior_dist,
         eta_min_factor=cfg.training.eta_min_factor,
@@ -271,6 +278,7 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         sampler=cfg.inference.sampler,
         use_reference_vectors=cfg.model.use_reference_vectors,
         use_node_scalars=cfg.model.use_node_scalars,
+        node_scalar_seed=cfg.model.node_scalar_seed,
         use_adaln=cfg.model.use_adaln,
         use_attention=cfg.model.use_attention,
         vf_mode=cfg.inference.vf_mode,
@@ -306,6 +314,7 @@ def run_config_dict(cfg: TrainRunConfig, final_scale: float) -> dict:
         "include_pt": True,
         "use_reference_vectors": cfg.model.use_reference_vectors,
         "use_node_scalars": cfg.model.use_node_scalars,
+        "node_scalar_seed": cfg.model.node_scalar_seed,
         "use_adaln": cfg.model.use_adaln,
         "use_attention": cfg.model.use_attention,
         "jet_types": cfg.data.jet_types,

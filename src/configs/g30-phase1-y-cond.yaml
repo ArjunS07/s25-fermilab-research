@@ -1,0 +1,26 @@
+# Wave 1' Y-cond: node scalars seeded from jet_conditions broadcast + isotropic prior, no refs.
+# Like F/Y-zero but with conditions broadcast as h_i seed. Still isotropic (h_i
+# scalar channel doesn't break rotation symmetry) — expect broken by W1M standard,
+# useful as an attribution point vs Y-zero.
+data:
+  jet_types: ["g"]
+  num_particles: 30
+
+model:
+  use_residual: true
+  use_node_scalars: true
+  node_scalar_seed: conditions
+
+training:
+  train_space: polar
+  time_sampling: power_law
+  batch_size: 50
+  num_epochs: 200
+  use_cosine_lr: true
+  use_time_sampling: true
+  use_curriculum: false
+  prior_dist: isotropic_com
+
+inference:
+  n_samples: 50000
+  integration_steps: 64

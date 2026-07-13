@@ -352,6 +352,7 @@ class LEFTJeN(nn.Module):
                  num_layers=6, message_dim=128, hidden_dim=128,
                  use_residual_update=True, include_pt=False,
                  use_reference_vectors=False, use_node_scalars=False,
+                 node_scalar_seed="physics",
                  node_scalar_dim=None, use_adaln=False, use_attention=False):
         super().__init__()
         self.max_particles = max_particles
@@ -362,6 +363,9 @@ class LEFTJeN(nn.Module):
         # both disabled the model is byte-for-byte the original (run A of the ablation grid).
         self.use_reference_vectors = use_reference_vectors
         self.use_node_scalars = use_node_scalars
+        if node_scalar_seed not in ("physics", "zero", "conditions"):
+            raise ValueError(f"node_scalar_seed must be one of physics/zero/conditions, got {node_scalar_seed!r}")
+        self.node_scalar_seed = node_scalar_seed
         self.use_adaln = use_adaln
         self.use_attention = use_attention
         self.node_scalar_dim = node_scalar_dim if node_scalar_dim is not None else embed_dim
@@ -387,20 +391,21 @@ class LEFTJeN(nn.Module):
             for _ in range(num_layers)
         ])
 
-        # Per-node scalar seed: maps 3 Minkowski invariants -> node_scalar_dim.
-        # Invariants: [psi(m_i^2)=psi(<x,x>), psi(E_i)=psi(<x,e_t>), psi(<x,x_jet>)].
-        # Without references (run F) the last two are zeroed, so h is seeded from the true
-        # invariant m_i^2 only and the model stays exactly rotation-equivariant.
-        if use_node_scalars:
-            self.node_seed = PhiMLP(3, [hidden_dim], self.node_scalar_dim)
-
         # Learned null conditioning token. Replaces the all-zeros null vector so the
         # unconditional representation is clearly separated from low-value conditioning.
         # n_particles_idx marks the slot that is preserved even in the null vector
         # (it is redundant with the mask, so zeroing it provides no extra guidance signal).
         cond_dim = max_num_jet_types + 1 + (1 if include_pt else 0)
+        self.cond_dim = cond_dim
         self.n_particles_idx = max_num_jet_types  # index of n_particles in cond vector
         self.null_cond = nn.Parameter(torch.zeros(cond_dim))
+
+        # Per-node scalar seed input dim. "physics" and "zero" produce 3-dim invariants (m², E,
+        # axis); "conditions" broadcasts jet_conditions (cond_dim) per particle so the h_i
+        # channel starts from a purely learned pathway with no Minkowski off-shell hook.
+        if use_node_scalars:
+            seed_input_dim = 3 if node_scalar_seed in ("physics", "zero") else cond_dim
+            self.node_seed = PhiMLP(seed_input_dim, [hidden_dim], self.node_scalar_dim)
         
     
     def make_null_cond(self, jet_conditions: torch.Tensor) -> torch.Tensor:
@@ -417,23 +422,37 @@ class LEFTJeN(nn.Module):
         keep[self.n_particles_idx] = 1.0
         return null_base * (1 - keep) + jet_conditions * keep
 
-    def _node_seed_features(self, x_aug, refs):
-        """Per-node Minkowski-invariant seed features for the scalar channel h_i.
+    def _node_seed_features(self, x_aug, refs, jet_conditions=None):
+        """Per-node seed features for the scalar channel h_i.
 
-        Returns (B, N, 3): [psi(m_i^2)=psi(<x,x>), psi(E_i)=psi(<x,e_t>), psi(<x,x_jet>)].
-        With refs=None the E and axis columns are zero, so h is seeded from the true
-        invariant m_i^2 alone and the network stays exactly rotation-equivariant (run F).
+        Three modes controlled by self.node_scalar_seed:
+          "physics"    — (B, N, 3) Minkowski invariants
+                         [psi(m_i^2), psi(E_i)=psi(<x,e_t>), psi(<x,x_jet>)].
+                         With refs=None the E and axis columns are zero (run F), so h is
+                         seeded from m_i^2 alone and the network stays rotation-equivariant.
+          "zero"       — (B, N, 3) zeros; h_i is a purely learned per-node hidden state
+                         with no physics prior (blank channel).
+          "conditions" — (B, N, cond_dim) jet_conditions broadcast per particle; h_i starts
+                         from Lorentz-invariant class/multiplicity/pT signal only.
         """
-        feat_m = psi(normsq4(x_aug))  # (B, N)
-        if refs is not None:
-            e_t = refs[:, 0:1, :]     # (B, 1, 4) — time axis (1,0,0,0); <x,e_t> = E
-            x_jet = refs[:, 1:2, :]   # (B, 1, 4) — jet 4-momentum; <x,x_jet> = axis alignment
-            feat_E = psi(dotsq4(x_aug, e_t))
-            feat_axis = psi(dotsq4(x_aug, x_jet))
-        else:
-            feat_E = torch.zeros_like(feat_m)
-            feat_axis = torch.zeros_like(feat_m)
-        return torch.stack([feat_m, feat_E, feat_axis], dim=-1)  # (B, N, 3)
+        if self.node_scalar_seed == "physics":
+            feat_m = psi(normsq4(x_aug))
+            if refs is not None:
+                e_t = refs[:, 0:1, :]
+                x_jet = refs[:, 1:2, :]
+                feat_E = psi(dotsq4(x_aug, e_t))
+                feat_axis = psi(dotsq4(x_aug, x_jet))
+            else:
+                feat_E = torch.zeros_like(feat_m)
+                feat_axis = torch.zeros_like(feat_m)
+            return torch.stack([feat_m, feat_E, feat_axis], dim=-1)
+        if self.node_scalar_seed == "zero":
+            B, N, _ = x_aug.shape
+            return torch.zeros(B, N, 3, device=x_aug.device, dtype=x_aug.dtype)
+        # "conditions": (B, cond_dim) -> (B, N, cond_dim)
+        if jet_conditions is None:
+            raise ValueError("node_scalar_seed='conditions' requires jet_conditions to be passed in.")
+        return jet_conditions.unsqueeze(1).expand(-1, x_aug.shape[1], -1)
 
     def forward(self, x, t, jet_conditions, mask, ref_vectors=None):
         """
@@ -472,7 +491,7 @@ class LEFTJeN(nn.Module):
         # Seed per-node scalars from the initial (augmented) state.
         if self.use_node_scalars:
             x_aug0 = torch.cat([x, refs], dim=1) if num_refs > 0 else x
-            seed_feats = self._node_seed_features(x_aug0, refs)     # (B, P+R, 3)
+            seed_feats = self._node_seed_features(x_aug0, refs, jet_conditions)
             h = self.node_seed(seed_feats) * mask_aug.unsqueeze(-1)  # (B, P+R, node_scalar_dim)
         else:
             h = None

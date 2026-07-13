@@ -1,0 +1,25 @@
+# Wave 1' X-zero: node scalars with zero seed + axis-aligned prior, no refs.
+# Tests whether h_i as a purely learned per-node channel (no physics seed) adds
+# capacity on top of the aligned prior; strips the m² off-shell hook.
+data:
+  jet_types: ["g"]
+  num_particles: 30
+
+model:
+  use_residual: true
+  use_node_scalars: true
+  node_scalar_seed: zero
+
+training:
+  train_space: polar
+  time_sampling: power_law
+  batch_size: 50
+  num_epochs: 200
+  use_cosine_lr: true
+  use_time_sampling: true
+  use_curriculum: false
+  prior_dist: axis_aligned
+
+inference:
+  n_samples: 50000
+  integration_steps: 64

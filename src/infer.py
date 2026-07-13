@@ -56,8 +56,8 @@ def parse_args():
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 _ARCH_KEYS = ("n_hidden", "n_layers", "use_residual", "use_reference_vectors",
-              "use_node_scalars", "use_adaln", "use_attention", "use_hyperbolic",
-              "hyperbolic_model", "regulator_mass")
+              "use_node_scalars", "node_scalar_seed", "use_adaln", "use_attention",
+              "use_hyperbolic", "hyperbolic_model", "regulator_mass")
 
 
 def _resolve_architecture(args, ckpt):
@@ -86,6 +86,7 @@ def _resolve_architecture(args, ckpt):
 
 def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
                      num_particles, device, use_reference_vectors=False, use_node_scalars=False,
+                     node_scalar_seed="physics",
                      use_adaln=False, use_attention=False, preloaded_ckpt=None):
     model = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
@@ -96,6 +97,7 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
         include_pt=True,
         use_reference_vectors=use_reference_vectors,
         use_node_scalars=use_node_scalars,
+        node_scalar_seed=node_scalar_seed,
         use_adaln=use_adaln,
         use_attention=use_attention,
     ).to(device)
@@ -153,6 +155,7 @@ def main():
         device=device,
         use_reference_vectors=args.use_reference_vectors,
         use_node_scalars=args.use_node_scalars,
+        node_scalar_seed=getattr(args, "node_scalar_seed", "physics"),
         use_adaln=args.use_adaln,
         use_attention=args.use_attention,
         preloaded_ckpt=ckpt,
