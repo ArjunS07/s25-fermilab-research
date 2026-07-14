@@ -34,6 +34,11 @@ PHASE1_LABEL_MAP = {
     "d": {"use_reference_vectors": True,  "use_node_scalars": True,  "prior_dist": "axis_aligned"},
     "e": {"use_reference_vectors": False, "use_node_scalars": False, "prior_dist": "axis_aligned"},
     "f": {"use_reference_vectors": False, "use_node_scalars": True,  "prior_dist": "isotropic_com"},
+    "p1a":    {"use_reference_vectors": True,  "use_node_scalars": False, "prior_dist": "axis_aligned"},
+    "x-cond": {"use_reference_vectors": False, "use_node_scalars": True,  "prior_dist": "axis_aligned"},
+    "x-zero": {"use_reference_vectors": False, "use_node_scalars": True,  "prior_dist": "axis_aligned"},
+    "y-cond": {"use_reference_vectors": False, "use_node_scalars": True,  "prior_dist": "isotropic_com"},
+    "y-zero": {"use_reference_vectors": False, "use_node_scalars": True,  "prior_dist": "isotropic_com"},
 }
 
 # Columns pulled from summary["metrics"] for the table, in order.

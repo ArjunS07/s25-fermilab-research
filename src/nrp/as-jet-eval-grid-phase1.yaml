@@ -67,13 +67,13 @@ spec:
 
               # Pick the latest run dir per label (multiple dirs may exist from retries).
               declare -A LATEST_DIR
-              for RUN_DIR in /mnt/data/output/*g30-phase1-[a-f]; do
+              for RUN_DIR in /mnt/data/output/*g30-phase1-*; do
                 [ -d "$RUN_DIR" ] || continue
-                LABEL=$(echo "$RUN_DIR" | grep -oP 'phase1-\K[a-f]')
+                LABEL=$(echo "$RUN_DIR" | grep -oP 'phase1-\K.+$')
                 LATEST_DIR[$LABEL]="$RUN_DIR"
               done
 
-              for LABEL in a b c d e f; do
+              for LABEL in a b c d e f p1a x-zero y-zero x-cond y-cond; do
                 RUN_DIR="${LATEST_DIR[$LABEL]:-}"
                 if [ -z "$RUN_DIR" ]; then
                   echo "WARN: no run dir found for label $LABEL, skipping" | tee -a "${BASE_OUT}/logs.txt"
@@ -127,7 +127,7 @@ spec:
               # Final assertion: 6 rows in ablation table.
               N_ROWS=$(tail -n +3 "${BASE_OUT}/ablation_table.md" | wc -l)
               echo "Ablation table has $N_ROWS rows" | tee -a "${BASE_OUT}/logs.txt"
-              [ "$N_ROWS" -eq 6 ] || echo "WARNING: expected 6 rows, got $N_ROWS"
+              [ "$N_ROWS" -eq 11 ] || echo "WARNING: expected 11 rows, got $N_ROWS"
 
               echo "=== Phase-1 eval grid complete ===" | tee -a "${BASE_OUT}/logs.txt"
 
