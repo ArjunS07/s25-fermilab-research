@@ -92,7 +92,7 @@ spec:
                   echo "WARN: failed to parse summary.json in $RUN_DIR ($SUMMARY_LINE), skipping" | tee -a "${BASE_OUT}/logs.txt"
                   continue
                 }
-                read USE_REFS USE_SCALARS USE_ADALN USE_ATTENTION PRIOR_DIST N_LAYERS N_HIDDEN USE_RESIDUAL <<< "$SUMMARY_LINE"
+                read USE_REFS USE_SCALARS USE_ADALN USE_ATTENTION PRIOR_DIST N_LAYERS N_HIDDEN USE_RESIDUAL NODE_SCALAR_SEED <<< "$SUMMARY_LINE"
 
                 CHECKPOINT="${RUN_DIR}/train/models/final_model.pth"
                 if [ ! -f "$CHECKPOINT" ]; then
@@ -112,6 +112,7 @@ spec:
                   --set model.n_layers="$N_LAYERS" \
                   --set model.n_hidden="$N_HIDDEN" \
                   --set model.use_residual="$USE_RESIDUAL" \
+                  --set model.node_scalar_seed="$NODE_SCALAR_SEED" \
                   --set inference.prior_dist="$PRIOR_DIST" \
                   2>&1 | tee -a "${BASE_OUT}/logs.txt"
 

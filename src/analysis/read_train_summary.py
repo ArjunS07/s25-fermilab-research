@@ -5,7 +5,7 @@ Tolerates truncated files (e.g. pod killed mid-write) and NaN/Infinity
 literals that train.py's json.dump may produce.
 
 Usage: python3 -m analysis.read_train_summary /path/to/summary.json
-Output: use_refs use_scalars use_adaln use_attention prior_dist n_layers n_hidden use_residual
+Output: use_refs use_scalars use_adaln use_attention prior_dist n_layers n_hidden use_residual node_scalar_seed
 """
 import json
 import re
@@ -72,6 +72,7 @@ def main():
         m.get("n_layers", 3),
         m.get("n_hidden", 128),
         str(m.get("use_residual", False)).lower(),
+        m.get("node_scalar_seed", "physics"),
     )
 
 
