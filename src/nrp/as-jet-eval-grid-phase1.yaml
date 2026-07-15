@@ -32,7 +32,7 @@ spec:
 
               # Pin to the fix commit (frozen-harness gate).
               git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
-              cd /tmp/repo && git checkout 5448605 && cd /
+              cd /tmp/repo && git checkout 037f993 && cd /
               cp -r /tmp/repo/src /mnt/data/
 
               if [ -d "/mnt/data/python-env" ] && /mnt/data/python-env/bin/python -c "import torch; print('Environment OK')" 2>/dev/null; then
