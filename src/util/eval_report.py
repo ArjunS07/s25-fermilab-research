@@ -19,7 +19,7 @@ from typing import Sequence, Optional
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import TwoSlopeNorm
+from matplotlib.colors import LogNorm, SymLogNorm
 import seaborn as sns
 import torch
 from scipy import stats
@@ -161,15 +161,24 @@ def _draw_jet_image_triptych(
     title_prefix: str = "",
     extent: float = 0.8,
 ) -> None:
+    # Jet images span 2-3 orders of magnitude between the pT-weighted core (the
+    # leading constituent, always near (0,0)) and the soft halo. On a linear
+    # scale the core saturates and the halo vanishes, so use a log color scale
+    # with a shared vmax and a floor a few decades down. See docstring.
     vmax = float(np.nanmax(np.stack([test_img, gen_img])) or 1e-12)
+    vmin = vmax * 1e-3
     diff = gen_img - test_img
     diff_max = float(np.nanmax(np.abs(diff)) or 1e-12)
 
     kw = dict(origin="lower", extent=(-extent, extent, -extent, extent),
               aspect="equal")
-    ax_test.imshow(test_img.T, vmin=0, vmax=vmax, cmap="viridis", **kw)
-    ax_gen.imshow(gen_img.T,   vmin=0, vmax=vmax, cmap="viridis", **kw)
-    ax_diff.imshow(diff.T,     norm=TwoSlopeNorm(vcenter=0, vmin=-diff_max, vmax=diff_max),
+    img_norm = LogNorm(vmin=vmin, vmax=vmax)
+    ax_test.imshow(test_img.T, norm=img_norm, cmap="viridis", **kw)
+    ax_gen.imshow(gen_img.T,   norm=img_norm, cmap="viridis", **kw)
+    # Signed difference: linear near zero, log-scaled in the tails so both the
+    # over- and under-dense regions are visible.
+    ax_diff.imshow(diff.T,
+                   norm=SymLogNorm(linthresh=diff_max * 1e-2, vmin=-diff_max, vmax=diff_max),
                    cmap="RdBu_r", **kw)
 
     for ax, sub in zip([ax_test, ax_gen, ax_diff], ["Test", "Gen", "Gen − Test"]):
