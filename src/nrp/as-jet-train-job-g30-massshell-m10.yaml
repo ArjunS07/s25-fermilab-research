@@ -39,7 +39,7 @@ spec:
               # --- Frozen-harness gate (experiment plan 0.4) ---
               # Pin Wave 3 runs to one commit so mass sweep is comparable. Placeholder must
               # be replaced with the frozen SHA before launch; the run records it below.
-              GIT_COMMIT="40944c63c627b8796f74fff018c7c5c854bcc650"
+              GIT_COMMIT="1fa1bf8ed98bfdd23e6e6a8cbfcbd27060384c92"
               if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
                 echo "ERROR: GIT_COMMIT is not pinned. Set it to the frozen harness commit SHA"
                 echo "       before launching a Wave 3 run (experiment plan hard gate)."
