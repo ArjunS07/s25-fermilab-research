@@ -1,8 +1,6 @@
 import seaborn as sns
 import torch
-import numpy as np
 import matplotlib.pyplot as plt
-from scipy import stats
 
 from jetnet.utils import EtaPhiPtE_to_cartesian
 
@@ -46,8 +44,8 @@ def generate_samples(
     make_clear_folder(f"{root_output_path}/samples")
 
     all_samples = []
-    all_pt_cond = []   # conditioning pT for each jet (normalized)
-    all_masks = []     # particle masks for each jet
+    all_pt_cond = []      # conditioning pT for each jet (normalized)
+    all_jet_types = []    # per-jet class index (argmax of one-hot)
 
     with torch.no_grad():
         model.eval()
@@ -147,58 +145,14 @@ def generate_samples(
 
             all_samples.append(scaled_x.cpu())
             all_pt_cond.append(gen_pt.cpu())
-            all_masks.append(masks.cpu())
+            all_jet_types.append(jet_one_hot_enc.argmax(dim=-1).cpu())
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-    all_samples_cat = torch.cat(all_samples, dim=0)
-    all_pt_cond_cat = torch.cat(all_pt_cond, dim=0)
-    all_masks_cat = torch.cat(all_masks, dim=0)
+    all_samples_cat   = torch.cat(all_samples, dim=0)
+    all_pt_cond_cat   = torch.cat(all_pt_cond, dim=0)
+    all_jet_types_cat = torch.cat(all_jet_types, dim=0)
 
-    _plot_pt_comparison(
-        all_samples_cat, all_pt_cond_cat, all_masks_cat,
-        out_path=f"{root_output_path}/samples/pt_comparison.png"
-    )
-
-    return all_samples_cat.to(device)
-
-
-def _plot_pt_comparison(samples, pt_cond, masks, out_path):
-    """
-    Scatter plot of sum-of-particle-pT vs conditioning pT per jet.
-
-    samples : (N, max_particles, 4)  Cartesian (E, px, py, pz), physical units
-    pt_cond : (N,)                   Normalized conditioning pT from the NF
-    masks   : (N, max_particles)     1 for real particles, 0 for padding
-    """
-    # Per-particle pT = sqrt(px^2 + py^2), then sum over real particles
-    px = samples[:, :, 1]
-    py = samples[:, :, 2]
-    particle_pt = torch.sqrt(px ** 2 + py ** 2)
-    sum_pt = (particle_pt * masks).sum(dim=1).numpy()
-    pt_cond_np = pt_cond.numpy()
-
-    slope, intercept, r_value, _, _ = stats.linregress(pt_cond_np, sum_pt)
-
-    fig, ax = plt.subplots(figsize=(6, 5))
-    sns.scatterplot(
-        x=pt_cond_np, y=sum_pt,
-        alpha=0.3, s=8, linewidth=0,
-        color=sns.color_palette("deep")[0],
-        ax=ax, label="Generated jets"
-    )
-    x_line = np.linspace(pt_cond_np.min(), pt_cond_np.max(), 200)
-    ax.plot(x_line, slope * x_line + intercept,
-            color="crimson", linewidth=1.5,
-            label=rf"Linear fit ($R^2={r_value**2:.3f}$, slope=${slope:.3f}$)")
-    ax.set_xlabel(r"Conditioning $p_T$ (normalized)", fontsize=13)
-    ax.set_ylabel(r"$\sum_i p_{T,i}$ (generated, physical units)", fontsize=13)
-    ax.set_title(r"Generated scalar $p_T$ sum vs. conditioning $p_T$", fontsize=13)
-    ax.legend(fontsize=11)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    print(f"pT comparison plot saved to {out_path}")
-
+    return all_samples_cat.to(device), all_jet_types_cat, all_pt_cond_cat
 

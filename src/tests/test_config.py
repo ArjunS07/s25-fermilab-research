@@ -83,7 +83,7 @@ def test_infer_defaults_match_legacy_argparse():
     assert cfg.model.use_reference_vectors is False
     assert cfg.model.use_node_scalars is False
     assert cfg.model.use_adaln is False
-    assert cfg.inference.vf_mode == "both"
+    assert cfg.inference.vf_mode == "none"
     assert cfg.inference.skip_samples is False
     assert cfg.inference.skip_metrics is False
 
@@ -215,7 +215,7 @@ def test_infer_config_to_namespace_attribute_names():
     assert ns.num_particles == 30
     assert ns.batch_size == 256
     assert ns.sampler == "euler"
-    assert ns.vf_mode == "both"
+    assert ns.vf_mode == "none"
 
 
 def test_cache_config_to_namespace_attribute_names():

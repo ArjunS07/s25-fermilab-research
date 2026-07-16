@@ -218,10 +218,12 @@ def main():
 
     # ── Stage 2: Sample generation ─────────────────────────────────────────────
     samples = None
+    gen_jet_types = None
+    gen_pt_cond = None
     if not args.skip_samples:
         try:
             print("\n=== Sample generation ===")
-            samples = generate_samples(
+            samples, gen_jet_types, gen_pt_cond = generate_samples(
                 model=model,
                 jet_attr_model=jet_attr_model,
                 root_output_path=out_dir,
@@ -262,6 +264,8 @@ def main():
                     gen_samples=samples,
                     output_path=out_dir,
                     device=device,
+                    gen_jet_types=gen_jet_types,
+                    gen_pt_cond=gen_pt_cond,
                 )
                 print("Metrics done.")
             except Exception as e:

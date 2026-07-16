@@ -615,48 +615,57 @@ if __name__ == "__main__":
 
         jet_attr_model_loaded = jet_attributes.load_model(model_path=get_model_pth_path(args.output_path)).to(device)
 
-        try:
-            make_clear_folder(f"{model_output_path}/vf_viz_cfg")
-            make_clear_folder(f"{model_output_path}/vf_viz_nocfg")
-            generate_model_vector_field(
-                out_dir=f"{model_output_path}/vf_viz_cfg",
-                final_model=raw_model,
-                jet_attr_model=jet_attr_model_loaded,
-                X_test=X_test,
-                scale=final_scale,
-                n_jet_types=len(args.jet_types),
-                n_particles_per_jet=args.num_particles,
-                n_features_per_particle=NUM_PARTICLE_FEATURES,
-                # set to 100 viz samples if 150 particle jets
-                n_viz_samples=args.n_viz_samples if args.num_particles < MAX_N_PARTICLES else 100,
-                integration_steps=args.integration_steps,
-                use_cfg=True,
-                cfg_guidance_weight=2.0,
-                use_hyperbolic=args.use_hyperbolic,
-                use_reference_vectors=args.use_reference_vectors,
-            )
-            generate_model_vector_field(
-                out_dir=f"{model_output_path}/vf_viz_nocfg",
-                final_model=raw_model,
-                jet_attr_model=jet_attr_model_loaded,
-                X_test=X_test,
-                scale=final_scale,
-                n_jet_types=len(args.jet_types),
-                n_particles_per_jet=args.num_particles,
-                n_features_per_particle=NUM_PARTICLE_FEATURES,
-                n_viz_samples=args.n_viz_samples if args.num_particles < MAX_N_PARTICLES else 100,
-                integration_steps=args.integration_steps,
-                use_cfg=False,
-                use_hyperbolic=args.use_hyperbolic,
-                use_reference_vectors=args.use_reference_vectors,
-            )
-        except Exception as e:
-            print(f"Error occurred while generating model vector field: {e}")
-            with open(f"{model_output_path}/error_log.txt", "a") as f:
-                f.write(f"Error occurred while generating model vector field: {e}\n")
+        # Vector-field visualization is opt-in (cfg.inference.vf_mode). Default "none"
+        # since the frames only show E vs p_x (2 of 4 features) and are rarely opened.
+        run_cfg_vf   = args.vf_mode in ("cfg", "both")
+        run_nocfg_vf = args.vf_mode in ("nocfg", "both")
+        if run_cfg_vf or run_nocfg_vf:
+            try:
+                vf_n_viz = args.n_viz_samples if args.num_particles < MAX_N_PARTICLES else 100
+                if run_cfg_vf:
+                    make_clear_folder(f"{model_output_path}/vf_viz_cfg")
+                    generate_model_vector_field(
+                        out_dir=f"{model_output_path}/vf_viz_cfg",
+                        final_model=raw_model,
+                        jet_attr_model=jet_attr_model_loaded,
+                        X_test=X_test,
+                        scale=final_scale,
+                        n_jet_types=len(args.jet_types),
+                        n_particles_per_jet=args.num_particles,
+                        n_features_per_particle=NUM_PARTICLE_FEATURES,
+                        n_viz_samples=vf_n_viz,
+                        integration_steps=args.integration_steps,
+                        use_cfg=True,
+                        cfg_guidance_weight=2.0,
+                        use_hyperbolic=args.use_hyperbolic,
+                        use_reference_vectors=args.use_reference_vectors,
+                    )
+                if run_nocfg_vf:
+                    make_clear_folder(f"{model_output_path}/vf_viz_nocfg")
+                    generate_model_vector_field(
+                        out_dir=f"{model_output_path}/vf_viz_nocfg",
+                        final_model=raw_model,
+                        jet_attr_model=jet_attr_model_loaded,
+                        X_test=X_test,
+                        scale=final_scale,
+                        n_jet_types=len(args.jet_types),
+                        n_particles_per_jet=args.num_particles,
+                        n_features_per_particle=NUM_PARTICLE_FEATURES,
+                        n_viz_samples=vf_n_viz,
+                        integration_steps=args.integration_steps,
+                        use_cfg=False,
+                        use_hyperbolic=args.use_hyperbolic,
+                        use_reference_vectors=args.use_reference_vectors,
+                    )
+            except Exception as e:
+                print(f"Error occurred while generating model vector field: {e}")
+                with open(f"{model_output_path}/error_log.txt", "a") as f:
+                    f.write(f"Error occurred while generating model vector field: {e}\n")
 
+        gen_jet_types = None
+        gen_pt_cond = None
         try:
-            samples = generate_samples(
+            samples, gen_jet_types, gen_pt_cond = generate_samples(
                 model=raw_model,
                 jet_attr_model=jet_attr_model_loaded,
                 root_output_path=model_output_path,
@@ -692,7 +701,9 @@ if __name__ == "__main__":
                 jet_types=args.jet_types,
                 gen_samples=samples,
                 output_path=model_output_path,
-                device=device
+                device=device,
+                gen_jet_types=gen_jet_types,
+                gen_pt_cond=gen_pt_cond,
             ) or {}
         except Exception as e:
             print(f"Error occurred while running/saving metrics: {e}")
