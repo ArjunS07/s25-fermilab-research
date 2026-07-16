@@ -1,0 +1,71 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-cache-icp-g30-massshell
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: as-train-pvc
+          persistentVolumeClaim:
+            claimName: as-jet-train-pvc-2
+
+      containers:
+        - name: cache
+          image: python:3.10-slim
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -ex
+              apt-get update && apt-get install -y libffi-dev gcc g++ git build-essential
+
+              mkdir -p /mnt/data
+
+              git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
+              cp -r /tmp/repo/src /mnt/data/
+
+              if [ -d "/mnt/data/python-env" ] && /mnt/data/python-env/bin/python -c "import torch; print('Environment OK')" 2>/dev/null; then
+                echo "=== Existing environment OK, skipping setup ==="
+                source /mnt/data/python-env/bin/activate
+              else
+                rm -rf /mnt/data/python-env
+                python -m venv /mnt/data/python-env
+                source /mnt/data/python-env/bin/activate
+                pip install torch --index-url https://download.pytorch.org/whl/cpu
+                pip install -r /mnt/data/src/requirements.txt
+              fi
+
+              cd /mnt/data/src
+
+              # Prepare dataset (no GPU needed; data.py only downloads/preprocesses).
+              UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
+              OUTPUT_PATH="/mnt/data/output/$UNIQUE_RUN_ID-cache-icp-g30-massshell"
+              mkdir -p $OUTPUT_PATH
+              python3 data.py --num_particles=30 --output_path=${OUTPUT_PATH}
+
+              # Generate mass-shell ICP cache — CPU only, use all available cores.
+              # Cache dir landing: /mnt/data/caches/<hash>_p30_massshell_m0.5_.../icp_cache.pkl
+              python3 cache_icp.py \
+                --config configs/cache-icp-30-massshell.yaml \
+                --set paths.output_path=${OUTPUT_PATH} \
+                --set cache.n_workers=$(nproc)
+
+          volumeMounts:
+            - mountPath: /mnt/data
+              name: as-train-pvc
+          resources:
+            limits:
+              memory: "19Gi"
+              cpu: "9.6"
+            requests:
+              memory: "16Gi"
+              cpu: "8"
