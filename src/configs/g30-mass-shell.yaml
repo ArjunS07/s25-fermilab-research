@@ -22,10 +22,13 @@ training:
   use_cosine_lr: true
   use_time_sampling: true
   use_curriculum: false
+  # Wave 3 base is E (aligned prior), not D. Per 08-wave1p-synthesis.md §4.
+  prior_dist: axis_aligned
 
 inference:
   n_samples: 50000
   integration_steps: 64
+  prior_dist: axis_aligned
 
 paths:
   cache_dir: /mnt/data/caches

@@ -1,0 +1,10 @@
+data:
+  num_particles: 30
+
+cache:
+  icp_max_iter: 1000
+  geometry: mass_shell
+  regulator_mass: 0.5
+
+paths:
+  cache_dir: /mnt/data/caches
