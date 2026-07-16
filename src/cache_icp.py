@@ -105,7 +105,11 @@ def _permute_geodesic(x_0_real, x_1_real, m):
     cost = geodesic_cost_matrix(x_0_real, x_1_real, m)             # (n, n)
     cost_np = cost.numpy().astype(np.float64)
     _, col_ind = linear_sum_assignment(cost_np)
-    perm = np.arange(n_real, dtype=np.int32)[col_ind]
+    # perm is applied at train time as x_0_reordered = x_0[perm], so position k must hold the
+    # x_0-item Hungarian-paired with x_1[k]. That's x_0[i*] where col_ind[i*]=k, i.e. the
+    # inverse of col_ind — hence argsort. The Euclidean branch's iterative composition (line 68)
+    # self-corrects to the same fixed point, so it doesn't need this explicitly.
+    perm = np.argsort(col_ind).astype(np.int32)
     return perm, np.eye(3, dtype=np.float32)
 
 
