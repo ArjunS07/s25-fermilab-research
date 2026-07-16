@@ -28,6 +28,12 @@ def __x_test_to_abs(X_test, device='cpu'):
     pt = pt_rel * Pt.unsqueeze(1)
     eta = eta_rel + Eta.unsqueeze(1)
     phi = phi_rel + Phi.unsqueeze(1)
+    # Wrap to (-pi, pi] to match the atan2 convention used for generated phi
+    # (cartesian_to_EtaPhiPtE). The synthetic jet phi is drawn on [0, 2pi), so
+    # without this the absolute-phi figure shows test and gen on different
+    # branches of the circle — a cosmetic ~pi offset. Relative coords and the
+    # atan2-based isotropy stats are unaffected either way.
+    phi = torch.remainder(phi + torch.pi, 2 * torch.pi) - torch.pi
     p0 = pt * torch.cosh(eta)
 
     return torch.stack([eta, phi, pt, p0], dim=-1).to(device)
