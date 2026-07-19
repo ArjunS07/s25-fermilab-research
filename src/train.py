@@ -668,7 +668,7 @@ if __name__ == "__main__":
             torch.manual_seed(args.inference_seed)
             if torch.cuda.is_available():
                 torch.cuda.manual_seed_all(args.inference_seed)
-            samples, gen_jet_types, gen_pt_cond = generate_samples(
+            samples, gen_jet_types, gen_pt_cond, prior_samples = generate_samples(
                 model=raw_model,
                 jet_attr_model=jet_attr_model_loaded,
                 root_output_path=model_output_path,
@@ -690,6 +690,7 @@ if __name__ == "__main__":
         # Persist a small sample subset so plots/metrics can be regenerated without re-running.
         try:
             torch.save(samples[:10000].cpu(), f"{model_output_path}/samples_subset.pt")
+            torch.save(prior_samples[:10000].cpu(), f"{model_output_path}/prior_samples_subset.pt")
         except Exception as e:
             print(f"Error saving sample subset: {e}")
 
@@ -703,6 +704,7 @@ if __name__ == "__main__":
                 device=device,
                 gen_jet_types=gen_jet_types,
                 gen_pt_cond=gen_pt_cond,
+                prior_samples=prior_samples,
             ) or {}
         except Exception as e:
             print(f"Error occurred while running/saving metrics: {e}")

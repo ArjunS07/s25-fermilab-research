@@ -36,6 +36,7 @@ sns.set_style("whitegrid")
 _CLASS_PALETTE = sns.color_palette("tab10")
 _TEST_COLOR = sns.color_palette("deep")[0]
 _GEN_COLOR = sns.color_palette("deep")[3]
+_PRIOR_COLOR = sns.color_palette("deep")[2]
 
 # Multiplicity buckets. Boundaries roughly track curriculum idea in MEMORY.md.
 _MULT_BUCKETS = [
@@ -59,6 +60,9 @@ def eval_report(
     jet_type_names: Sequence[str],     # e.g. ["g", "q", "t"]
     gen_pt_cond: Optional[torch.Tensor],  # (Ng,) normalized conditioning pT; None ok
     output_path: str,
+    prior_cartesian: Optional[torch.Tensor] = None,
+    prior_polar_abs: Optional[torch.Tensor] = None,
+    prior_polar_rel: Optional[torch.Tensor] = None,
 ) -> None:
     """Emit the 14 evaluation figures into `output_path`."""
 
@@ -70,36 +74,41 @@ def eval_report(
     g_types = gen_jet_types.detach().cpu().long()
     t_types = test_jet_types.detach().cpu().long()
     pt_cond = gen_pt_cond.detach().cpu() if gen_pt_cond is not None else None
+    prior_c = prior_cartesian.detach().cpu() if prior_cartesian is not None else None
+    pp_abs = prior_polar_abs.detach().cpu() if prior_polar_abs is not None else None
+    pp_rel = prior_polar_rel.detach().cpu() if prior_polar_rel is not None else None
 
     names = list(jet_type_names)
 
     # Pooled
-    _plot_jet_image(tp_rel, gp_rel, f"{output_path}/jet_image.png")
+    _plot_jet_image(tp_rel, gp_rel, f"{output_path}/jet_image.png", pp_rel)
     _plot_jet_image_by_multiplicity(tp_rel, gp_rel,
                                     f"{output_path}/jet_image_by_multiplicity.png")
     _plot_particle_kinematics(tp_rel, gp_rel, relative=True,
-                              out_path=f"{output_path}/particle_kinematics_rel.png")
+                              out_path=f"{output_path}/particle_kinematics_rel.png",
+                              prior_polar=pp_rel)
     _plot_particle_kinematics(tp_abs, gp_abs, relative=False,
-                              out_path=f"{output_path}/particle_kinematics_abs.png")
+                              out_path=f"{output_path}/particle_kinematics_abs.png",
+                              prior_polar=pp_abs)
     _plot_physicality(gen_c, f"{output_path}/physicality.png")
     _plot_isotropy(gen_c, tp_abs, f"{output_path}/isotropy.png")
 
     # Per-class overlay
     _plot_jet_girth(tp_rel, gp_rel, t_types, g_types, names,
-                    f"{output_path}/jet_girth.png")
+                    f"{output_path}/jet_girth.png", pp_rel)
     _plot_jet_multiplicity(tp_rel, gp_rel, t_types, g_types, names,
                            f"{output_path}/jet_multiplicity.png")
     _plot_jet_pt_total(tp_abs, gp_abs, t_types, g_types, names, pt_cond,
-                       f"{output_path}/jet_pt_total.png")
+                       f"{output_path}/jet_pt_total.png", pp_abs)
     _plot_radial_profile(tp_rel, gp_rel, t_types, g_types, names,
-                         f"{output_path}/radial_profile.png")
+                         f"{output_path}/radial_profile.png", pp_rel)
     _plot_energy_tails(tp_abs, gp_abs, t_types, g_types, names,
                        f"{output_path}/energy_tails.png")
 
     # Per-class grid
     test_cart = _polar_abs_to_cartesian(tp_abs)
     _plot_jet_mass(test_cart, gen_c, t_types, g_types, names,
-                   f"{output_path}/jet_mass.png")
+                   f"{output_path}/jet_mass.png", prior_c)
     _plot_jet_z1_z2(tp_rel, gp_rel, t_types, g_types, names,
                     f"{output_path}/jet_z1_z2.png")
     _plot_jet_image_by_class(tp_rel, gp_rel, t_types, g_types, names,
@@ -206,16 +215,36 @@ def _plot_jet_image(
     test_polar_rel: torch.Tensor,
     gen_polar_rel: torch.Tensor,
     out_path: str,
+    prior_polar_rel: Optional[torch.Tensor] = None,
 ) -> None:
-    """Averaged jet image, Test | Gen | (Gen − Test)."""
+    """Averaged jet image, including the exact pre-transport state when available."""
     t_img = _pt_weighted_avg_image(test_polar_rel[..., 0], test_polar_rel[..., 1],
                                    test_polar_rel[..., 2])
     g_img = _pt_weighted_avg_image(gen_polar_rel[..., 0], gen_polar_rel[..., 1],
                                    gen_polar_rel[..., 2])
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
-    fig.suptitle(r"Averaged jet image (pT-weighted, $\Delta\eta$–$\Delta\phi$)",
-                 fontsize=14)
-    _draw_jet_image_triptych(*axes, t_img, g_img)
+    if prior_polar_rel is None:
+        fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
+        fig.suptitle(r"Averaged jet image (pT-weighted, $\Delta\eta$–$\Delta\phi$)", fontsize=14)
+        _draw_jet_image_triptych(*axes, t_img, g_img)
+    else:
+        p_img = _pt_weighted_avg_image(prior_polar_rel[..., 0], prior_polar_rel[..., 1],
+                                       prior_polar_rel[..., 2])
+        vmax = float(np.nanmax(np.stack([t_img, p_img, g_img])) or 1e-12)
+        norm = LogNorm(vmin=vmax * 1e-3, vmax=vmax)
+        fig, axes = plt.subplots(1, 5, figsize=(24, 4.5))
+        kw = dict(origin="lower", extent=(-0.8, 0.8, -0.8, 0.8), aspect="equal")
+        for ax, img, title in zip(axes[:3], [t_img, p_img, g_img], ["Test", "Prior", "Gen"]):
+            ax.imshow(img.T, norm=norm, cmap="viridis", **kw)
+            ax.set_title(title)
+        for ax, diff, title in [(axes[3], g_img - p_img, "Gen − Prior"),
+                                (axes[4], g_img - t_img, "Gen − Test")]:
+            lim = float(np.nanmax(np.abs(diff)) or 1e-12)
+            ax.imshow(diff.T, norm=SymLogNorm(linthresh=lim * 1e-2, vmin=-lim, vmax=lim),
+                      cmap="RdBu_r", **kw)
+            ax.set_title(title)
+        for ax in axes:
+            ax.set_xlabel(r"$\Delta\eta$"); ax.set_ylabel(r"$\Delta\phi$")
+        fig.suptitle(r"Averaged jet image: transport from Prior to Gen", fontsize=14)
     fig.tight_layout()
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
@@ -255,6 +284,7 @@ def _plot_particle_kinematics(
     gen_polar: torch.Tensor,
     relative: bool,
     out_path: str,
+    prior_polar: Optional[torch.Tensor] = None,
 ) -> None:
     if relative:
         titles = [r"$\eta_{\rm rel}$", r"$\phi_{\rm rel}$", r"$p_T^{\rm rel}$"]
@@ -268,8 +298,12 @@ def _plot_particle_kinematics(
     for i, ax in enumerate(axes):
         t = _flatten_real(test_polar, i)
         g = _flatten_real(gen_polar, i)
+        p = _flatten_real(prior_polar, i) if prior_polar is not None else None
         bins = 100
         ax.hist(t, bins=bins, alpha=0.5, density=True, color=_TEST_COLOR, label="Test")
+        if p is not None:
+            ax.hist(p, bins=bins, density=True, histtype="step", linestyle="--",
+                    linewidth=1.6, color=_PRIOR_COLOR, label="Prior")
         ax.hist(g, bins=bins, alpha=0.5, density=True, color=_GEN_COLOR, label="Gen")
         ax.set_xlabel(titles[i])
         ax.set_ylabel("Density")
@@ -411,6 +445,7 @@ def _overlay_hist_by_class(
     bins,
     log_y: bool = False,
     density: bool = True,
+    prior_vals_by_class: Optional[list] = None,
 ) -> None:
     """Test as filled+alpha, gen as solid step, one color per class."""
     for c, name in enumerate(names):
@@ -422,6 +457,10 @@ def _overlay_hist_by_class(
         if len(t) > 0:
             ax.hist(t, bins=bins, density=density, alpha=0.28, color=color,
                     label=f"{name} (test)")
+        if prior_vals_by_class is not None and len(prior_vals_by_class[c]) > 0:
+            ax.hist(prior_vals_by_class[c], bins=bins, density=density, histtype="step",
+                    linestyle="--", color=_PRIOR_COLOR, linewidth=1.6,
+                    label=f"{name} (prior)")
         if len(g) > 0:
             ax.hist(g, bins=bins, density=density, histtype="step", color=color,
                     linewidth=1.8, label=f"{name} (gen)")
@@ -443,12 +482,14 @@ def _jet_girth(polar_rel: torch.Tensor) -> torch.Tensor:
     return (pt_rel.clamp(min=0) * dR).sum(dim=1)
 
 
-def _plot_jet_girth(tp_rel, gp_rel, t_types, g_types, names, out_path):
+def _plot_jet_girth(tp_rel, gp_rel, t_types, g_types, names, out_path, pp_rel=None):
     t_g = _jet_girth(tp_rel)
     g_g = _jet_girth(gp_rel)
     n = len(names)
     fig, ax = plt.subplots(figsize=(8, 5))
-    bins = np.linspace(0.0, float(max(t_g.max(), g_g.max()).item()) * 1.02 + 1e-6, 60)
+    p_g = _jet_girth(pp_rel) if pp_rel is not None else None
+    maxima = [t_g.max(), g_g.max()] + ([p_g.max()] if p_g is not None else [])
+    bins = np.linspace(0.0, float(max(maxima).item()) * 1.02 + 1e-6, 60)
     _overlay_hist_by_class(
         ax,
         _split_scalar_by_class(t_g, t_types, n),
@@ -456,6 +497,8 @@ def _plot_jet_girth(tp_rel, gp_rel, t_types, g_types, names, out_path):
         names,
         xlabel=r"Jet girth $g = \sum_i (p_T^i/p_T^{\rm jet})\, \Delta R_i$",
         bins=bins,
+        prior_vals_by_class=(_split_scalar_by_class(p_g, g_types, n)
+                             if p_g is not None else None),
     )
     ax.set_title("Jet girth by class")
     fig.tight_layout()
@@ -485,11 +528,13 @@ def _plot_jet_multiplicity(tp_rel, gp_rel, t_types, g_types, names, out_path):
     plt.close(fig)
 
 
-def _plot_jet_pt_total(tp_abs, gp_abs, t_types, g_types, names, pt_cond, out_path):
+def _plot_jet_pt_total(tp_abs, gp_abs, t_types, g_types, names, pt_cond, out_path, pp_abs=None):
     t_pt = _jet_pt_scalar(tp_abs)
     g_pt = _jet_pt_scalar(gp_abs)
     n = len(names)
-    hi = float(max(t_pt.max(), g_pt.max()).item()) * 1.02
+    p_pt = _jet_pt_scalar(pp_abs) if pp_abs is not None else None
+    maxima = [t_pt.max(), g_pt.max()] + ([p_pt.max()] if p_pt is not None else [])
+    hi = float(max(maxima).item()) * 1.02
     bins = np.linspace(0.0, hi + 1e-6, 60)
 
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -500,6 +545,8 @@ def _plot_jet_pt_total(tp_abs, gp_abs, t_types, g_types, names, pt_cond, out_pat
         names,
         xlabel=r"Total jet $\sum_i p_T^i$",
         bins=bins,
+        prior_vals_by_class=(_split_scalar_by_class(p_pt, g_types, n)
+                             if p_pt is not None else None),
     )
     title = "Total jet pT by class"
     if pt_cond is not None:
@@ -514,7 +561,7 @@ def _plot_jet_pt_total(tp_abs, gp_abs, t_types, g_types, names, pt_cond, out_pat
     plt.close(fig)
 
 
-def _plot_radial_profile(tp_rel, gp_rel, t_types, g_types, names, out_path):
+def _plot_radial_profile(tp_rel, gp_rel, t_types, g_types, names, out_path, pp_rel=None):
     """ρ(ΔR) weighted by pT_rel, per class overlay."""
     n = len(names)
     bins = np.linspace(0.0, 0.8, 60)
@@ -522,7 +569,10 @@ def _plot_radial_profile(tp_rel, gp_rel, t_types, g_types, names, out_path):
     fig, ax = plt.subplots(figsize=(8, 5))
     for c, name in enumerate(names):
         color = _CLASS_PALETTE[c % len(_CLASS_PALETTE)]
-        for tag, polar, types in [("test", tp_rel, t_types), ("gen", gp_rel, g_types)]:
+        series = [("test", tp_rel, t_types), ("gen", gp_rel, g_types)]
+        if pp_rel is not None:
+            series.insert(1, ("prior", pp_rel, g_types))
+        for tag, polar, types in series:
             sel = (types == c)
             if not bool(sel.any()):
                 continue
@@ -536,6 +586,10 @@ def _plot_radial_profile(tp_rel, gp_rel, t_types, g_types, names, out_path):
             if tag == "test":
                 ax.hist(dR, bins=bins, weights=wt, density=True, alpha=0.28,
                         color=color, label=f"{name} (test)")
+            elif tag == "prior":
+                ax.hist(dR, bins=bins, weights=wt, density=True, histtype="step",
+                        linestyle="--", color=_PRIOR_COLOR, linewidth=1.6,
+                        label=f"{name} (prior)")
             else:
                 ax.hist(dR, bins=bins, weights=wt, density=True, histtype="step",
                         color=color, linewidth=1.8, label=f"{name} (gen)")
@@ -639,7 +693,7 @@ def _jet_invariant_mass(cartesian: torch.Tensor) -> torch.Tensor:
     return torch.sqrt(m2.clamp(min=0.0))
 
 
-def _plot_jet_mass(test_cart, gen_cart, t_types, g_types, names, out_path):
+def _plot_jet_mass(test_cart, gen_cart, t_types, g_types, names, out_path, prior_cart=None):
     t_m = _jet_invariant_mass(test_cart)
     g_m = _jet_invariant_mass(gen_cart)
     n = len(names)
@@ -648,18 +702,24 @@ def _plot_jet_mass(test_cart, gen_cart, t_types, g_types, names, out_path):
     fig.suptitle(r"Invariant jet mass  $m_{\rm jet}=\sqrt{(\Sigma E)^2 - |\Sigma \vec p|^2}$",
                  fontsize=14)
 
-    hi = float(max(t_m.max(), g_m.max()).item()) * 1.02 + 1e-6
+    p_m = _jet_invariant_mass(prior_cart) if prior_cart is not None else None
+    maxima = [t_m.max(), g_m.max()] + ([p_m.max()] if p_m is not None else [])
+    hi = float(max(maxima).item()) * 1.02 + 1e-6
     bins = np.linspace(0.0, hi, 80)
 
-    panels = [(f"class {name}", t_m[t_types == c].numpy(), g_m[g_types == c].numpy())
+    panels = [(f"class {name}", t_m[t_types == c].numpy(), g_m[g_types == c].numpy(),
+               p_m[g_types == c].numpy() if p_m is not None else None)
               for c, name in enumerate(names)]
-    panels.append(("pooled", t_m.numpy(), g_m.numpy()))
-    for k, (title, t_vals, g_vals) in enumerate(panels):
+    panels.append(("pooled", t_m.numpy(), g_m.numpy(), p_m.numpy() if p_m is not None else None))
+    for k, (title, t_vals, g_vals, p_vals) in enumerate(panels):
         ax = axes[k // cols, k % cols]
         if len(t_vals) == 0 and len(g_vals) == 0:
             ax.set_visible(False); continue
         if len(t_vals):
             ax.hist(t_vals, bins=bins, density=True, alpha=0.5, color=_TEST_COLOR, label="Test")
+        if p_vals is not None and len(p_vals):
+            ax.hist(p_vals, bins=bins, density=True, histtype="step", linestyle="--",
+                    linewidth=1.6, color=_PRIOR_COLOR, label="Prior")
         if len(g_vals):
             ax.hist(g_vals, bins=bins, density=True, alpha=0.5, color=_GEN_COLOR, label="Gen")
         ax.set_xlabel(r"$m_{\rm jet}$")

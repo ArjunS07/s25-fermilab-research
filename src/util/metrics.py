@@ -47,6 +47,7 @@ def run_save_metrics(
     device='cpu',
     gen_jet_types=None,
     gen_pt_cond=None,
+    prior_samples=None,
 ):
     """Compute scalar metrics + call eval_report to write the 14 eval figures.
 
@@ -57,6 +58,7 @@ def run_save_metrics(
             zeros (per-class figures degenerate to a single-class overlay).
         gen_pt_cond: (N_gen,) normalized conditioning pT; if None the slope
             annotation on jet_pt_total is skipped.
+        prior_samples: exact pre-transport Cartesian state paired with gen_samples.
     """
     torch.manual_seed(EVAL_SEED)  # fixed yardstick across runs
 
@@ -75,12 +77,18 @@ def run_save_metrics(
             gen_jet_types = gen_jet_types[finite_jet.to(gen_jet_types.device)]
         if gen_pt_cond is not None:
             gen_pt_cond = gen_pt_cond[finite_jet.to(gen_pt_cond.device)]
+        if prior_samples is not None:
+            prior_samples = prior_samples[finite_jet.to(prior_samples.device)]
 
     gen_polar_abs = cartesian_to_EtaPhiPtE(gen_samples.to(device))
+    prior_polar_abs = (cartesian_to_EtaPhiPtE(prior_samples.to(device))
+                       if prior_samples is not None else None)
 
     test_polar_abs = __x_test_to_abs(X_test=X_test, device=device)
     test_polar_rel = EtaPhiPtE_to_relEtaPhiPt(test_polar_abs)
     gen_polar_rel  = EtaPhiPtE_to_relEtaPhiPt(gen_polar_abs)
+    prior_polar_rel = (EtaPhiPtE_to_relEtaPhiPt(prior_polar_abs)
+                       if prior_polar_abs is not None else None)
 
     # Padded rows must land exactly at (0, 0, 0) in rel coords on both sides so
     # jetnet's marginal-based W1s aren't polluted by phantom values. Gen padding is
@@ -94,6 +102,10 @@ def run_save_metrics(
         # Fallback if data.py's MASK flag was flipped off: recover from pt_rel > 0.
         test_mask = (test_particles[:, :, 2] > 0).to(test_polar_rel.dtype).to(test_polar_rel.device)
     gen_polar_rel  = gen_polar_rel  * gen_mask.unsqueeze(-1)
+    if prior_polar_rel is not None:
+        prior_mask = (prior_samples.abs().sum(dim=-1) > 0).to(
+            prior_polar_rel.dtype).to(prior_polar_rel.device)
+        prior_polar_rel = prior_polar_rel * prior_mask.unsqueeze(-1)
     test_polar_rel = test_polar_rel * test_mask.unsqueeze(-1)
 
     # Move to CPU once for all subsequent numpy / jetnet calls
@@ -101,6 +113,9 @@ def run_save_metrics(
     test_polar_rel = test_polar_rel.cpu()
     gen_polar_abs  = gen_polar_abs.cpu()
     gen_polar_rel  = gen_polar_rel.cpu()
+    if prior_polar_abs is not None:
+        prior_polar_abs = prior_polar_abs.cpu()
+        prior_polar_rel = prior_polar_rel.cpu()
 
     # Test per-jet class index lives at X_test[:][1][:, 4] (JetNet layout).
     test_jet_types = X_test[:][1][:, 4].long().cpu()
@@ -132,6 +147,9 @@ def run_save_metrics(
             test_jet_types=test_jet_types,
             jet_type_names=jet_types,
             gen_pt_cond=gen_pt_cond.cpu() if gen_pt_cond is not None else None,
+            prior_cartesian=prior_samples.cpu() if prior_samples is not None else None,
+            prior_polar_abs=prior_polar_abs,
+            prior_polar_rel=prior_polar_rel,
             output_path=output_path,
         )
     except Exception as e:

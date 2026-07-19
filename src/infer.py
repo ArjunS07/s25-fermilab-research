@@ -227,10 +227,11 @@ def main():
     samples = None
     gen_jet_types = None
     gen_pt_cond = None
+    prior_samples = None
     if not args.skip_samples:
         try:
             print("\n=== Sample generation ===")
-            samples, gen_jet_types, gen_pt_cond = generate_samples(
+            samples, gen_jet_types, gen_pt_cond, prior_samples = generate_samples(
                 model=model,
                 jet_attr_model=jet_attr_model,
                 root_output_path=out_dir,
@@ -247,6 +248,9 @@ def main():
             pt_path = os.path.join(out_dir, "samples.pt")
             torch.save(samples.cpu(), pt_path)
             print(f"Saved samples → {pt_path}")
+            prior_path = os.path.join(out_dir, "prior_samples.pt")
+            torch.save(prior_samples.cpu(), prior_path)
+            print(f"Saved exact integration prior → {prior_path}")
         except Exception as e:
             print(f"\n[ERROR] Sample generation failed: {e}")
             traceback.print_exc()
@@ -267,6 +271,7 @@ def main():
                     device=device,
                     gen_jet_types=gen_jet_types,
                     gen_pt_cond=gen_pt_cond,
+                    prior_samples=prior_samples,
                 )
                 print("Metrics done.")
             except Exception as e:

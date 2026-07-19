@@ -44,6 +44,7 @@ def generate_samples(
     make_clear_folder(f"{root_output_path}/samples")
 
     all_samples = []
+    all_prior_samples = []
     all_pt_cond = []      # conditioning pT for each jet (normalized)
     all_jet_types = []    # per-jet class index (argmax of one-hot)
 
@@ -86,6 +87,12 @@ def generate_samples(
                 max_particles_per_jet=max_particles_per_jet,
                 device=device
             )
+            # Preserve the exact integration start, including sampled attributes,
+            # multiplicity mask, orientation, and any geometry-specific projection.
+            prior_x = x * masks.unsqueeze(-1)
+            if use_hyperbolic and hyperbolic_model == 'mass_shell':
+                from util.mass_shell import project_to_shell
+                prior_x = project_to_shell(prior_x, regulator_mass) * masks.unsqueeze(-1)
             # Conditioning vector: [one_hot_type, n_particles, pT]
             cond = torch.cat([
                 jet_one_hot_enc,
@@ -148,6 +155,7 @@ def generate_samples(
             # torch.save(scaled_x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
 
             all_samples.append(scaled_x.cpu())
+            all_prior_samples.append((final_scale * prior_x).cpu())
             all_pt_cond.append(gen_pt.cpu())
             all_jet_types.append(jet_one_hot_enc.argmax(dim=-1).cpu())
 
@@ -155,7 +163,8 @@ def generate_samples(
                 torch.cuda.empty_cache()
 
     all_samples_cat   = torch.cat(all_samples, dim=0)
+    all_prior_samples_cat = torch.cat(all_prior_samples, dim=0)
     all_pt_cond_cat   = torch.cat(all_pt_cond, dim=0)
     all_jet_types_cat = torch.cat(all_jet_types, dim=0)
 
-    return all_samples_cat.to(device), all_jet_types_cat, all_pt_cond_cat
+    return all_samples_cat.to(device), all_jet_types_cat, all_pt_cond_cat, all_prior_samples_cat
