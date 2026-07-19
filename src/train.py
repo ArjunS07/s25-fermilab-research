@@ -26,7 +26,7 @@ from util.mass_shell import (
     conditional_vector_field as ms_vector_field,
     pushforward_to_tangent as ms_pushforward, mass_shell_loss,
 )
-from util.coordinates import transform_rel_particle_coordinates_to_cartesian, jacobian_epp_etaphipte
+from util.coordinates import transform_rel_particle_coordinates_to_cartesian
 from jetnet.utils import EtaPhiPtE_to_cartesian, cartesian_to_EtaPhiPtE
 from util.ema import ModelEMA
 from util.file_management import make_clear_folder

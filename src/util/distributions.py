@@ -6,21 +6,6 @@ from util.hyperbolic import (
 )
 
 
-def generate_x_0_com_frame(x_1=None, batch_size=None, num_particles=None, device='cpu'):
-    """Generate noise that naturally has zero total momentum"""
-
-    if x_1 is not None:
-        batch_size, num_particles = x_1.shape[:2]
-        device = x_1.device
-    elif (batch_size is None) or (num_particles is None):
-        raise ValueError("Either x_1 or (batch_size and num_particles) must be provided.")
-    raise NotImplementedError(
-        "generate_x_0_com_frame is not yet implemented. "
-        "Use gen_initial_distribution with prior_dist='isotropic_com' instead."
-    )
-
-    
-
 def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, prior_dist='isotropic_com', jet_features=None, jet_phi=None, device='cpu'):
 
     if x_1 is not None:

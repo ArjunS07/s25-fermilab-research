@@ -1,0 +1,88 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-train-g30-massshell-m01-fixed-smoke
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: as-train-pvc
+          persistentVolumeClaim:
+            claimName: as-jet-train-pvc-2
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              apt-get update
+              apt-get install -y libffi-dev gcc g++ curl git wget build-essential
+
+              git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
+              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
+                echo "ERROR: corrected mass-shell smoke SHA is not pinned"
+                exit 1
+              fi
+              git -C /tmp/repo checkout "$GIT_COMMIT"
+              cp -r /tmp/repo/src /mnt/data/
+
+              if [ -d /mnt/data/python-env ] && /mnt/data/python-env/bin/python -c "import torch" 2>/dev/null; then
+                source /mnt/data/python-env/bin/activate
+              else
+                python -m venv /mnt/data/python-env
+                source /mnt/data/python-env/bin/activate
+                pip install torch --index-url https://download.pytorch.org/whl/cu121
+                pip install -r /mnt/data/src/requirements.txt
+              fi
+
+              cd /mnt/data/src
+              UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
+              OUTPUT_PATH="/mnt/data/output/${UNIQUE_RUN_ID}-g30-massshell-m01-fixed-smoke"
+              mkdir -p "$OUTPUT_PATH"
+              git -C /tmp/repo rev-parse HEAD > "$OUTPUT_PATH/git_commit.txt"
+
+              python data.py --jet_types g --num_particles=30 --output_path="$OUTPUT_PATH"
+              python jet_attr_model.py --output_path="$OUTPUT_PATH"
+              torchrun --standalone --nproc_per_node=1 train.py \
+                --config configs/g30-mass-shell-m01.yaml \
+                --set paths.output_path="$OUTPUT_PATH" \
+                --set training.n_train_samples=100000 \
+                --set training.num_epochs=2 \
+                --set training.epoch_frac=0.05 \
+                --set training.lr_warmup_epochs=0 \
+                --set training.use_icp=false \
+                --set model.use_reference_vectors=false \
+                --set inference.n_samples=2000 \
+                --set inference.integration_steps=16 \
+                2>&1 | tee -a "$OUTPUT_PATH/logs.txt"
+
+              python -m experiments.diagnose_mass_shell_checkpoint \
+                --run-dir "$OUTPUT_PATH" \
+                --out "$OUTPUT_PATH/transport_diagnostics.json" \
+                --n-jets 512 \
+                --seed 42 \
+                --steps 16 \
+                2>&1 | tee -a "$OUTPUT_PATH/logs.txt"
+          volumeMounts:
+            - mountPath: /mnt/data
+              name: as-train-pvc
+          resources:
+            limits:
+              nvidia.com/a40: 1
+              memory: 16Gi
+              cpu: "2.4"
+            requests:
+              nvidia.com/a40: 1
+              memory: 16Gi
+              cpu: "2"
