@@ -1,14 +1,12 @@
 """
 cache_icp.py — Pre-compute ICP-aligned prior distributions for training.
 
-For each jet in the training set we generate an isotropic-CoM prior sample x_0
-and find the *permutation* of its particles that minimises the total squared
-Cartesian distance to the corresponding target cloud x_1 (Hungarian / linear
-assignment). Only the permutation is applied — no rotation or translation —
-so the physics of the prior is preserved.
+For each jet in the training set we generate one prior sample x_0, align that exact
+realization to x_1, and cache the resulting paired tensor.  Training reuses the tensor
+itself; cached assignments are never applied to unrelated fresh noise.
 
-The resulting cache is a tensor of shape (N, max_particles, 4) stored in the
-normalized space (after dividing by final_scale, same convention as train.py).
+The paired tensor has shape (N, max_particles, 4) in normalized space and is accompanied
+by strict dataset/prior/geometry/scale metadata.
 Pass --icp_cache_path to train.py to load it instead of generating x_0 fresh.
 
 Usage:
@@ -19,6 +17,7 @@ Usage:
 import logging
 import os
 import pickle
+import hashlib
 from multiprocessing import Pool
 
 import numpy as np
@@ -57,6 +56,27 @@ def resolve_training_cache_path(use_icp: bool, explicit_path: str | None,
 
 MAX_N_PARTICLES = 150
 RANDOM_SEED = 42
+CACHE_FORMAT_VERSION = 2
+
+
+def dataset_fingerprint(x: torch.Tensor) -> str:
+    a = x.detach().cpu().contiguous().numpy()
+    h = hashlib.sha256()
+    h.update(str(a.shape).encode())
+    h.update(a.tobytes())
+    return h.hexdigest()
+
+
+def validate_cache_metadata(payload, expected):
+    metadata = payload.get("metadata")
+    if payload.get("format_version") != CACHE_FORMAT_VERSION or metadata is None:
+        raise ValueError("incompatible permutation-only/legacy ICP cache; rebuild paired x_0 cache")
+    mismatches = {k: (metadata.get(k), v) for k, v in expected.items()
+                  if metadata.get(k) != v}
+    if mismatches:
+        raise ValueError(f"incompatible ICP cache metadata: {mismatches}")
+    if "paired_x0" not in payload:
+        raise ValueError("ICP cache does not contain the exact paired_x0 realization")
 
 
 def _align_point_clouds_till_converge(x_0_orig, x1, max_iter=200):
@@ -204,12 +224,11 @@ if __name__ == "__main__":
     from util.distributions import gen_initial_distribution
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    torch.manual_seed(RANDOM_SEED)
-    np.random.seed(RANDOM_SEED)
-
     config_path, overrides = parse_config_cli()
     cfg = build_config(CacheRunConfig, config_path, overrides)
     args = cache_config_to_namespace(cfg)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
     # ── Compute canonical cache path ──────────────────────────────────────────
     cache_path = canonical_cache_path(args.cache_dir, args.jet_types, args.num_particles)
@@ -218,7 +237,7 @@ if __name__ == "__main__":
     if os.path.exists(cache_path):
         with open(cache_path, "rb") as _f:
             _existing = pickle.load(_f)
-        if "perm_cache" in _existing:
+        if _existing.get("format_version") == CACHE_FORMAT_VERSION and "paired_x0" in _existing:
             if args.skip_if_exists:
                 logging.info("Cache already exists — skipping computation (--no-skip_if_exists to force).")
                 raise SystemExit(0)
@@ -236,7 +255,9 @@ if __name__ == "__main__":
     with open(f"{data_path}/x_train.pkl", "rb") as f:
         X_train = pickle.load(f)
 
-    X_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to("cpu")
+    jet_phi = (2 * torch.pi) * torch.rand(len(X_train))
+    X_transformed = transform_rel_particle_coordinates_to_cartesian(
+        X_train, jet_phi=jet_phi).to("cpu")
     if args.num_particles < MAX_N_PARTICLES:
         X_transformed = X_transformed[:, :args.num_particles, :]
 
@@ -267,6 +288,9 @@ if __name__ == "__main__":
             gen_initial_distribution(
                 batch_size=end - start,
                 num_particles=args.num_particles,
+                prior_dist=args.prior_dist,
+                jet_features=X_train[:][1][start:end],
+                jet_phi=jet_phi[start:end],
             ).numpy().astype(np.float32)
         )
     x_0_np = np.concatenate(x_0_parts, axis=0)   # (N, P, 4)
@@ -292,8 +316,14 @@ if __name__ == "__main__":
             perm_cache[idx] = perm_full
             rot_cache[idx] = rot
 
+    paired_x0 = np.take_along_axis(x_0_np, perm_cache[..., None], axis=1)
+    paired_x0[..., 1:4] = np.einsum("npj,nkj->npk", paired_x0[..., 1:4], rot_cache)
+    paired_x0 *= (np.arange(args.num_particles)[None, :] < n_real_np[:, None])[..., None]
+
     # ── Save ──────────────────────────────────────────────────────────────────
     payload = {
+        "format_version": CACHE_FORMAT_VERSION,
+        "paired_x0": paired_x0.astype(np.float32),
         "perm_cache": perm_cache,
         "rot_cache": rot_cache,
         "final_scale": final_scale,
@@ -301,6 +331,17 @@ if __name__ == "__main__":
         "n_samples": n_total,
         "geometry": args.geometry,
         "regulator_mass": args.regulator_mass,
+        "metadata": {
+            "dataset_fingerprint": dataset_fingerprint(X_scaled),
+            "dataset_indices": list(range(n_total)),
+            "jet_types": list(args.jet_types),
+            "prior_dist": args.prior_dist,
+            "seed": args.seed,
+            "num_particles": args.num_particles,
+            "geometry": args.geometry,
+            "regulator_mass": args.regulator_mass,
+            "final_scale": final_scale,
+        },
     }
     with open(cache_path, "wb") as f:
         pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)

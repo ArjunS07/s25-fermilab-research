@@ -35,7 +35,7 @@ from util.metrics import run_save_metrics
 # from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import get_data_path
-from cache_icp import resolve_training_cache_path
+from cache_icp import resolve_training_cache_path, validate_cache_metadata, dataset_fingerprint
 from util.mask_helpers import mean_std_masked_tensor
 from config import (TrainRunConfig, build_config, parse_config_cli, train_config_to_namespace,
                     generation_controls_from_namespace)
@@ -48,19 +48,18 @@ TRAIN_SPLIT = 0.7
 # SCALE = 2000
 
 class PairedDataset(torch.utils.data.Dataset):
-    def __init__(self, jet_info, particle_data, perm_cache=None, rot_cache=None):
+    def __init__(self, jet_info, particle_data, jet_phi, paired_x0=None):
         self.jet_info = jet_info
         self.particle_data = particle_data
-        self.perm_cache = perm_cache   # optional (N, P) int64 — ICP permutation indices
-        self.rot_cache = rot_cache     # optional (N, 3, 3) float32 — ICP rotation matrices
+        self.jet_phi = jet_phi
+        self.paired_x0 = paired_x0
 
     def __len__(self):
         return len(self.particle_data)
 
     def __getitem__(self, idx):
-        perm = self.perm_cache[idx] if self.perm_cache is not None else torch.zeros(1, dtype=torch.long)
-        rot = self.rot_cache[idx] if self.rot_cache is not None else torch.zeros(1)
-        return self.jet_info[idx], self.particle_data[idx], perm, rot
+        x0 = self.paired_x0[idx] if self.paired_x0 is not None else torch.zeros(1)
+        return self.jet_info[idx], self.particle_data[idx], self.jet_phi[idx], x0
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)    
@@ -109,7 +108,9 @@ if __name__ == "__main__":
     if args.distributed:
         dist.barrier()  # ranks 1..N-1 wait for rank 0 to create the output dir
 
-    X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(X_train).to('cpu')
+    train_jet_phi = (2 * torch.pi) * torch.rand(len(X_train))
+    X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(
+        X_train, jet_phi=train_jet_phi).to('cpu')
     X_train_particle_transformed = X_train_particle_transformed[:args.n_train_samples]
     if args.num_particles < MAX_N_PARTICLES:
         # Particles are, by default, ordered by p_t. take the n highest pt particles in each jet
@@ -237,8 +238,7 @@ if __name__ == "__main__":
               f"alpha_start={args.curriculum_alpha_start:.2f}")
 
     # ── ICP cache ─────────────────────────────────────────────────────────────
-    perm_cache: torch.Tensor | None = None
-    rot_cache: torch.Tensor | None = None
+    paired_x0_cache: torch.Tensor | None = None
     icp_cache_path = resolve_training_cache_path(
         args.use_icp, args.icp_cache_path, args.cache_dir, args.jet_types, args.num_particles
     )
@@ -247,26 +247,20 @@ if __name__ == "__main__":
             print(f"Loading ICP cache from {icp_cache_path} …")
         with open(icp_cache_path, "rb") as f:
             icp_payload = pickle.load(f)
-        if "perm_cache" not in icp_payload:
-            raise ValueError(
-                f"ICP cache at '{icp_cache_path}' is old format (x_0_cache key). "
-                "Re-run cache_icp.py — it will auto-detect, delete, and recompute the cache."
-            )
         n_train = len(X_train_particle_transformed)
-        perm_cache = torch.from_numpy(icp_payload["perm_cache"]).long()
-        assert perm_cache.shape[0] >= n_train, (
-            f"ICP cache has {perm_cache.shape[0]} entries but training set needs {n_train}"
-        )
-        assert perm_cache.shape[1] >= args.num_particles, (
-            f"ICP cache has {perm_cache.shape[1]} particles but --num_particles={args.num_particles}"
-        )
-        perm_cache = perm_cache[:n_train, :args.num_particles]
-        if "rot_cache" in icp_payload:
-            rot_cache = torch.from_numpy(icp_payload["rot_cache"]).float()
-            rot_cache = rot_cache[:n_train]
+        expected = {"dataset_fingerprint": dataset_fingerprint(X_train_particle_transformed),
+                    "dataset_indices": list(range(n_train)), "jet_types": list(args.jet_types),
+                    "prior_dist": args.prior_dist, "seed": RANDOM_SEED,
+                    "num_particles": args.num_particles, "final_scale": float(final_scale),
+                    "geometry": ("mass_shell" if args.use_hyperbolic and
+                                 args.hyperbolic_model == "mass_shell" else "euclidean")}
+        if expected["geometry"] == "mass_shell":
+            expected["regulator_mass"] = args.regulator_mass
+        validate_cache_metadata(icp_payload, expected)
+        paired_x0_cache = torch.from_numpy(icp_payload["paired_x0"]).float()
+        paired_x0_cache = paired_x0_cache[:n_train, :args.num_particles]
         if is_rank0:
-            print(f"ICP cache loaded: perm={tuple(perm_cache.shape)}"
-                  + (f"  rot={tuple(rot_cache.shape)}" if rot_cache is not None else "  (no rot)"))
+            print(f"ICP paired x_0 cache loaded: {tuple(paired_x0_cache.shape)}")
 
    
     def _sample_t(batch_size: int) -> torch.Tensor:
@@ -358,11 +352,11 @@ if __name__ == "__main__":
 
         X_train_epoch = torch.utils.data.Subset(X_train_particle_transformed, epoch_indices)
         train_jet_info_epoch = train_jet_info[epoch_indices]
-        perm_cache_epoch = perm_cache[epoch_indices] if perm_cache is not None else None
-        rot_cache_epoch = rot_cache[epoch_indices] if rot_cache is not None else None
+        train_jet_phi_epoch = train_jet_phi[epoch_indices]
+        paired_x0_epoch = paired_x0_cache[epoch_indices] if paired_x0_cache is not None else None
 
         paired_dataset = PairedDataset(
-            train_jet_info_epoch, X_train_epoch, perm_cache=perm_cache_epoch, rot_cache=rot_cache_epoch
+            train_jet_info_epoch, X_train_epoch, train_jet_phi_epoch, paired_x0=paired_x0_epoch
         )
         train_loader = DataLoader(
             paired_dataset,
@@ -377,7 +371,7 @@ if __name__ == "__main__":
         accumulated_loss = 0
         total_n_accumulations = 0
 
-        for i, (batch_jet_info, batch_particle_info, batch_perm_cached, batch_rot_cached) in enumerate(train_loader):
+        for i, (batch_jet_info, batch_particle_info, batch_jet_phi, batch_x0_cached) in enumerate(train_loader):
 
             batch_jet_info = batch_jet_info.to(device)
             batch_particle_info = batch_particle_info.to(device)
@@ -409,34 +403,24 @@ if __name__ == "__main__":
             # TODO: Boost before, can't boost scaled data
             # x_1 = boost_to_com_frame(x_1, mask=true_masks)
             # x_1 = (1/SCALE) * x_1
-            x_0 = gen_initial_distribution(
-                x_1=x_1, prior_dist=args.prior_dist, jet_features=batch_jet_info, device=device,
-            ).to(device)
-            if perm_cache is not None:
-                # Apply the ICP-derived permutation then rotation to the fresh prior sample.
-                # Permutation: gather along particle dim using (B, P, 4) index.
-                batch_perm = batch_perm_cached.to(device)
-                x_0 = torch.gather(x_0, 1, batch_perm.unsqueeze(-1).expand(-1, -1, x_0.shape[-1]))
-                if rot_cache is not None:
-                    # Rotate 3-momenta (indices 1:4): (B, P, 3) @ (B, 3, 3)^T
-                    batch_rot = batch_rot_cached.to(device)
-                    x_0 = torch.cat([
-                        x_0[:, :, :1],
-                        torch.bmm(x_0[:, :, 1:4], batch_rot.transpose(1, 2)),
-                    ], dim=-1)
+            x_0 = (batch_x0_cached.to(device) if paired_x0_cache is not None else
+                   gen_initial_distribution(x_1=x_1, prior_dist=args.prior_dist,
+                                            jet_features=batch_jet_info,
+                                            jet_phi=batch_jet_phi.to(device),
+                                            device=device).to(device))
 
             mask_exp = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
             x_1 = mask_exp * x_1
             x_0 = mask_exp * x_0
 
-            # Reference virtual particles: e_t=(1,0,0,0) and the true jet 4-momentum
-            # (sum of the target constituents, in scaled space). None when disabled.
+            # External physical massless conditioning jet.  This is reproducible from the
+            # same attributes at inference and never leaks the target constituent sum.
             ref_vectors = None
             if args.use_reference_vectors:
-                e_t = torch.zeros(x_1.shape[0], 1, 4, device=device, dtype=x_1.dtype)
-                e_t[..., 0] = 1.0
-                jet_p4 = (x_1 * true_masks.unsqueeze(-1)).sum(dim=1, keepdim=True)  # (B, 1, 4)
-                ref_vectors = torch.cat([e_t, jet_p4], dim=1)  # (B, 2, 4)
+                from util.coordinates import build_reference_vectors
+                ref_vectors = build_reference_vectors(batch_jet_info[:, 0], batch_jet_info[:, 1],
+                                                      final_scale, device,
+                                                      jet_phi=batch_jet_phi.to(device))
 
 
             # mean_std_masked_tensor("x_0", x_0, true_masks)
@@ -453,10 +437,15 @@ if __name__ == "__main__":
                 p0 = project_to_shell(x_0, m).to(device)
                 p1 = project_to_shell(x_1, m).to(device)
                 x_t = ms_interpolant(p0, p1, t, m)
-                u_t = ms_vector_field(x_t, p1, t, m) * mask_exp   # tangent target at x_t
+                mask_exp64 = mask_exp.to(torch.float64)
+                u_t = ms_vector_field(x_t, p1, t.to(torch.float64), m) * mask_exp64
 
-                pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks, ref_vectors=ref_vectors)
-                pred_tan = ms_pushforward(x_t, pred, m) * mask_exp
+                model_dtype = next(raw_model.parameters()).dtype
+                model_refs = ref_vectors.to(model_dtype) if ref_vectors is not None else None
+                pred = model.forward(x=x_t.to(model_dtype), t=t.to(model_dtype),
+                                     jet_conditions=batch_jet_info_cropped.to(model_dtype),
+                                     mask=true_masks, ref_vectors=model_refs)
+                pred_tan = ms_pushforward(x_t, pred.to(torch.float64), m) * mask_exp64
                 loss = mass_shell_loss(pred_tan, u_t, true_masks, m)
             elif args.use_hyperbolic:
                 # Riemannian flow matching: geodesic interpolant in the Poincaré ball.

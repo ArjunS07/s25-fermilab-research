@@ -12,7 +12,8 @@ import torch
 # math is covered scipy-free in test_mass_shell.py; these worker tests need the assignment.
 pytest.importorskip("scipy")
 
-from cache_icp import _permute_geodesic, _icp_permute_worker, resolve_training_cache_path
+from cache_icp import (_permute_geodesic, _icp_permute_worker, resolve_training_cache_path,
+                       validate_cache_metadata, CACHE_FORMAT_VERSION)
 
 
 def test_icp_opt_out_ignores_existing_shared_cache():
@@ -88,3 +89,33 @@ def test_worker_empty_jet():
     assert idx == 3
     assert perm_full.tolist() == list(range(5))
     assert np.allclose(rot, np.eye(3))
+
+
+def test_paired_cache_metadata_rejects_dataset_reordering():
+    paired = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    metadata = {"dataset_fingerprint": "ordered", "dataset_indices": [0, 1],
+                "prior_dist": "axis_aligned", "seed": 42}
+    payload = {"format_version": CACHE_FORMAT_VERSION, "paired_x0": paired,
+               "metadata": metadata}
+    validate_cache_metadata(payload, metadata)
+    with pytest.raises(ValueError, match="metadata"):
+        validate_cache_metadata(payload, {**metadata, "dataset_indices": [1, 0]})
+    with pytest.raises(ValueError, match="legacy"):
+        validate_cache_metadata({"perm_cache": np.zeros((2, 3))}, metadata)
+
+
+def test_geodesic_alignment_reduces_same_realization_cost():
+    g = torch.Generator().manual_seed(13)
+    x1 = torch.cat([torch.zeros(7, 1, dtype=torch.float64),
+                    torch.randn(7, 3, generator=g, dtype=torch.float64)], dim=-1)
+    shuffle = torch.randperm(7, generator=g)
+    x0 = x1[shuffle]
+    perm, _ = _permute_geodesic(x0, x1, 0.1)
+    unaligned = torch.linalg.vector_norm(x0[:, 1:] - x1[:, 1:], dim=-1).sum()
+    aligned = torch.linalg.vector_norm(x0[perm, 1:] - x1[:, 1:], dim=-1).sum()
+    assert aligned < unaligned
+    # The cached tensor is the actual changed training pair, not an instruction for a fresh draw.
+    paired = x0[perm]
+    fresh = torch.randn_like(x0)
+    assert torch.equal(paired, x1)
+    assert not torch.equal(paired, fresh[torch.as_tensor(perm)])

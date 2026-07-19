@@ -133,6 +133,8 @@ class CacheConfig(BaseModel):
     # mass shell (Phase 4); no rotation, since Euclidean Kabsch is not valid on the shell.
     geometry: Literal["euclidean", "mass_shell"] = "euclidean"
     regulator_mass: float = 0.5
+    prior_dist: Literal["isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned"] = "isotropic_com"
+    seed: int = 42
 
 
 class TrainRunConfig(BaseModel):
@@ -312,6 +314,8 @@ def cache_config_to_namespace(cfg: CacheRunConfig) -> argparse.Namespace:
         skip_if_exists=cfg.cache.skip_if_exists,
         geometry=cfg.cache.geometry,
         regulator_mass=cfg.cache.regulator_mass,
+        prior_dist=cfg.cache.prior_dist,
+        seed=cfg.cache.seed,
     )
 
 
