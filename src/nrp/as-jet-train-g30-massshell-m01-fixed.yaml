@@ -29,7 +29,7 @@ spec:
               apt-get install -y libffi-dev gcc g++ curl git wget build-essential
 
               git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
-              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              GIT_COMMIT="9137b69145428a78249e192e4af9bb1cc2982dac"
               if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
                 echo "ERROR: corrected mass-shell training SHA is not pinned"
                 exit 1
