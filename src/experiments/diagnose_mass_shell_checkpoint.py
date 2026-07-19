@@ -10,6 +10,10 @@ import json
 import os
 import pickle
 import random
+import sys
+
+# Support both `python -m experiments...` and direct script execution from any cwd.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import torch
