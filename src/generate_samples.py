@@ -140,6 +140,10 @@ def generate_samples(
                                    ref_vectors=ref_vectors)
 
             x = x.clamp(-50, 50)
+            if use_hyperbolic and hyperbolic_model == 'mass_shell':
+                # Component clamping is an inference guard, but a Cartesian clamp alone moves
+                # points off H_m. Restore energy from the clamped spatial momentum.
+                x = project_to_shell(x, regulator_mass)
             scaled_x = final_scale * x * masks.unsqueeze(-1)   # zero-out padded slots
             # torch.save(scaled_x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
 
@@ -155,4 +159,3 @@ def generate_samples(
     all_jet_types_cat = torch.cat(all_jet_types, dim=0)
 
     return all_samples_cat.to(device), all_jet_types_cat, all_pt_cond_cat
-

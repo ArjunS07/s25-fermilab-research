@@ -35,9 +35,10 @@ from util.metrics import run_save_metrics
 # from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import get_data_path
-from cache_icp import canonical_cache_path
+from cache_icp import resolve_training_cache_path
 from util.mask_helpers import mean_std_masked_tensor
-from config import TrainRunConfig, build_config, parse_config_cli, train_config_to_namespace
+from config import (TrainRunConfig, build_config, parse_config_cli, train_config_to_namespace,
+                    generation_controls_from_namespace)
 
 RANDOM_SEED = 42
 MAX_N_PARTICLES = 150
@@ -238,13 +239,10 @@ if __name__ == "__main__":
     # ── ICP cache ─────────────────────────────────────────────────────────────
     perm_cache: torch.Tensor | None = None
     rot_cache: torch.Tensor | None = None
-    icp_cache_path = args.icp_cache_path
-    if icp_cache_path is None:
-        auto = canonical_cache_path(args.cache_dir, args.jet_types, args.num_particles)
-        if os.path.exists(auto):
-            logging.info(f"Auto-discovered ICP cache: {auto}")
-            icp_cache_path = auto
-    if icp_cache_path is not None:
+    icp_cache_path = resolve_training_cache_path(
+        args.use_icp, args.icp_cache_path, args.cache_dir, args.jet_types, args.num_particles
+    )
+    if args.use_icp and icp_cache_path is not None:
         if is_rank0:
             print(f"Loading ICP cache from {icp_cache_path} …")
         with open(icp_cache_path, "rb") as f:
@@ -665,6 +663,11 @@ if __name__ == "__main__":
         gen_jet_types = None
         gen_pt_cond = None
         try:
+            random.seed(args.inference_seed)
+            np.random.seed(args.inference_seed)
+            torch.manual_seed(args.inference_seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(args.inference_seed)
             samples, gen_jet_types, gen_pt_cond = generate_samples(
                 model=raw_model,
                 jet_attr_model=jet_attr_model_loaded,
@@ -676,11 +679,7 @@ if __name__ == "__main__":
                 n_jet_types=len(args.jet_types),
                 device=device,
                 batch_size=args.batch_size if args.num_particles < MAX_N_PARTICLES else 16,
-                use_cfg=False,
-                use_hyperbolic=args.use_hyperbolic,
-                hyperbolic_model=args.hyperbolic_model,
-                regulator_mass=args.regulator_mass,
-                use_reference_vectors=args.use_reference_vectors,
+                **generation_controls_from_namespace(args),
             )
         except Exception as e:
             print(f"Error occurred while generating samples: {e}")
@@ -726,6 +725,17 @@ if __name__ == "__main__":
                 "train_seconds": round(time.time() - train_start_time, 1),
                 "hyperbolic_model": args.hyperbolic_model if args.use_hyperbolic else None,
                 "regulator_mass": args.regulator_mass if (args.use_hyperbolic and args.hyperbolic_model == "mass_shell") else None,
+                "effective_prior_dist": args.prior_dist,
+                "effective_icp": {
+                    "enabled": bool(args.use_icp),
+                    "cache_path": icp_cache_path,
+                },
+                "generation": {
+                    "seed": args.inference_seed,
+                    "use_cfg": bool(args.use_cfg),
+                    "cfg_guidance_weight": args.cfg_guidance_weight,
+                    "integration_steps": args.integration_steps,
+                },
                 "config": run_config,
                 "full_config": full_config,
                 "metrics": {k: eval_info.get(k) for k in (

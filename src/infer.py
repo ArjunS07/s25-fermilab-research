@@ -19,6 +19,7 @@ Example usage:
 import json
 import os
 import pickle
+import random
 import subprocess
 import traceback
 
@@ -34,7 +35,8 @@ from util.viz import generate_model_vector_field
 from util.metrics import run_save_metrics
 from generate_samples import generate_samples
 from data import get_data_path
-from config import InferRunConfig, build_config, parse_config_cli, infer_config_to_namespace
+from config import (InferRunConfig, build_config, parse_config_cli, infer_config_to_namespace,
+                    generation_controls_from_namespace)
 
 MAX_N_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4
@@ -119,6 +121,11 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
 
 def main():
     args = parse_args()
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
@@ -234,13 +241,7 @@ def main():
                 n_jet_types=len(args.jet_types),
                 device=device,
                 batch_size=args.batch_size,
-                use_cfg=False,
-                use_hyperbolic=args.use_hyperbolic,
-                hyperbolic_model=args.hyperbolic_model,
-                regulator_mass=args.regulator_mass,
-                use_reference_vectors=args.use_reference_vectors,
-                sampler=args.sampler,
-                prior_dist=args.prior_dist,
+                **generation_controls_from_namespace(args),
             )
             print(f"Sample generation done. Shape: {samples.shape}")
             pt_path = os.path.join(out_dir, "samples.pt")
@@ -290,6 +291,13 @@ def main():
     summary = {
         "final_loss": train_summary.get("final_loss"),
         "prior_dist": args.prior_dist,
+        "generation": {
+            "seed": args.seed,
+            "use_cfg": args.use_cfg,
+            "cfg_guidance_weight": args.cfg_guidance_weight,
+            "integration_steps": args.integration_steps,
+            "sampler": args.sampler,
+        },
         "git_commit": git_commit,
         "config": train_summary.get("config"),
         "full_config": train_summary.get("full_config"),

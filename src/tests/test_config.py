@@ -51,6 +51,7 @@ def test_train_defaults_match_legacy_argparse():
     assert cfg.model.use_reference_vectors is False
     assert cfg.model.use_node_scalars is False
     assert cfg.training.prior_dist == "isotropic_com"
+    assert cfg.training.use_icp is False
     assert cfg.training.eta_min_factor == 0.3
     assert cfg.training.use_ema is False
     assert cfg.training.ema_decay == 0.999
@@ -78,6 +79,8 @@ def test_infer_defaults_match_legacy_argparse():
     assert cfg.inference.integration_steps == 16
     assert cfg.inference.batch_size == 256
     assert cfg.inference.cfg_guidance_weight == 2.0
+    assert cfg.inference.use_cfg is False
+    assert cfg.inference.seed == 42
     assert cfg.model.use_hyperbolic is False
     assert cfg.inference.sampler == "euler"
     assert cfg.model.use_reference_vectors is False

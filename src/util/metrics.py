@@ -60,6 +60,22 @@ def run_save_metrics(
     """
     torch.manual_seed(EVAL_SEED)  # fixed yardstick across runs
 
+    # A handful of non-finite jets must not erase every metric. Drop whole invalid jets,
+    # report the exact count, and compare the remaining generated sample to an equally-sized
+    # prefix of the frozen test set.
+    finite_jet = torch.isfinite(gen_samples).all(dim=-1).all(dim=-1)
+    n_invalid = int((~finite_jet).sum().item())
+    n_total = int(gen_samples.shape[0])
+    if not finite_jet.any():
+        raise ValueError("all generated jets contain non-finite values")
+    if n_invalid:
+        print(f"WARNING: dropping {n_invalid}/{n_total} non-finite generated jets before metrics")
+        gen_samples = gen_samples[finite_jet]
+        if gen_jet_types is not None:
+            gen_jet_types = gen_jet_types[finite_jet.to(gen_jet_types.device)]
+        if gen_pt_cond is not None:
+            gen_pt_cond = gen_pt_cond[finite_jet.to(gen_pt_cond.device)]
+
     gen_polar_abs = cartesian_to_EtaPhiPtE(gen_samples.to(device))
 
     test_polar_abs = __x_test_to_abs(X_test=X_test, device=device)
@@ -93,7 +109,11 @@ def run_save_metrics(
     else:
         gen_jet_types = gen_jet_types.long().cpu()
 
-    eval_info = {}
+    eval_info = {
+        "n_generated_total": n_total,
+        "n_generated_invalid": n_invalid,
+        "frac_generated_invalid": n_invalid / n_total,
+    }
     try:
         eval_info.update(physicality_isotropy_scalars(gen_samples.cpu(), test_polar_abs))
         print(f"Physicality: E<0 {eval_info['frac_negative_energy']:.2%}, "
@@ -117,11 +137,14 @@ def run_save_metrics(
     except Exception as e:
         print(f"Error occurred while writing eval_report: {e}")
 
-    eval_info["cov_mmd"] = jetnet_eval.cov_mmd(
-        real_jets=test_polar_rel[:, :, :3],
-        gen_jets=gen_polar_rel[:, :, :3]
-    )
-    print(f"Cov MMD: {eval_info['cov_mmd']}")
+    try:
+        eval_info["cov_mmd"] = jetnet_eval.cov_mmd(
+            real_jets=test_polar_rel[:gen_polar_rel.shape[0], :, :3],
+            gen_jets=gen_polar_rel[:, :, :3]
+        )
+        print(f"Cov MMD: {eval_info['cov_mmd']}")
+    except Exception as e:
+        print(f"Error computing cov_mmd: {e}")
 
     test_polar_rel = test_polar_rel[:gen_polar_rel.shape[0]]
     assert test_polar_rel.shape == gen_polar_rel.shape

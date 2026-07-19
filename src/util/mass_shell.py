@@ -60,6 +60,16 @@ def project_to_shell(p: torch.Tensor, m: float) -> torch.Tensor:
     return out.to(dtype)
 
 
+def massless_energy_view(p: torch.Tensor) -> torch.Tensor:
+    """Diagnostic view with identical spatial momentum and E=|p|.
+
+    This does not change the canonical shell sample; it isolates observables that depend on
+    the regulator energy from JetNet observables built only from eta/phi/pT.
+    """
+    energy = torch.linalg.vector_norm(p[..., 1:4], dim=-1, keepdim=True)
+    return torch.cat([energy, p[..., 1:4]], dim=-1)
+
+
 def geodesic_distance(p: torch.Tensor, q: torch.Tensor, m: float) -> torch.Tensor:
     """Geodesic distance d(p,q) = m * arccosh(<p,q>/m^2) on the mass shell.
 
@@ -178,3 +188,45 @@ def mass_shell_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor
     sq = (-normsq4(diff)).clamp(min=0.0)              # (batch, max_particles)
     n_real = mask64.sum().clamp(min=1.0)
     return ((sq * mask64).sum() / n_real).to(dtype)
+
+
+def tangent_error_diagnostics(p: torch.Tensor, pred: torch.Tensor, target: torch.Tensor,
+                              mask: torch.Tensor, m: float, dt: float = 1.0) -> dict:
+    """Summarize numerical health of tangent prediction and one geodesic Euler step."""
+    p64, pred64, target64, mask64 = _to_f64(p, pred, target, mask)
+    real = mask64 > 0
+    diff = pred64 - target64
+    raw_sq = -normsq4(diff)
+    pred_norm = torch.sqrt((-normsq4(pred64)).clamp(min=0.0))
+    target_norm = torch.sqrt((-normsq4(target64)).clamp(min=0.0))
+    step_rapidity = pred_norm * abs(float(dt)) / float(m)
+    p_dot_pred = dotsq4(p64, pred64).abs()
+    euclid_scale = torch.linalg.vector_norm(p64, dim=-1) * torch.linalg.vector_norm(pred64, dim=-1)
+    tangent_residual = p_dot_pred / euclid_scale.clamp(min=_EPS)
+
+    def fraction(condition):
+        return float(condition[real].to(torch.float64).mean().item()) if real.any() else 0.0
+
+    def quantiles(values):
+        selected = values[real]
+        selected = selected[torch.isfinite(selected)]
+        if selected.numel() == 0:
+            return [0.0, 0.0, 0.0, 0.0]
+        return [float(v) for v in torch.quantile(
+            selected, torch.tensor([0.5, 0.9, 0.99, 0.999], dtype=torch.float64,
+                                   device=selected.device)
+        ).cpu()]
+
+    return {
+        "n_real": int(real.sum().item()),
+        "nonfinite_fraction": fraction(~torch.isfinite(p64).all(dim=-1)
+                                       | ~torch.isfinite(pred64).all(dim=-1)
+                                       | ~torch.isfinite(target64).all(dim=-1)),
+        "raw_loss_negative_fraction": fraction(raw_sq < 0.0),
+        "loss_zero_fraction": fraction(raw_sq <= 0.0),
+        "tangency_residual_quantiles": quantiles(tangent_residual),
+        "pred_tangent_norm_quantiles": quantiles(pred_norm),
+        "target_tangent_norm_quantiles": quantiles(target_norm),
+        "step_rapidity_quantiles": quantiles(step_rapidity),
+        "step_clamp_fraction": fraction(step_rapidity > _S_MAX),
+    }

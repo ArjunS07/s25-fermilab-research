@@ -12,7 +12,22 @@ import torch
 # math is covered scipy-free in test_mass_shell.py; these worker tests need the assignment.
 pytest.importorskip("scipy")
 
-from cache_icp import _permute_geodesic, _icp_permute_worker
+from cache_icp import _permute_geodesic, _icp_permute_worker, resolve_training_cache_path
+
+
+def test_icp_opt_out_ignores_existing_shared_cache():
+    exists = lambda _: True
+    assert resolve_training_cache_path(False, None, "/cache", ["g"], 30, exists=exists) is None
+
+
+def test_icp_requires_cache_when_enabled():
+    with pytest.raises(FileNotFoundError):
+        resolve_training_cache_path(True, None, "/cache", ["g"], 30, exists=lambda _: False)
+
+
+def test_icp_rejects_explicit_path_when_disabled():
+    with pytest.raises(ValueError):
+        resolve_training_cache_path(False, "/cache/file.pkl", "/cache", ["g"], 30)
 
 
 def test_permute_geodesic_recovers_known_permutation():

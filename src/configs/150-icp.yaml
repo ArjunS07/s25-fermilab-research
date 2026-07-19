@@ -5,6 +5,7 @@ model:
   use_residual: true
 
 training:
+  use_icp: true
   train_space: polar
   time_sampling: power_law
   batch_size: 25

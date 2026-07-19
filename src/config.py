@@ -85,6 +85,9 @@ class TrainingConfig(BaseModel):
         "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned"
     ] = "isotropic_com"
 
+    # ICP is opt-in. A cache present on a shared PVC must never silently change a baseline.
+    use_icp: bool = False
+
     distributed: bool = False
 
 
@@ -95,6 +98,8 @@ class InferenceConfig(BaseModel):
     n_viz_samples: int = 1000
     integration_steps: int = 16
     cfg_guidance_weight: float = 2.0
+    use_cfg: bool = False
+    seed: int = 42
     batch_size: int = 256
     sampler: Literal["euler", "heun"] = "euler"
     vf_mode: Literal["cfg", "nocfg", "both", "none"] = "none"
@@ -229,6 +234,10 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         n_viz_samples=cfg.inference.n_viz_samples,
         integration_steps=cfg.inference.integration_steps,
         vf_mode=cfg.inference.vf_mode,
+        use_cfg=cfg.inference.use_cfg,
+        cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
+        inference_seed=cfg.inference.seed,
+        sampler=cfg.inference.sampler,
         use_cosine_lr=cfg.training.use_cosine_lr,
         lr_t0=cfg.training.lr_t0,
         lr_warmup_epochs=cfg.training.lr_warmup_epochs,
@@ -242,6 +251,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         node_scalar_seed=cfg.model.node_scalar_seed,
         use_attention=cfg.model.use_attention,
         prior_dist=cfg.training.prior_dist,
+        use_icp=cfg.training.use_icp,
         eta_min_factor=cfg.training.eta_min_factor,
         use_ema=cfg.training.use_ema,
         ema_decay=cfg.training.ema_decay,
@@ -272,6 +282,8 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         integration_steps=cfg.inference.integration_steps,
         batch_size=cfg.inference.batch_size,
         cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
+        use_cfg=cfg.inference.use_cfg,
+        seed=cfg.inference.seed,
         use_hyperbolic=cfg.model.use_hyperbolic,
         hyperbolic_model=cfg.model.hyperbolic_model,
         regulator_mass=cfg.model.regulator_mass,
@@ -301,6 +313,20 @@ def cache_config_to_namespace(cfg: CacheRunConfig) -> argparse.Namespace:
         geometry=cfg.cache.geometry,
         regulator_mass=cfg.cache.regulator_mass,
     )
+
+
+def generation_controls_from_namespace(args: argparse.Namespace) -> dict:
+    """Return generation controls shared by train-time and standalone evaluation."""
+    return {
+        "use_cfg": args.use_cfg,
+        "cfg_guidance_weight": args.cfg_guidance_weight,
+        "use_hyperbolic": args.use_hyperbolic,
+        "hyperbolic_model": args.hyperbolic_model,
+        "regulator_mass": args.regulator_mass,
+        "use_reference_vectors": args.use_reference_vectors,
+        "sampler": args.sampler,
+        "prior_dist": args.prior_dist,
+    }
 
 
 def run_config_dict(cfg: TrainRunConfig, final_scale: float) -> dict:

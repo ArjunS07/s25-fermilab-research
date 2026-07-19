@@ -41,6 +41,20 @@ def canonical_cache_path(cache_dir: str, jet_types: list, num_particles: int) ->
     key = "_".join(sorted(jet_types)) + f"_p{num_particles}"
     return os.path.join(cache_dir, key, "icp_cache.pkl")
 
+
+def resolve_training_cache_path(use_icp: bool, explicit_path: str | None,
+                                cache_dir: str, jet_types: list, num_particles: int,
+                                exists=os.path.exists) -> str | None:
+    """Resolve an ICP cache without allowing shared-PVC state to affect opt-out runs."""
+    if not use_icp:
+        if explicit_path is not None:
+            raise ValueError("paths.icp_cache_path was set while training.use_icp=false")
+        return None
+    path = explicit_path or canonical_cache_path(cache_dir, jet_types, num_particles)
+    if not exists(path):
+        raise FileNotFoundError(f"training.use_icp=true but ICP cache does not exist: {path}")
+    return path
+
 MAX_N_PARTICLES = 150
 RANDOM_SEED = 42
 

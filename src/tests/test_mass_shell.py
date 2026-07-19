@@ -23,6 +23,8 @@ from util.mass_shell import (
     conditional_vector_field,
     geodesic_cost_matrix,
     mass_shell_loss,
+    massless_energy_view,
+    tangent_error_diagnostics,
 )
 from util.minkowski_utils import normsq4
 from tests.lorentz_test_utils import build_model, sample_inputs
@@ -53,6 +55,28 @@ def test_project_zero_momentum_is_apex():
     p = project_to_shell(z, m=1.3)
     apex = torch.tensor([1.3, 0.0, 0.0, 0.0], dtype=torch.float64)
     assert torch.allclose(p, apex.expand_as(p), atol=1e-9)
+
+
+def test_massless_energy_view_preserves_spatial_momentum():
+    p = project_to_shell(torch.randn(2, 3, 4, dtype=torch.float64), m=0.3)
+    view = massless_energy_view(p)
+    assert torch.equal(view[..., 1:4], p[..., 1:4])
+    assert torch.allclose(view[..., 0], torch.linalg.vector_norm(p[..., 1:4], dim=-1))
+    assert torch.allclose(normsq4(view), torch.zeros_like(normsq4(view)), atol=1e-10)
+
+
+def test_tangent_error_diagnostics_detects_healthy_and_bad_vectors():
+    p, target = _shell_points(batch=2, n=4, m=0.5)
+    mask = torch.ones(2, 4, dtype=torch.float64)
+    healthy = tangent_error_diagnostics(p, target.clone(), target, mask, m=0.5, dt=1 / 64)
+    assert healthy["raw_loss_negative_fraction"] == 0.0
+    assert healthy["step_clamp_fraction"] == 0.0
+    assert healthy["nonfinite_fraction"] == 0.0
+
+    bad = target.clone()
+    bad[0, 0, 0] = float("nan")
+    unhealthy = tangent_error_diagnostics(p, bad, target, mask, m=0.5, dt=1 / 64)
+    assert unhealthy["nonfinite_fraction"] > 0.0
 
 
 def test_pushforward_is_tangent():
