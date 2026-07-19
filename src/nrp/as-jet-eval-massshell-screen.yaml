@@ -1,0 +1,106 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-eval-massshell-screen
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: as-train-pvc
+          persistentVolumeClaim:
+            claimName: as-jet-train-pvc-2
+      containers:
+        - name: eval
+          image: python:3.10-slim
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              apt-get update
+              apt-get install -y libffi-dev gcc g++ curl git wget build-essential
+
+              git clone https://github.com/ArjunS07/s25-fermilab-research /tmp/repo
+              GIT_COMMIT="fd9a38f225d87b5bf6c27f1a27289a9728070762"
+              if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
+                echo "ERROR: frozen commit SHA was not pinned"
+                exit 1
+              fi
+              git -C /tmp/repo checkout "$GIT_COMMIT"
+              cp -r /tmp/repo/src /mnt/data/
+
+              if [ -d /mnt/data/python-env ] && /mnt/data/python-env/bin/python -c "import torch" 2>/dev/null; then
+                source /mnt/data/python-env/bin/activate
+              else
+                python -m venv /mnt/data/python-env
+                source /mnt/data/python-env/bin/activate
+                pip install torch --index-url https://download.pytorch.org/whl/cu121
+                pip install -r /mnt/data/src/requirements.txt
+              fi
+
+              cd /mnt/data/src
+              UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
+              BASE_OUT="/mnt/data/output/${UNIQUE_RUN_ID}-g30-massshell-screen"
+              mkdir -p "$BASE_OUT"
+              git -C /tmp/repo rev-parse HEAD > "$BASE_OUT/git_commit.txt"
+
+              for LABEL in m01 m03 m05 m10; do
+                case "$LABEL" in
+                  m01) PATTERN="/mnt/data/output/*-g30-massshell-m01" ;;
+                  m03) PATTERN="/mnt/data/output/*-g30-massshell-m03" ;;
+                  m05) PATTERN="/mnt/data/output/*-g30-massshell" ;;
+                  m10) PATTERN="/mnt/data/output/*-g30-massshell-m10" ;;
+                esac
+                RUN_DIR="$(ls -dt $PATTERN 2>/dev/null | head -1)"
+                if [ -z "$RUN_DIR" ]; then
+                  echo "ERROR: no run found for $LABEL"
+                  exit 1
+                fi
+                CHECKPOINT="$RUN_DIR/train/models/final_checkpoint.pth"
+                OUT_DIR="$BASE_OUT/$LABEL"
+                echo "=== $LABEL: $RUN_DIR ===" | tee -a "$BASE_OUT/logs.txt"
+                python infer.py \
+                  --config configs/infer-g30-massshell-screen.yaml \
+                  --set paths.checkpoint_path="$CHECKPOINT" \
+                  --set paths.output_path="$RUN_DIR" \
+                  --set paths.out_dir="$OUT_DIR" \
+                  2>&1 | tee -a "$BASE_OUT/logs.txt"
+                python experiments/diagnose_mass_shell_checkpoint.py \
+                  --run-dir "$RUN_DIR" \
+                  --out "$OUT_DIR/tangent_diagnostics.json" \
+                  --n-jets 1024 \
+                  --seed 42 \
+                  --steps 64 \
+                  2>&1 | tee -a "$BASE_OUT/logs.txt"
+                test -f "$OUT_DIR/summary.json"
+                test -f "$OUT_DIR/tangent_diagnostics.json"
+              done
+
+              python -m analysis.analyze_mass_shell_samples \
+                --runs \
+                  m01="$BASE_OUT/m01/samples.pt" \
+                  m03="$BASE_OUT/m03/samples.pt" \
+                  m05="$BASE_OUT/m05/samples.pt" \
+                  m10="$BASE_OUT/m10/samples.pt" \
+                --out "$BASE_OUT/sample_diagnostics.json"
+              echo "Screen complete: $BASE_OUT"
+          volumeMounts:
+            - mountPath: /mnt/data
+              name: as-train-pvc
+          resources:
+            limits:
+              nvidia.com/a40: 1
+              memory: 16Gi
+              cpu: "2.4"
+            requests:
+              nvidia.com/a40: 1
+              memory: 16Gi
+              cpu: "2"
