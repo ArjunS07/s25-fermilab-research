@@ -21,7 +21,7 @@ def generate_x_0_com_frame(x_1=None, batch_size=None, num_particles=None, device
 
     
 
-def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, prior_dist='isotropic_com', jet_features=None, device='cpu'):
+def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, prior_dist='isotropic_com', jet_features=None, jet_phi=None, device='cpu'):
 
     if x_1 is not None:
         batch_size, num_particles = x_1.shape[:2]
@@ -74,7 +74,8 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
 
         # jet features are ["eta", "pt", "mass", "num_particles", "type"],
         jet_eta = jet_features[:, 0]
-        jet_phi = (2 * torch.pi) * torch.rand(batch_size, device=device)
+        jet_phi = ((2 * torch.pi) * torch.rand(batch_size, device=device) if jet_phi is None
+                   else jet_phi.to(device))
         jet_pt = jet_features[:, 1]
 
         pt = pt_rel * jet_pt.unsqueeze(1)
@@ -98,7 +99,8 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         pt_rel = torch.exp(torch.randn(batch_size, num_particles, device=device))
 
         jet_eta = jet_features[:, 0]
-        jet_phi = (2 * torch.pi) * torch.rand(batch_size, device=device)
+        jet_phi = ((2 * torch.pi) * torch.rand(batch_size, device=device) if jet_phi is None
+                   else jet_phi.to(device))
         jet_pt = jet_features[:, 1]
 
         pt = pt_rel * jet_pt.unsqueeze(1)

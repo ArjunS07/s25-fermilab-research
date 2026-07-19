@@ -1,7 +1,7 @@
 import torch
 from jetnet.utils import EtaPhiPtE_to_cartesian, cartesian_to_EtaPhiPtE
 
-def transform_rel_particle_coordinates_to_cartesian(X):
+def transform_rel_particle_coordinates_to_cartesian(X, jet_phi=None):
     """
     Transforms relative particle coordinates to absolute Cartesian coordinates using the JetNet relEtaPhiPt_to_cartesian utility function
 
@@ -19,7 +19,7 @@ def transform_rel_particle_coordinates_to_cartesian(X):
     
     # Phi has to be the second column for the JetNet utility function
     jet_eta = (X[:][1][:, 0]).unsqueeze(1)
-    jet_phi_vals = (2 * torch.pi) * torch.rand(len(X)).unsqueeze(1)
+    jet_phi_vals = ((2 * torch.pi) * torch.rand(len(X)) if jet_phi is None else jet_phi).unsqueeze(1)
     jet_pt_ec = X[:][1][:, 1:3]
     jet_features = torch.concat([jet_eta, jet_phi_vals, jet_pt_ec], dim=-1)
 
@@ -40,20 +40,18 @@ def transform_rel_particle_coordinates_to_cartesian(X):
     return torch.cat([cartesian_feats, masks.unsqueeze(-1)], dim=-1)
 
 
-def build_reference_vectors(jet_eta, jet_pt, final_scale, device):
+def build_reference_vectors(jet_eta, jet_pt, final_scale, device, jet_phi=None):
     """Inference reference 4-vectors: e_t=(1,0,0,0) and a reconstructed jet 4-momentum.
 
-    Mirrors transform_rel_particle_coordinates_to_cartesian: the jet axis is
-    (jet_eta, random phi, jet_pt) with energy E = pt*cosh(eta), converted with the same jetnet
-    routine used to build the training particles, then divided by final_scale to enter the
-    model's scaled space. This matches train.py, where the reference is the sum of the scaled
-    constituents (= physical jet 4-momentum / final_scale). The random phi is the *chosen* jet
-    orientation the references then induce in the generated cloud.
+    The jet reference is the reproducible physical massless conditioning jet, never a sum of
+    target constituents.  Pass the same ``jet_phi`` used to orient particles/the prior; if it
+    is omitted a new uniform orientation is sampled.
 
     Returns (B, 2, 4).
     """
     batch = jet_eta.shape[0]
-    phi = (2 * torch.pi) * torch.rand(batch, device=device)
+    phi = ((2 * torch.pi) * torch.rand(batch, device=device) if jet_phi is None
+           else jet_phi.to(device))
     energy = jet_pt * torch.cosh(jet_eta)
     stacked = torch.stack([jet_eta, phi, jet_pt, energy], dim=-1)  # (B, 4) = (eta, phi, pt, E)
     jet_p4 = EtaPhiPtE_to_cartesian(stacked) / final_scale         # (B, 4) scaled (E, px, py, pz)
