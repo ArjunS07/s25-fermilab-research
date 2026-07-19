@@ -35,7 +35,9 @@ spec:
                 exit 1
               fi
               git -C /tmp/repo checkout "$GIT_COMMIT"
-              cp -r /tmp/repo/src /mnt/data/
+              if [ -d /mnt/data/src/datasets ]; then
+                ln -s /mnt/data/src/datasets /tmp/repo/src/datasets
+              fi
 
               if [ -d /mnt/data/python-env ] && /mnt/data/python-env/bin/python -c "import torch" 2>/dev/null; then
                 source /mnt/data/python-env/bin/activate
@@ -43,10 +45,10 @@ spec:
                 python -m venv /mnt/data/python-env
                 source /mnt/data/python-env/bin/activate
                 pip install torch --index-url https://download.pytorch.org/whl/cu121
-                pip install -r /mnt/data/src/requirements.txt
+                pip install -r /tmp/repo/src/requirements.txt
               fi
 
-              cd /mnt/data/src
+              cd /tmp/repo/src
               UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
               OUTPUT_PATH="/mnt/data/output/${UNIQUE_RUN_ID}-g30-massshell-m01-fixed"
               mkdir -p "$OUTPUT_PATH"
