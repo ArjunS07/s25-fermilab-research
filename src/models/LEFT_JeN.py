@@ -591,10 +591,16 @@ class LEFTJeN(nn.Module):
         batch_size = y_t.shape[0]
         t_batch = t_start.unsqueeze(0).expand(batch_size)
 
-        vel_cartesian = self.forward(x=y_t, t=t_batch, jet_conditions=jet_conditions, mask=mask, ref_vectors=ref_vectors)
+        model_dtype = next(self.parameters()).dtype
+        model_refs = ref_vectors.to(model_dtype) if ref_vectors is not None else None
+        vel_cartesian = self.forward(x=y_t.to(model_dtype), t=t_batch.to(model_dtype),
+                                     jet_conditions=jet_conditions.to(model_dtype), mask=mask,
+                                     ref_vectors=model_refs)
         if use_cfg:
             null_cond = self.make_null_cond(jet_conditions)
-            vel_uncond = self.forward(x=y_t, t=t_batch, jet_conditions=null_cond, mask=mask, ref_vectors=ref_vectors)
+            vel_uncond = self.forward(x=y_t.to(model_dtype), t=t_batch.to(model_dtype),
+                                      jet_conditions=null_cond.to(model_dtype), mask=mask,
+                                      ref_vectors=model_refs)
             vel_cartesian = vel_cartesian + guidance_weight * (vel_cartesian - vel_uncond)
 
         # Project onto T_{y_t}H, zero padding, then geodesic step exp_{y_t}(v_tan * dt).

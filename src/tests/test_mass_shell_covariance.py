@@ -102,7 +102,10 @@ def test_interpolant_and_field_are_covariant(seed):
 @pytest.mark.parametrize("seed", SEEDS)
 def test_loss_is_invariant(seed):
     p, _, u, _ = _on_shell_and_tangent(seed=seed)
-    _, _, u2, _ = _on_shell_and_tangent(seed=seed + 7)
+    # Both vectors must inhabit the same tangent space; subtracting tangents based at
+    # different shell points is not a defined Riemannian loss.
+    _, _, _, v2 = _on_shell_and_tangent(seed=seed + 7)
+    u2 = pushforward_to_tangent(p, v2, M)
     mask = torch.ones(p.shape[0], p.shape[1], dtype=torch.float64)
     L = random_proper_transform(seed=seed)
     base = mass_shell_loss(u, u2, mask, M)

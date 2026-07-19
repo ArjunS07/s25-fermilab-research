@@ -211,10 +211,41 @@ def test_model_mass_shell_step_stays_on_shell():
     assert torch.allclose(onshell[real], torch.full_like(onshell[real], m * m), atol=1e-6)
 
 
-def test_float32_in_float32_out():
+def test_float32_inputs_produce_float64_geometry():
     p3 = torch.randn(2, 4, 4)
     p = project_to_shell(p3, 1.0)
-    assert p.dtype == torch.float32
+    assert p.dtype == torch.float64
     q = exp_map(p, pushforward_to_tangent(p, torch.randn(2, 4, 4) * 0.2, 1.0), 1.0)
-    assert q.dtype == torch.float32
-    assert geodesic_distance(p, q, 1.0).dtype == torch.float32
+    assert q.dtype == torch.float64
+    assert geodesic_distance(p, q, 1.0).dtype == torch.float64
+
+
+@pytest.mark.parametrize("m", [0.1, 0.03])
+def test_stiff_loss_is_float64_tangent_and_has_gradient(m):
+    p, target = _shell_points(batch=2, n=5, seed=31, m=m)
+    raw = torch.randn_like(target, dtype=torch.float32, requires_grad=True)
+    pred = pushforward_to_tangent(p, raw, m)
+    assert pred.dtype == torch.float64
+    assert dotsq4(p, pred).abs().max() < 1e-8
+    loss = mass_shell_loss(pred, target, torch.ones(2, 5), m)
+    assert loss.dtype == torch.float64 and loss > 0
+    loss.backward()
+    assert raw.grad is not None and torch.isfinite(raw.grad).all()
+    assert raw.grad.abs().sum() > 0
+
+
+def test_massless_endpoint_zeroes_padding_and_removes_constituent_mass_floor():
+    m = 0.1
+    mask = torch.tensor([[1.0, 1.0, 0.0]], dtype=torch.float64)
+    raw = torch.tensor([[[0., 1., 0., 0.], [0., .5, .3, .2], [0., 0., 0., 0.]]],
+                       dtype=torch.float64)
+    shell = project_to_shell(raw, m)
+    physical = massless_energy_view(shell, mask)
+    real = mask.bool()
+    assert (physical[..., 0][real] > 0).all()
+    assert torch.allclose(normsq4(physical)[real], torch.zeros(2, dtype=torch.float64), atol=1e-12)
+    assert torch.equal(physical[..., 1:4][real], shell[..., 1:4][real])
+    assert torch.equal(physical[~real], torch.zeros_like(physical[~real]))
+    shell_jet_mass = torch.sqrt(normsq4((shell * mask.unsqueeze(-1)).sum(1)).clamp(min=0))
+    physical_jet_mass = torch.sqrt(normsq4(physical.sum(1)).clamp(min=0))
+    assert physical_jet_mass < shell_jet_mass
