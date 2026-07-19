@@ -103,7 +103,7 @@ def eval_report(
     _plot_radial_profile(tp_rel, gp_rel, t_types, g_types, names,
                          f"{output_path}/radial_profile.png", pp_rel)
     _plot_energy_tails(tp_abs, gp_abs, t_types, g_types, names,
-                       f"{output_path}/energy_tails.png")
+                       f"{output_path}/energy_tails.png", pp_abs)
 
     # Per-class grid
     test_cart = _polar_abs_to_cartesian(tp_abs)
@@ -602,13 +602,15 @@ def _plot_radial_profile(tp_rel, gp_rel, t_types, g_types, names, out_path, pp_r
     plt.close(fig)
 
 
-def _plot_energy_tails(tp_abs, gp_abs, t_types, g_types, names, out_path):
+def _plot_energy_tails(tp_abs, gp_abs, t_types, g_types, names, out_path, pp_abs=None):
     """(E, |p|) × (log-y hist, QQ).  Overlay 5 classes per hist panel; per-class
     QQ curves in the QQ panels."""
     tp_cart = _polar_abs_to_cartesian(tp_abs)
     gp_cart = _polar_abs_to_cartesian(gp_abs)
     real_t = _real_mask(tp_abs)
     real_g = _real_mask(gp_abs)
+    pp_cart = _polar_abs_to_cartesian(pp_abs) if pp_abs is not None else None
+    real_p = _real_mask(pp_abs) if pp_abs is not None else None
 
     def _per_particle_by_class(cart, real, jet_types, idx_col):
         """idx_col='E' or 'p' -> per-real-particle scalar, gathered by jet class."""
@@ -631,21 +633,24 @@ def _plot_energy_tails(tp_abs, gp_abs, t_types, g_types, names, out_path):
     g_E = _per_particle_by_class(gp_cart, real_g, g_types, "E")
     t_P = _per_particle_by_class(tp_cart, real_t, t_types, "p")
     g_P = _per_particle_by_class(gp_cart, real_g, g_types, "p")
+    p_E = _per_particle_by_class(pp_cart, real_p, g_types, "E") if pp_cart is not None else None
+    p_P = _per_particle_by_class(pp_cart, real_p, g_types, "p") if pp_cart is not None else None
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 9))
     fig.suptitle("Energy tails per class (log-y histograms + Q-Q)", fontsize=13)
 
     for ax, feats, xlabel in [
-        (axes[0, 0], (t_E, g_E), "E (per real particle)"),
-        (axes[0, 1], (t_P, g_P), r"$|\vec p|$ (per real particle)"),
+        (axes[0, 0], (t_E, g_E, p_E), "E (per real particle)"),
+        (axes[0, 1], (t_P, g_P, p_P), r"$|\vec p|$ (per real particle)"),
     ]:
-        t_by, g_by = feats
-        all_v = np.concatenate([v for v in (t_by + g_by) if len(v)])
+        t_by, g_by, p_by = feats
+        all_v = np.concatenate([v for v in (t_by + g_by + (p_by or [])) if len(v)])
         if all_v.size == 0:
             continue
         bins = np.linspace(0, np.quantile(all_v, 0.999), 80)
         _overlay_hist_by_class(ax, t_by, g_by, names, xlabel=xlabel,
-                               bins=bins, log_y=True, density=True)
+                               bins=bins, log_y=True, density=True,
+                               prior_vals_by_class=p_by)
 
     # QQ plots — one solid line per class (gen quantiles vs test quantiles).
     for ax, feats, xlabel in [

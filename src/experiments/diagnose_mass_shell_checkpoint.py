@@ -29,7 +29,9 @@ from util.mass_shell import (
     project_to_shell,
     pushforward_to_tangent,
     tangent_error_diagnostics,
+    massless_energy_view,
 )
+from jetnet.utils import cartesian_to_EtaPhiPtE, EtaPhiPtE_to_relEtaPhiPt
 
 
 TIMES = (0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99)
@@ -41,6 +43,30 @@ def _quantiles(x):
         return [None] * 4
     q = torch.tensor([0.5, 0.9, 0.99, 0.999], device=x.device, dtype=x.dtype)
     return [float(v) for v in torch.quantile(x, q).cpu()]
+
+
+def paired_endpoint_diagnostics(prior, generated, mask):
+    """Exact paired prior→endpoint transport summary (no reconstructed prior allowed)."""
+    real = mask > 0
+    pp = EtaPhiPtE_to_relEtaPhiPt(cartesian_to_EtaPhiPtE(prior))
+    gp = EtaPhiPtE_to_relEtaPhiPt(cartesian_to_EtaPhiPtE(generated))
+    dphi = torch.remainder(gp[..., 1] - pp[..., 1] + torch.pi, 2 * torch.pi) - torch.pi
+    deta = gp[..., 0] - pp[..., 0]
+    angular = torch.sqrt(deta.square() + dphi.square())
+    spatial = torch.linalg.vector_norm(generated[..., 1:4] - prior[..., 1:4], dim=-1)
+    def girth(x):
+        dr = torch.sqrt(x[..., 0].square() + x[..., 1].square())
+        return (x[..., 2].clamp(min=0) * dr).sum(dim=1)
+    return {
+        "angular_displacement_quantiles": _quantiles(angular[real]),
+        "delta_eta_change_quantiles": _quantiles(deta[real].abs()),
+        "delta_phi_change_quantiles": _quantiles(dphi[real].abs()),
+        "delta_r_change_quantiles": _quantiles((torch.sqrt(gp[..., 0].square() + gp[..., 1].square()) -
+                                                 torch.sqrt(pp[..., 0].square() + pp[..., 1].square())).abs()[real]),
+        "spatial_momentum_displacement_quantiles": _quantiles(spatial[real]),
+        "prior_girth_quantiles": _quantiles(girth(pp)),
+        "generated_girth_quantiles": _quantiles(girth(gp)),
+    }
 
 
 def _load_model(checkpoint, model_cfg, num_particles, device):
@@ -124,7 +150,8 @@ def main():
             t = torch.full((x1.shape[0],), value, device=device)
             point = geodesic_interpolant(p0, p1, t, mass)
             target = conditional_vector_field(point, p1, t, mass) * mask.unsqueeze(-1)
-            pred = model(point, t, cond, mask)
+            model_dtype = next(model.parameters()).dtype
+            pred = model(point.to(model_dtype), t.to(model_dtype), cond.to(model_dtype), mask)
             pred_tan = pushforward_to_tangent(point, pred, mass) * mask.unsqueeze(-1)
             report["path_field"][str(value)] = tangent_error_diagnostics(
                 point, pred_tan, target, mask, mass, dt=1 / args.steps
@@ -134,7 +161,7 @@ def main():
         times = torch.linspace(0, 1 - 1e-5, args.steps + 1, device=device)
         for step in range(args.steps):
             t = times[step].expand(x1.shape[0])
-            pred = model(state, t, cond, mask)
+            pred = model(state.to(model_dtype), t.to(model_dtype), cond.to(model_dtype), mask)
             pred_tan = pushforward_to_tangent(state, pred, mass) * mask.unsqueeze(-1)
             if step % 8 == 0 or step == args.steps - 1:
                 pt = torch.linalg.vector_norm(state[..., 1:3], dim=-1)[mask > 0]
@@ -149,6 +176,11 @@ def main():
                 hyperbolic_model="mass_shell", regulator_mass=mass,
                 use_cfg=False,
             )
+
+        physical_prior = massless_energy_view(p0, mask)
+        physical_generated = massless_energy_view(state, mask)
+        report["paired_endpoint"] = paired_endpoint_diagnostics(
+            physical_prior, physical_generated, mask)
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w") as handle:

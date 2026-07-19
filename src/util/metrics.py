@@ -61,6 +61,9 @@ def run_save_metrics(
         prior_samples: exact pre-transport Cartesian state paired with gen_samples.
     """
     torch.manual_seed(EVAL_SEED)  # fixed yardstick across runs
+    if prior_samples is None:
+        print("Prior provenance unavailable: exact paired prior tensor was not supplied; "
+              "prior overlays will be omitted (not reconstructed).")
 
     # A handful of non-finite jets must not erase every metric. Drop whole invalid jets,
     # report the exact count, and compare the remaining generated sample to an equally-sized
