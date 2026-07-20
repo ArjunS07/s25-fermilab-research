@@ -27,7 +27,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="353bf5cdde8dadeb82757cfc7f2f0ba112b6b505"
+              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
               if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
                 echo "ERROR: corrected mass-shell training SHA is not pinned"
                 exit 1
@@ -49,7 +49,8 @@ spec:
                 --cache-dir /mnt/data/caches/stage1 \
                 --jet-types g \
                 --num-particles 30 \
-                --import-run "$STAGE1_RUN"
+                --import-run "$STAGE1_RUN" \
+                2>&1 | tee -a "$OUTPUT_PATH/startup.log"
               torchrun --standalone --nproc_per_node=1 train.py \
                 --config configs/g30-mass-shell-m01.yaml \
                 --set paths.output_path="$OUTPUT_PATH" \

@@ -7,7 +7,7 @@ import torch
 from prepare_stage1 import cache_key, resolve_stage1, stage1_spec, validate_bundle
 
 
-def _legacy_bundle(path, type_ids=(0,), particles=30):
+def _legacy_bundle(path, type_ids=(0,), particles=30, with_summary=False):
     data = path / "data"
     data.mkdir(parents=True)
     particle_tensor = torch.zeros(len(type_ids), particles, 4)
@@ -17,6 +17,12 @@ def _legacy_bundle(path, type_ids=(0,), particles=30):
         with (data / split).open("wb") as handle:
             pickle.dump((particle_tensor, jet_features), handle)
     (path / "jet_attr_model.pth").write_bytes(b"model")
+    if with_summary:
+        train = path / "train"
+        train.mkdir()
+        train.joinpath("summary.json").write_text(json.dumps({
+            "full_config": {"data": {"jet_types": ["g"], "num_particles": particles}}
+        }))
 
 
 def test_cache_key_is_order_independent_for_same_type_set():
@@ -38,6 +44,13 @@ def test_imports_validated_legacy_bundle_then_reuses_cache(tmp_path):
     second = tmp_path / "second"
     same_bundle, reused = resolve_stage1(second, cache, ["g"], 30)
     assert reused and same_bundle == bundle
+
+
+def test_legacy_summary_avoids_loading_large_pickle(tmp_path):
+    legacy = tmp_path / "legacy"
+    _legacy_bundle(legacy, with_summary=True)
+    legacy.joinpath("data", "x_train.pkl").write_bytes(b"not a pickle")
+    validate_bundle(legacy, stage1_spec(["g"], 30), require_metadata=False)
 
 
 @pytest.mark.parametrize("jet_types,particles", [(["q"], 30), (["g"], 150)])

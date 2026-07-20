@@ -61,7 +61,28 @@ def validate_bundle(bundle: Path, spec: dict, require_metadata: bool = True) -> 
     if require_metadata:
         raise FileNotFoundError(f"missing Stage-1 metadata: {metadata_path}")
 
-    # Legacy runs predate cache metadata. Validate their actual data before import.
+    # Legacy training runs predate cache metadata but record the data contract in
+    # their compact summary. Prefer it over unpickling a large JetNet object from
+    # network storage; retain the pickle path for older runs without summaries.
+    summary_path = bundle / "train" / "summary.json"
+    if summary_path.is_file():
+        summary = json.loads(summary_path.read_text())
+        data_config = summary.get("full_config", {}).get("data", {})
+        actual_spec = stage1_spec(
+            data_config.get("jet_types", []), data_config.get("num_particles", -1)
+        )
+        if actual_spec["jet_types"] != spec["jet_types"]:
+            raise ValueError(
+                f"legacy Stage-1 types {actual_spec['jet_types']} != {spec['jet_types']}"
+            )
+        if actual_spec["num_particles"] != spec["num_particles"]:
+            raise ValueError(
+                f"legacy Stage-1 particle count {actual_spec['num_particles']} "
+                f"!= {spec['num_particles']}"
+            )
+        return
+
+    # Oldest runs have no summary; validate their actual data as a fallback.
     with (bundle / "data" / "x_train.pkl").open("rb") as handle:
         particles, jet_features = pickle.load(handle)
     if particles.shape[1] != spec["num_particles"]:
