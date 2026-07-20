@@ -27,7 +27,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="75e20d7d73bbeace66519aeb5eb2252cf9f0e793"
+              GIT_COMMIT="a6a3837793f92ba754fe2f0460ef8c7014ec3fb6"
               if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
                 echo "ERROR: corrected mass-shell training SHA is not pinned"
                 exit 1
