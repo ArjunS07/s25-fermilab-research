@@ -7,7 +7,7 @@ import math
 
 import torch
 
-from util.minkowski_utils import normsq4
+from util.minkowski_utils import normsq4, relative_mass_shell_residual, spacelike_mask
 
 
 def test_msq_sign_classifies_particles():
@@ -18,6 +18,16 @@ def test_msq_sign_classifies_particles():
     assert normsq4(timelike).item() > 0
     assert abs(normsq4(lightlike).item()) < 1e-12
     assert normsq4(spacelike).item() < 0
+    assert not spacelike_mask(lightlike).item()
+    assert spacelike_mask(spacelike).item()
+
+
+def test_roundoff_near_light_cone_is_not_called_spacelike():
+    spatial = torch.tensor([[1234.567, 2345.678, 3456.789]], dtype=torch.float32)
+    energy = torch.linalg.vector_norm(spatial, dim=-1, keepdim=True)
+    rounded_lightlike = torch.cat([energy, spatial], dim=-1)
+    assert not spacelike_mask(rounded_lightlike).item()
+    assert relative_mass_shell_residual(rounded_lightlike).item() < 1e-6
 
 
 def test_physicality_fractions_on_known_cloud():

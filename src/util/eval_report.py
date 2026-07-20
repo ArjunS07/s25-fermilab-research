@@ -24,7 +24,7 @@ import seaborn as sns
 import torch
 from scipy import stats
 
-from util.minkowski_utils import normsq4
+from util.minkowski_utils import normsq4, relative_mass_shell_residual, spacelike_mask
 from util.ks import ks_statistic_vs_uniform, ks_two_sample
 
 
@@ -330,14 +330,17 @@ def physicality_isotropy_scalars(
     if not bool(real.any()):
         return {"frac_negative_energy": float("nan"), "frac_spacelike": float("nan")}
     frac_neg_E     = (E < 0)[real].float().mean().item()
-    frac_spacelike = (msq < 0)[real].float().mean().item()
+    frac_spacelike = spacelike_mask(gen)[real].float().mean().item()
     msq_real = msq[real]
+    shell_residual = relative_mass_shell_residual(gen)[real]
 
     diag = {
         "frac_negative_energy": frac_neg_E,
         "frac_spacelike": frac_spacelike,
         "msq_mean":   msq_real.mean().item()   if msq_real.numel() else float("nan"),
         "msq_median": msq_real.median().item() if msq_real.numel() else float("nan"),
+        "mass_shell_rel_residual_p99": torch.quantile(shell_residual, 0.99).item(),
+        "mass_shell_rel_residual_max": shell_residual.max().item(),
     }
 
     gen_total = gen[..., 1:4].sum(dim=1)
@@ -377,7 +380,7 @@ def _plot_physicality(gen_cartesian: torch.Tensor, out_path: str) -> None:
         ax.text(0.5, 0.5, "No real particles", ha="center", va="center")
         fig.savefig(out_path, dpi=200); plt.close(fig); return
     frac_neg_E    = (E < 0)[real].float().mean().item()
-    frac_spacelike = (msq < 0)[real].float().mean().item()
+    frac_spacelike = spacelike_mask(gen_cartesian)[real].float().mean().item()
     msq_real = msq[real].numpy()
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
