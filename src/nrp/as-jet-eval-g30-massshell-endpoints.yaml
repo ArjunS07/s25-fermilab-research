@@ -1,0 +1,88 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-eval-g30-massshell-endpoints
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: as-train-pvc
+          persistentVolumeClaim:
+            claimName: as-jet-train-pvc-2
+      containers:
+        - name: eval
+          image: python:3.10-slim
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              GIT_COMMIT="b9aa2d6cb1bd209b88b6cafe6c760ebdd150e738"
+              SOURCE_RUN="/mnt/data/output/2026-07-20_03-32-40--ef83d0f0-38ef-47d4-b81c-72d6dd1ff162-g30-massshell-m01-fixed"
+              CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
+              ENV_ARCHIVE=/mnt/data/caches/runtime/python-env-py310-torch271.tar
+              test -f "$CHECKPOINT"
+              test -f "$ENV_ARCHIVE"
+
+              mkdir -p /tmp/runtime
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              test -x "$PYTHON"
+              export MPLCONFIGDIR=/mnt/data/caches/matplotlib
+              mkdir -p "$MPLCONFIGDIR"
+              "$PYTHON" -c "import torch, jetnet, yaml"
+              "$PYTHON" -c "import tarfile, urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+
+              UNIQUE_RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID"
+              BASE_OUT="/mnt/data/output/${UNIQUE_RUN_ID}-g30-massshell-endpoints"
+              mkdir -p "$BASE_OUT"
+              printf '%s\n' "$GIT_COMMIT" > "$BASE_OUT/git_commit.txt"
+              printf '%s\n' "$SOURCE_RUN" > "$BASE_OUT/source_run.txt"
+
+              run_endpoint() {
+                LABEL="$1"
+                END_TIME="$2"
+                "$PYTHON" infer.py \
+                  --config configs/infer-g30-massshell-screen.yaml \
+                  --set paths.checkpoint_path="$CHECKPOINT" \
+                  --set paths.output_path="$SOURCE_RUN" \
+                  --set paths.out_dir="$BASE_OUT/$LABEL" \
+                  --set inference.n_samples=10000 \
+                  --set inference.integration_steps=64 \
+                  --set inference.integration_end_time="$END_TIME" \
+                  --set inference.mass_shell_max_step_rapidity=0.5 \
+                  --set inference.mass_shell_max_substeps=64 \
+                  2>&1 | tee -a "$BASE_OUT/logs.txt"
+              }
+
+              run_endpoint t095 0.95
+              run_endpoint t098 0.98
+              run_endpoint t099 0.99
+              run_endpoint t0995 0.995
+              run_endpoint t099999 0.99999
+
+              "$PYTHON" -m analysis.compare_mass_shell_endpoints --base "$BASE_OUT" \
+                2>&1 | tee -a "$BASE_OUT/logs.txt"
+              echo "Mass-shell endpoint sweep complete: $BASE_OUT"
+          volumeMounts:
+            - mountPath: /mnt/data
+              name: as-train-pvc
+          resources:
+            limits:
+              nvidia.com/a40: 1
+              memory: 16Gi
+              cpu: "2.4"
+            requests:
+              nvidia.com/a40: 1
+              memory: 16Gi
+              cpu: "2"
