@@ -208,7 +208,10 @@ def run_save_metrics(
     for jet_type in jet_types:
         try:
             eval_info[f"fpnd_{jet_type}"] = jetnet_eval.fpnd(
-                jets=gen_polar_rel,
+                # JetNet's pretrained ParticleNet weights are float32.  The
+                # mass-shell pipeline deliberately retains float64 through
+                # generation, so cast only at this external model boundary.
+                jets=gen_polar_rel.float(),
                 jet_type=jet_type,
                 use_tqdm=False
             )
