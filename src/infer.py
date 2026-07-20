@@ -301,6 +301,7 @@ def main():
             "use_cfg": args.use_cfg,
             "cfg_guidance_weight": args.cfg_guidance_weight,
             "integration_steps": args.integration_steps,
+            "integration_end_time": args.integration_end_time,
             "sampler": args.sampler,
             "mass_shell_max_step_rapidity": args.mass_shell_max_step_rapidity,
             "mass_shell_max_substeps": args.mass_shell_max_substeps,

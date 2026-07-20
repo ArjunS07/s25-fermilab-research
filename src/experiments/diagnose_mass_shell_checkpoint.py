@@ -96,6 +96,7 @@ def main():
     parser.add_argument("--n-jets", type=int, default=1024)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--steps", type=int, default=64)
+    parser.add_argument("--end-time", type=float, default=0.99999)
     parser.add_argument("--max-step-rapidity", type=float, default=None)
     parser.add_argument("--max-substeps", type=int, default=64)
     args = parser.parse_args()
@@ -143,6 +144,7 @@ def main():
         "n_jets": int(x1.shape[0]),
         "regulator_mass": mass,
         "prior_dist": full_cfg["training"]["prior_dist"],
+        "integration_end_time": args.end_time,
         "path_field": {},
         "sampler": [],
         "trajectory_failures": {
@@ -164,7 +166,7 @@ def main():
             )
 
         state = p0
-        times = torch.linspace(0, 1 - 1e-5, args.steps + 1, device=device)
+        times = torch.linspace(0, args.end_time, args.steps + 1, device=device)
         seen_nonfinite = torch.zeros(x1.shape[0], dtype=torch.bool, device=device)
         seen_explosive = torch.zeros_like(seen_nonfinite)
         for step in range(args.steps):

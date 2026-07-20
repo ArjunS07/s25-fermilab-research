@@ -42,6 +42,7 @@ def test_train_defaults_match_legacy_argparse():
     assert cfg.inference.n_samples == 50_000
     assert cfg.inference.n_viz_samples == 1000
     assert cfg.inference.integration_steps == 16
+    assert cfg.inference.integration_end_time == 0.99999
     assert cfg.training.use_cosine_lr is True
     assert cfg.training.lr_t0 == 0
     assert cfg.training.lr_warmup_epochs == 10
@@ -77,6 +78,7 @@ def test_infer_defaults_match_legacy_argparse():
     assert cfg.inference.n_samples == 50_000
     assert cfg.inference.n_viz_samples == 1000
     assert cfg.inference.integration_steps == 16
+    assert cfg.inference.integration_end_time == 0.99999
     assert cfg.inference.batch_size == 256
     assert cfg.inference.cfg_guidance_weight == 2.0
     assert cfg.inference.use_cfg is False
@@ -126,6 +128,8 @@ def test_invalid_sampler_choice_rejected():
     ("mass_shell_max_step_rapidity", 0),
     ("mass_shell_max_step_rapidity", -0.5),
     ("mass_shell_max_substeps", 0),
+    ("integration_end_time", 0),
+    ("integration_end_time", 1.1),
 ])
 def test_invalid_adaptive_mass_shell_limits_rejected(field, value):
     with pytest.raises(ValidationError):

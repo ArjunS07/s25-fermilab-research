@@ -15,6 +15,7 @@ def test_generation_controls_preserve_prior_geometry_and_guidance():
         prior_dist="axis_aligned",
         mass_shell_max_step_rapidity=0.5,
         mass_shell_max_substeps=64,
+        integration_end_time=0.99,
     )
 
     assert generation_controls_from_namespace(args) == {
@@ -28,4 +29,5 @@ def test_generation_controls_preserve_prior_geometry_and_guidance():
         "prior_dist": "axis_aligned",
         "mass_shell_max_step_rapidity": 0.5,
         "mass_shell_max_substeps": 64,
+        "integration_end_time": 0.99,
     }

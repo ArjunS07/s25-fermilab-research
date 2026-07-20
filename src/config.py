@@ -97,6 +97,7 @@ class InferenceConfig(BaseModel):
     n_samples: int = 50_000
     n_viz_samples: int = 1000
     integration_steps: int = 16
+    integration_end_time: float = Field(default=0.99999, gt=0, le=1)
     cfg_guidance_weight: float = 2.0
     use_cfg: bool = False
     seed: int = 42
@@ -239,6 +240,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         n_samples=cfg.inference.n_samples,
         n_viz_samples=cfg.inference.n_viz_samples,
         integration_steps=cfg.inference.integration_steps,
+        integration_end_time=cfg.inference.integration_end_time,
         vf_mode=cfg.inference.vf_mode,
         use_cfg=cfg.inference.use_cfg,
         cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
@@ -288,6 +290,7 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         n_samples=cfg.inference.n_samples,
         n_viz_samples=cfg.inference.n_viz_samples,
         integration_steps=cfg.inference.integration_steps,
+        integration_end_time=cfg.inference.integration_end_time,
         batch_size=cfg.inference.batch_size,
         cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
         use_cfg=cfg.inference.use_cfg,
@@ -339,6 +342,7 @@ def generation_controls_from_namespace(args: argparse.Namespace) -> dict:
         "sampler": args.sampler,
         "mass_shell_max_step_rapidity": args.mass_shell_max_step_rapidity,
         "mass_shell_max_substeps": args.mass_shell_max_substeps,
+        "integration_end_time": args.integration_end_time,
         "prior_dist": args.prior_dist,
     }
 

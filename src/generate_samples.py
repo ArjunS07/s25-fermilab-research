@@ -52,6 +52,7 @@ def generate_samples(
         max_particles_per_jet,
         final_scale,
         integration_steps,
+        integration_end_time,
         n_samples,
         batch_size,
         n_jet_types=3,
@@ -84,12 +85,13 @@ def generate_samples(
     all_jet_types = []    # per-jet class index (argmax of one-hot)
     all_failure_steps = []
     all_explosion_steps = []
+    all_generated_jet_attrs = []
 
     with torch.no_grad():
         model.eval()
         jet_attr_model.eval()
 
-        times = torch.linspace(0, 1 - 1e-5, integration_steps + 1).to(device)
+        times = torch.linspace(0, integration_end_time, integration_steps + 1).to(device)
 
         for start_idx in range(0, n_samples, batch_size):
             current_batch_size = min(batch_size, n_samples - start_idx)
@@ -217,6 +219,7 @@ def generate_samples(
             all_prior_samples.append((final_scale * prior_x).cpu())
             all_pt_cond.append(gen_pt.cpu())
             all_jet_types.append(jet_one_hot_enc.argmax(dim=-1).cpu())
+            all_generated_jet_attrs.append(generated_jet_attrs.cpu())
             if use_hyperbolic and hyperbolic_model == 'mass_shell':
                 all_failure_steps.append(failure_step.cpu())
                 all_explosion_steps.append(explosion_step.cpu())
@@ -233,6 +236,30 @@ def generate_samples(
         import json
         failures = torch.cat(all_failure_steps)
         explosions = torch.cat(all_explosion_steps)
+        generated_attrs = torch.cat(all_generated_jet_attrs)
+        prior_max_abs = all_prior_samples_cat.abs().amax(dim=(1, 2))
+        endpoint_max_abs = all_samples_cat.abs().amax(dim=(1, 2))
+        noteworthy = (failures >= 0) | (explosions >= 0)
+        def quantiles(values):
+            q = torch.tensor([0.5, 0.9, 0.99, 0.999, 1.0], dtype=torch.float64)
+            return {name: float(value) for name, value in zip(
+                ("p50", "p90", "p99", "p999", "max"),
+                torch.quantile(values.to(torch.float64), q))}
+        trajectory_records = []
+        for idx in noteworthy.nonzero(as_tuple=False).flatten().tolist():
+            attrs = generated_attrs[idx]
+            trajectory_records.append({
+                "index": idx,
+                "failure_step": int(failures[idx]),
+                "explosion_step": int(explosions[idx]),
+                "jet_type": int(attrs[:5].argmax()),
+                "eta": float(attrs[5]),
+                "pt_condition": float(attrs[6]),
+                "mass_condition": float(attrs[7]),
+                "n_particles": int(attrs[-1]),
+                "prior_max_abs": float(prior_max_abs[idx]),
+                "endpoint_max_abs": float(endpoint_max_abs[idx]),
+            })
         generation_report = {
             "n_total": int(failures.numel()),
             "n_failed": int((failures >= 0).sum()),
@@ -246,8 +273,17 @@ def generate_samples(
                 for step in torch.unique(explosions[explosions >= 0]).tolist()
             },
             "integration_steps": int(integration_steps),
+            "integration_end_time": float(integration_end_time),
             "max_step_rapidity": mass_shell_max_step_rapidity,
             "max_substeps": int(mass_shell_max_substeps),
+            "all_trajectory_quantiles": {
+                "abs_eta": quantiles(generated_attrs[:, 5].abs()),
+                "pt_condition": quantiles(generated_attrs[:, 6]),
+                "mass_condition": quantiles(generated_attrs[:, 7]),
+                "n_particles": quantiles(generated_attrs[:, -1]),
+                "prior_max_abs": quantiles(prior_max_abs),
+            },
+            "noteworthy_trajectories": trajectory_records,
         }
         with open(f"{root_output_path}/generation_diagnostics.json", "w") as handle:
             json.dump(generation_report, handle, indent=2)
