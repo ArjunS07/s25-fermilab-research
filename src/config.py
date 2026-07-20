@@ -102,6 +102,10 @@ class InferenceConfig(BaseModel):
     seed: int = 42
     batch_size: int = 256
     sampler: Literal["euler", "heun"] = "euler"
+    # Optional Lorentz-invariant stability control for mass-shell Euler integration.
+    # Each nominal interval is subdivided until ||v||_g * dt / m is at most this value.
+    mass_shell_max_step_rapidity: float | None = Field(default=None, gt=0)
+    mass_shell_max_substeps: int = Field(default=64, ge=1)
     vf_mode: Literal["cfg", "nocfg", "both", "none"] = "none"
     skip_samples: bool = False
     skip_metrics: bool = False
@@ -240,6 +244,8 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
         inference_seed=cfg.inference.seed,
         sampler=cfg.inference.sampler,
+        mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
+        mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
         use_cosine_lr=cfg.training.use_cosine_lr,
         lr_t0=cfg.training.lr_t0,
         lr_warmup_epochs=cfg.training.lr_warmup_epochs,
@@ -290,6 +296,8 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         hyperbolic_model=cfg.model.hyperbolic_model,
         regulator_mass=cfg.model.regulator_mass,
         sampler=cfg.inference.sampler,
+        mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
+        mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
         use_reference_vectors=cfg.model.use_reference_vectors,
         use_node_scalars=cfg.model.use_node_scalars,
         node_scalar_seed=cfg.model.node_scalar_seed,
@@ -329,6 +337,8 @@ def generation_controls_from_namespace(args: argparse.Namespace) -> dict:
         "regulator_mass": args.regulator_mass,
         "use_reference_vectors": args.use_reference_vectors,
         "sampler": args.sampler,
+        "mass_shell_max_step_rapidity": args.mass_shell_max_step_rapidity,
+        "mass_shell_max_substeps": args.mass_shell_max_substeps,
         "prior_dist": args.prior_dist,
     }
 

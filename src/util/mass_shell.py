@@ -97,6 +97,11 @@ def _tangent_norm(u64: torch.Tensor) -> torch.Tensor:
     return torch.sqrt(nsq).unsqueeze(-1)
 
 
+def tangent_norm(u: torch.Tensor) -> torch.Tensor:
+    """Public float64 induced norm for tangent vectors, with shape ``(..., 1)``."""
+    return _tangent_norm(u.to(torch.float64))
+
+
 def exp_map(p: torch.Tensor, u: torch.Tensor, m: float) -> torch.Tensor:
     """Exponential map exp_p(u): travel geodesic arc length ||u|| from p in direction u.
 
@@ -241,5 +246,7 @@ def tangent_error_diagnostics(p: torch.Tensor, pred: torch.Tensor, target: torch
         "target_tangent_norm_quantiles": quantiles(target_norm),
         "pred_target_alignment_quantiles": quantiles(alignment),
         "step_rapidity_quantiles": quantiles(step_rapidity),
+        "step_rapidity_max": (float(step_rapidity[real & torch.isfinite(step_rapidity)].max())
+                               if (real & torch.isfinite(step_rapidity)).any() else 0.0),
         "step_clamp_fraction": fraction(step_rapidity > _S_MAX),
     }

@@ -1,3 +1,5 @@
+import json
+import os
 import pickle
 import torch
 
@@ -5,6 +7,7 @@ from jetnet.utils import EtaPhiPtE_to_relEtaPhiPt, cartesian_to_EtaPhiPtE
 import jetnet.evaluation as jetnet_eval
 
 from util.eval_report import eval_report, physicality_isotropy_scalars
+from util.tail_diagnostics import endpoint_tail_diagnostics
 
 # Fixed seed so the random jet-phi assignment (and hence the isotropy reference) is
 # reproducible across runs — the harness is a fixed yardstick (experiment plan 0.4).
@@ -68,6 +71,11 @@ def run_save_metrics(
     # A handful of non-finite jets must not erase every metric. Drop whole invalid jets,
     # report the exact count, and compare the remaining generated sample to an equally-sized
     # prefix of the frozen test set.
+    tail_report = endpoint_tail_diagnostics(gen_samples)
+    os.makedirs(output_path, exist_ok=True)
+    with open(os.path.join(output_path, "endpoint_tail_diagnostics.json"), "w") as handle:
+        json.dump(tail_report, handle, indent=2)
+
     finite_jet = torch.isfinite(gen_samples).all(dim=-1).all(dim=-1)
     n_invalid = int((~finite_jet).sum().item())
     n_total = int(gen_samples.shape[0])
@@ -131,6 +139,10 @@ def run_save_metrics(
         "n_generated_total": n_total,
         "n_generated_invalid": n_invalid,
         "frac_generated_invalid": n_invalid / n_total,
+        "n_generated_finite_max_abs_gt_1e3": tail_report.get("n_finite_max_abs_gt_1e3", 0),
+        "n_generated_finite_max_abs_gt_1e6": tail_report.get("n_finite_max_abs_gt_1e6", 0),
+        "frac_generated_finite_max_abs_gt_1e6": tail_report.get(
+            "fraction_finite_max_abs_gt_1e6", 0.0),
     }
     try:
         eval_info.update(physicality_isotropy_scalars(gen_samples.cpu(), test_polar_abs))

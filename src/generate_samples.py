@@ -17,6 +17,33 @@ sns.set_style("whitegrid")
 features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 
 
+def _resilient_mass_shell_step(model, state, cond, masks, t_start, t_end, **kwargs):
+    """Integrate a batch while isolating trajectories that exceed adaptive safety limits."""
+    try:
+        stepped = model.step_hyperbolic(
+            y_t=state, jet_conditions=cond, mask=masks, t_start=t_start, t_end=t_end,
+            hyperbolic_model='mass_shell', **kwargs)
+        if torch.isfinite(stepped).all():
+            return stepped, torch.zeros(state.shape[0], dtype=torch.bool, device=state.device)
+        raise FloatingPointError("mass-shell step returned non-finite state")
+    except FloatingPointError:
+        if state.shape[0] == 1:
+            failed = torch.full_like(state, float('nan'))
+            return failed, torch.ones(1, dtype=torch.bool, device=state.device)
+        middle = state.shape[0] // 2
+        outputs, failures = [], []
+        for slc in (slice(0, middle), slice(middle, state.shape[0])):
+            refs = kwargs.get("ref_vectors")
+            child_kwargs = dict(kwargs)
+            if refs is not None:
+                child_kwargs["ref_vectors"] = refs[slc]
+            child, child_failed = _resilient_mass_shell_step(
+                model, state[slc], cond[slc], masks[slc], t_start, t_end, **child_kwargs)
+            outputs.append(child)
+            failures.append(child_failed)
+        return torch.cat(outputs), torch.cat(failures)
+
+
 def generate_samples(
         model: LEFTJeN,
         jet_attr_model,
@@ -37,8 +64,16 @@ def generate_samples(
         use_reference_vectors=False,
         sampler='euler',
         prior_dist='isotropic_com',
+        mass_shell_max_step_rapidity=None,
+        mass_shell_max_substeps=64,
 ):
 
+
+    if use_hyperbolic and hyperbolic_model == 'mass_shell' and sampler != 'euler':
+        raise ValueError(
+            f"mass-shell integration supports sampler='euler'; got {sampler!r}. "
+            "Use mass_shell_max_step_rapidity for adaptive Euler integration."
+        )
 
     # make folder
     make_clear_folder(f"{root_output_path}/samples")
@@ -47,6 +82,8 @@ def generate_samples(
     all_prior_samples = []
     all_pt_cond = []      # conditioning pT for each jet (normalized)
     all_jet_types = []    # per-jet class index (argmax of one-hot)
+    all_failure_steps = []
+    all_explosion_steps = []
 
     with torch.no_grad():
         model.eval()
@@ -114,19 +151,34 @@ def generate_samples(
                 # (Cartesian on-shell 4-vectors), so the final x is used directly.
                 from util.mass_shell import project_to_shell
                 y = project_to_shell(x * masks.unsqueeze(-1), regulator_mass)
+                failure_step = torch.full(
+                    (current_batch_size,), -1, dtype=torch.int64, device=device)
+                explosion_step = torch.full_like(failure_step, -1)
                 for i in range(integration_steps):
-                    y = model.step_hyperbolic(
-                        y_t=y,
-                        jet_conditions=cond,
-                        mask=masks,
-                        t_start=times[i],
-                        t_end=times[i + 1],
-                        hyperbolic_model='mass_shell',
+                    active = failure_step < 0
+                    if not active.any():
+                        break
+                    refs_active = ref_vectors[active] if ref_vectors is not None else None
+                    stepped, failed = _resilient_mass_shell_step(
+                        model, y[active], cond[active], masks[active], times[i], times[i + 1],
                         regulator_mass=regulator_mass,
                         use_cfg=use_cfg,
                         guidance_weight=cfg_guidance_weight,
-                        ref_vectors=ref_vectors,
+                        ref_vectors=refs_active,
+                        max_step_rapidity=mass_shell_max_step_rapidity,
+                        max_substeps=mass_shell_max_substeps,
                     )
+                    y = y.clone()
+                    y[active] = stepped
+                    active_indices = active.nonzero(as_tuple=False).flatten()
+                    if failed.any():
+                        failure_step[active_indices[failed]] = i
+                    finite = torch.isfinite(stepped).all(dim=(1, 2))
+                    max_abs = stepped.abs().amax(dim=(1, 2))
+                    new_explosive = finite & (max_abs > 1e6)
+                    unset = explosion_step[active_indices] < 0
+                    if (new_explosive & unset).any():
+                        explosion_step[active_indices[new_explosive & unset]] = i
                 x = y
             elif use_hyperbolic:
                 y = to_poincare_ball(x, c=hyperbolic_c)
@@ -165,6 +217,9 @@ def generate_samples(
             all_prior_samples.append((final_scale * prior_x).cpu())
             all_pt_cond.append(gen_pt.cpu())
             all_jet_types.append(jet_one_hot_enc.argmax(dim=-1).cpu())
+            if use_hyperbolic and hyperbolic_model == 'mass_shell':
+                all_failure_steps.append(failure_step.cpu())
+                all_explosion_steps.append(explosion_step.cpu())
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -173,5 +228,28 @@ def generate_samples(
     all_prior_samples_cat = torch.cat(all_prior_samples, dim=0)
     all_pt_cond_cat   = torch.cat(all_pt_cond, dim=0)
     all_jet_types_cat = torch.cat(all_jet_types, dim=0)
+
+    if all_failure_steps:
+        import json
+        failures = torch.cat(all_failure_steps)
+        explosions = torch.cat(all_explosion_steps)
+        generation_report = {
+            "n_total": int(failures.numel()),
+            "n_failed": int((failures >= 0).sum()),
+            "n_crossed_max_abs_1e6": int((explosions >= 0).sum()),
+            "first_failure_step_counts": {
+                str(int(step)): int((failures == step).sum())
+                for step in torch.unique(failures[failures >= 0]).tolist()
+            },
+            "first_explosion_step_counts": {
+                str(int(step)): int((explosions == step).sum())
+                for step in torch.unique(explosions[explosions >= 0]).tolist()
+            },
+            "integration_steps": int(integration_steps),
+            "max_step_rapidity": mass_shell_max_step_rapidity,
+            "max_substeps": int(mass_shell_max_substeps),
+        }
+        with open(f"{root_output_path}/generation_diagnostics.json", "w") as handle:
+            json.dump(generation_report, handle, indent=2)
 
     return all_samples_cat.to(device), all_jet_types_cat, all_pt_cond_cat, all_prior_samples_cat

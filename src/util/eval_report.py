@@ -198,7 +198,32 @@ def _draw_jet_image_triptych(
 
 def _flatten_real(polar: torch.Tensor, idx: int) -> np.ndarray:
     real = _real_mask(polar)
-    return polar[..., idx][real].numpy()
+    values = polar[..., idx][real]
+    return values[torch.isfinite(values)].numpy()
+
+
+def _robust_bounds(*values: torch.Tensor, lower_q: float = 0.001,
+                   upper_q: float = 0.999) -> tuple[float, float]:
+    """Shared display range that exposes the central distribution without hiding tail counts."""
+    finite = [v.reshape(-1).to(torch.float64) for v in values if v is not None]
+    finite = [v[torch.isfinite(v)] for v in finite]
+    finite = [v for v in finite if v.numel()]
+    if not finite:
+        return 0.0, 1.0
+    joined = torch.cat(finite)
+    lo = float(torch.quantile(joined, lower_q, interpolation="higher"))
+    hi = float(torch.quantile(joined, upper_q, interpolation="lower"))
+    if not hi > lo:
+        hi = lo + 1e-6
+    return lo, hi
+
+
+def _annotate_display_tail(ax, generated: torch.Tensor, hi: float) -> None:
+    finite = generated[torch.isfinite(generated)]
+    n_above = int((finite > hi).sum())
+    if n_above:
+        ax.text(0.99, 0.97, f"{n_above} generated values above display range",
+                transform=ax.transAxes, ha="right", va="top", fontsize=8, color="tab:red")
 
 
 def _class_series(polar: torch.Tensor, types: torch.Tensor, n_classes: int):
@@ -299,12 +324,17 @@ def _plot_particle_kinematics(
         t = _flatten_real(test_polar, i)
         g = _flatten_real(gen_polar, i)
         p = _flatten_real(prior_polar, i) if prior_polar is not None else None
-        bins = 100
+        arrays = [torch.from_numpy(t), torch.from_numpy(g)]
+        if p is not None:
+            arrays.append(torch.from_numpy(p))
+        lo, hi = _robust_bounds(*arrays)
+        bins = np.linspace(lo, hi, 100)
         ax.hist(t, bins=bins, alpha=0.5, density=True, color=_TEST_COLOR, label="Test")
         if p is not None:
             ax.hist(p, bins=bins, density=True, histtype="step", linestyle="--",
                     linewidth=1.6, color=_PRIOR_COLOR, label="Prior")
         ax.hist(g, bins=bins, alpha=0.5, density=True, color=_GEN_COLOR, label="Gen")
+        _annotate_display_tail(ax, torch.from_numpy(g), hi)
         ax.set_xlabel(titles[i])
         ax.set_ylabel("Density")
         ax.legend()
@@ -491,8 +521,8 @@ def _plot_jet_girth(tp_rel, gp_rel, t_types, g_types, names, out_path, pp_rel=No
     n = len(names)
     fig, ax = plt.subplots(figsize=(8, 5))
     p_g = _jet_girth(pp_rel) if pp_rel is not None else None
-    maxima = [t_g.max(), g_g.max()] + ([p_g.max()] if p_g is not None else [])
-    bins = np.linspace(0.0, float(max(maxima).item()) * 1.02 + 1e-6, 60)
+    _, hi = _robust_bounds(t_g, g_g, p_g, lower_q=0.0)
+    bins = np.linspace(0.0, hi * 1.02 + 1e-6, 60)
     _overlay_hist_by_class(
         ax,
         _split_scalar_by_class(t_g, t_types, n),
@@ -503,6 +533,7 @@ def _plot_jet_girth(tp_rel, gp_rel, t_types, g_types, names, out_path, pp_rel=No
         prior_vals_by_class=(_split_scalar_by_class(p_g, g_types, n)
                              if p_g is not None else None),
     )
+    _annotate_display_tail(ax, g_g, hi)
     ax.set_title("Jet girth by class")
     fig.tight_layout()
     fig.savefig(out_path, dpi=200, bbox_inches="tight")
@@ -536,8 +567,8 @@ def _plot_jet_pt_total(tp_abs, gp_abs, t_types, g_types, names, pt_cond, out_pat
     g_pt = _jet_pt_scalar(gp_abs)
     n = len(names)
     p_pt = _jet_pt_scalar(pp_abs) if pp_abs is not None else None
-    maxima = [t_pt.max(), g_pt.max()] + ([p_pt.max()] if p_pt is not None else [])
-    hi = float(max(maxima).item()) * 1.02
+    _, hi = _robust_bounds(t_pt, g_pt, p_pt, lower_q=0.0)
+    hi *= 1.02
     bins = np.linspace(0.0, hi + 1e-6, 60)
 
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -551,11 +582,14 @@ def _plot_jet_pt_total(tp_abs, gp_abs, t_types, g_types, names, pt_cond, out_pat
         prior_vals_by_class=(_split_scalar_by_class(p_pt, g_types, n)
                              if p_pt is not None else None),
     )
+    _annotate_display_tail(ax, g_pt, hi)
     title = "Total jet pT by class"
     if pt_cond is not None:
         try:
-            slope, intercept, r_value, _, _ = stats.linregress(pt_cond.numpy(), g_pt.numpy())
-            title += rf"   ·   gen-vs-cond fit: slope={slope:.3f}, $R^2$={r_value ** 2:.3f}"
+            fit = torch.isfinite(g_pt) & (g_pt <= hi) & torch.isfinite(pt_cond)
+            slope, intercept, r_value, _, _ = stats.linregress(
+                pt_cond[fit].numpy(), g_pt[fit].numpy())
+            title += rf"   ·   bulk gen-vs-cond fit: slope={slope:.3f}, $R^2$={r_value ** 2:.3f}"
         except Exception:
             pass
     ax.set_title(title, fontsize=11)
@@ -711,8 +745,8 @@ def _plot_jet_mass(test_cart, gen_cart, t_types, g_types, names, out_path, prior
                  fontsize=14)
 
     p_m = _jet_invariant_mass(prior_cart) if prior_cart is not None else None
-    maxima = [t_m.max(), g_m.max()] + ([p_m.max()] if p_m is not None else [])
-    hi = float(max(maxima).item()) * 1.02 + 1e-6
+    _, hi = _robust_bounds(t_m, g_m, p_m, lower_q=0.0)
+    hi = hi * 1.02 + 1e-6
     bins = np.linspace(0.0, hi, 80)
 
     panels = [(f"class {name}", t_m[t_types == c].numpy(), g_m[g_types == c].numpy(),
@@ -730,6 +764,7 @@ def _plot_jet_mass(test_cart, gen_cart, t_types, g_types, names, out_path, prior
                     linewidth=1.6, color=_PRIOR_COLOR, label="Prior")
         if len(g_vals):
             ax.hist(g_vals, bins=bins, density=True, alpha=0.5, color=_GEN_COLOR, label="Gen")
+            _annotate_display_tail(ax, torch.from_numpy(g_vals), hi)
         ax.set_xlabel(r"$m_{\rm jet}$")
         ax.set_ylabel("Density")
         ax.set_title(title)

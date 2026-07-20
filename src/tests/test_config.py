@@ -83,6 +83,8 @@ def test_infer_defaults_match_legacy_argparse():
     assert cfg.inference.seed == 42
     assert cfg.model.use_hyperbolic is False
     assert cfg.inference.sampler == "euler"
+    assert cfg.inference.mass_shell_max_step_rapidity is None
+    assert cfg.inference.mass_shell_max_substeps == 64
     assert cfg.model.use_reference_vectors is False
     assert cfg.model.use_node_scalars is False
     assert cfg.model.use_adaln is False
@@ -118,6 +120,16 @@ def test_invalid_prior_dist_choice_rejected():
 def test_invalid_sampler_choice_rejected():
     with pytest.raises(ValidationError):
         InferRunConfig(inference={"sampler": "rk4"})
+
+
+@pytest.mark.parametrize("field,value", [
+    ("mass_shell_max_step_rapidity", 0),
+    ("mass_shell_max_step_rapidity", -0.5),
+    ("mass_shell_max_substeps", 0),
+])
+def test_invalid_adaptive_mass_shell_limits_rejected(field, value):
+    with pytest.raises(ValidationError):
+        InferRunConfig(inference={field: value})
 
 
 def test_unknown_field_rejected():

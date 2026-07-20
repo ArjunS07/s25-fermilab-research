@@ -96,6 +96,8 @@ def main():
     parser.add_argument("--n-jets", type=int, default=1024)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--steps", type=int, default=64)
+    parser.add_argument("--max-step-rapidity", type=float, default=None)
+    parser.add_argument("--max-substeps", type=int, default=64)
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -143,6 +145,10 @@ def main():
         "prior_dist": full_cfg["training"]["prior_dist"],
         "path_field": {},
         "sampler": [],
+        "trajectory_failures": {
+            "first_nonfinite_step_by_jet": {},
+            "first_max_abs_gt_1e6_step_by_jet": {},
+        },
     }
 
     with torch.no_grad():
@@ -159,6 +165,8 @@ def main():
 
         state = p0
         times = torch.linspace(0, 1 - 1e-5, args.steps + 1, device=device)
+        seen_nonfinite = torch.zeros(x1.shape[0], dtype=torch.bool, device=device)
+        seen_explosive = torch.zeros_like(seen_nonfinite)
         for step in range(args.steps):
             t = times[step].expand(x1.shape[0])
             pred = model(state.to(model_dtype), t.to(model_dtype), cond.to(model_dtype), mask)
@@ -169,18 +177,42 @@ def main():
                     state, pred_tan, torch.zeros_like(pred_tan), mask, mass,
                     dt=float(times[step + 1] - times[step]),
                 )
-                stats.update({"step": step, "t": float(times[step]), "pt_quantiles": _quantiles(pt)})
+                jet_max_abs = state.abs().amax(dim=(1, 2))
+                finite_max = jet_max_abs[torch.isfinite(jet_max_abs)]
+                stats.update({
+                    "step": step,
+                    "t": float(times[step]),
+                    "pt_quantiles": _quantiles(pt),
+                    "state_max_abs_quantiles": _quantiles(finite_max),
+                    "state_max_abs_max": (float(finite_max.max()) if finite_max.numel() else None),
+                })
                 report["sampler"].append(stats)
             state = model.step_hyperbolic(
                 state, cond, mask, times[step], times[step + 1],
                 hyperbolic_model="mass_shell", regulator_mass=mass,
                 use_cfg=False,
+                max_step_rapidity=args.max_step_rapidity,
+                max_substeps=args.max_substeps,
             )
+            finite_jet = torch.isfinite(state).all(dim=(1, 2))
+            max_abs = state.abs().amax(dim=(1, 2))
+            newly_nonfinite = (~finite_jet) & (~seen_nonfinite)
+            newly_explosive = finite_jet & (max_abs > 1e6) & (~seen_explosive)
+            for idx in newly_nonfinite.nonzero(as_tuple=False).flatten().tolist():
+                report["trajectory_failures"]["first_nonfinite_step_by_jet"][str(idx)] = step
+            for idx in newly_explosive.nonzero(as_tuple=False).flatten().tolist():
+                report["trajectory_failures"]["first_max_abs_gt_1e6_step_by_jet"][str(idx)] = step
+            seen_nonfinite |= ~finite_jet
+            seen_explosive |= finite_jet & (max_abs > 1e6)
 
         physical_prior = massless_energy_view(p0, mask)
         physical_generated = massless_energy_view(state, mask)
         report["paired_endpoint"] = paired_endpoint_diagnostics(
             physical_prior, physical_generated, mask)
+        report["trajectory_failures"].update({
+            "n_nonfinite": int(seen_nonfinite.sum()),
+            "n_finite_max_abs_gt_1e6": int((~seen_nonfinite & seen_explosive).sum()),
+        })
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w") as handle:

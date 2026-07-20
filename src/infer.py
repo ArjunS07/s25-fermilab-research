@@ -302,6 +302,8 @@ def main():
             "cfg_guidance_weight": args.cfg_guidance_weight,
             "integration_steps": args.integration_steps,
             "sampler": args.sampler,
+            "mass_shell_max_step_rapidity": args.mass_shell_max_step_rapidity,
+            "mass_shell_max_substeps": args.mass_shell_max_substeps,
         },
         "git_commit": git_commit,
         "config": train_summary.get("config"),

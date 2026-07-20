@@ -529,6 +529,8 @@ class LEFTJeN(nn.Module):
         ref_vectors: torch.Tensor = None,
         hyperbolic_model: str = "poincare",
         regulator_mass: float = 0.5,
+        max_step_rapidity: float = None,
+        max_substeps: int = 64,
     ) -> torch.Tensor:
         """
         Riemannian Euler step in the Poincaré ball (default) or on the mass shell.
@@ -540,6 +542,7 @@ class LEFTJeN(nn.Module):
             return self._step_mass_shell(
                 y_t, jet_conditions, mask, t_start, t_end,
                 regulator_mass, use_cfg, guidance_weight, ref_vectors,
+                max_step_rapidity, max_substeps,
             )
 
         from util.hyperbolic import from_poincare_ball, exp_map, pushforward, clamp_to_ball
@@ -581,15 +584,57 @@ class LEFTJeN(nn.Module):
         use_cfg: bool,
         guidance_weight: float,
         ref_vectors: torch.Tensor,
+        max_step_rapidity: float = None,
+        max_substeps: int = 64,
     ) -> torch.Tensor:
         """Riemannian Euler step on the mass shell H_m. The state y_t is already on the shell
         (a Cartesian on-shell 4-vector), so it is fed to the model directly; the predicted
         Cartesian velocity is projected onto the tangent space and the geodesic exp map takes
         the step. Masked/padded rows stay put (zero tangent velocity) and remain on the shell."""
-        from util.mass_shell import exp_map, pushforward_to_tangent, project_to_shell
+        from util.mass_shell import exp_map, project_to_shell, tangent_norm
+
+        if max_step_rapidity is None:
+            vel_tan = self._mass_shell_velocity(
+                y_t, jet_conditions, mask, t_start, m, use_cfg, guidance_weight, ref_vectors)
+            return project_to_shell(exp_map(y_t, vel_tan * (t_end - t_start), m), m)
+
+        if max_step_rapidity <= 0 or max_substeps < 1:
+            raise ValueError("adaptive mass-shell limits must be positive")
+
+        state = y_t
+        current_t = float(t_start.detach().cpu())
+        end_t = float(t_end.detach().cpu())
+        n_substeps = 0
+        while current_t < end_t - 1e-15:
+            t_scalar = torch.as_tensor(current_t, device=y_t.device, dtype=t_start.dtype)
+            vel_tan = self._mass_shell_velocity(
+                state, jet_conditions, mask, t_scalar, m, use_cfg, guidance_weight, ref_vectors)
+            real_norms = tangent_norm(vel_tan).squeeze(-1)[mask > 0]
+            max_norm = float(real_norms.max().detach().cpu()) if real_norms.numel() else 0.0
+            remaining = end_t - current_t
+            allowed_dt = remaining if max_norm == 0.0 else min(
+                remaining, float(max_step_rapidity) * float(m) / max_norm)
+            if not allowed_dt > 0 or not torch.isfinite(torch.tensor(allowed_dt)):
+                raise FloatingPointError("adaptive mass-shell integration produced an invalid step size")
+            n_substeps += 1
+            if n_substeps > max_substeps:
+                raise FloatingPointError(
+                    f"adaptive mass-shell integration exceeded {max_substeps} substeps in "
+                    f"[{float(t_start):.6g}, {float(t_end):.6g}]"
+                )
+            state = project_to_shell(exp_map(state, vel_tan * allowed_dt, m), m)
+            if not torch.isfinite(state).all():
+                raise FloatingPointError("adaptive mass-shell integration produced a non-finite state")
+            current_t = min(end_t, current_t + allowed_dt)
+        return state
+
+    def _mass_shell_velocity(self, y_t, jet_conditions, mask, t, m, use_cfg,
+                             guidance_weight, ref_vectors):
+        """Evaluate the learned field and project it into the float64 tangent space."""
+        from util.mass_shell import pushforward_to_tangent
 
         batch_size = y_t.shape[0]
-        t_batch = t_start.unsqueeze(0).expand(batch_size)
+        t_batch = t.unsqueeze(0).expand(batch_size)
 
         model_dtype = next(self.parameters()).dtype
         model_refs = ref_vectors.to(model_dtype) if ref_vectors is not None else None
@@ -603,13 +648,7 @@ class LEFTJeN(nn.Module):
                                       ref_vectors=model_refs)
             vel_cartesian = vel_cartesian + guidance_weight * (vel_cartesian - vel_uncond)
 
-        # Project onto T_{y_t}H, zero padding, then geodesic step exp_{y_t}(v_tan * dt).
-        vel_tan = pushforward_to_tangent(y_t, vel_cartesian, m) * mask.unsqueeze(-1)
-        dt = t_end - t_start
-        y_next = exp_map(y_t, vel_tan * dt, m)
-        # Re-project onto H_m to kill any numerical drift off the shell accumulated over the
-        # many integration steps (the mass-shell analogue of clamp_to_ball on the Poincaré path).
-        return project_to_shell(y_next, m)
+        return pushforward_to_tangent(y_t, vel_cartesian, m) * mask.unsqueeze(-1)
 
     def _guided_velocity(self, x, t_scalar, jet_conditions, mask, use_cfg,
                          guidance_weight, ref_vectors, null_jet_conditions):
