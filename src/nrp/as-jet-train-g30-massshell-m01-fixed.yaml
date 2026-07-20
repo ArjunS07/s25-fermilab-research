@@ -32,10 +32,19 @@ spec:
                 echo "ERROR: corrected mass-shell training SHA is not pinned"
                 exit 1
               fi
-              test -x /mnt/data/python-env/bin/python
-              source /mnt/data/python-env/bin/activate
-              python -c "import torch, jetnet, yaml"
-              python -c "import tarfile, urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              ENV_ARCHIVE=/mnt/data/caches/runtime/python-env-py310-torch271.tar
+              if [ -f "$ENV_ARCHIVE" ]; then
+                mkdir -p /tmp/runtime
+                tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+                PYTHON=/tmp/runtime/python-env/bin/python
+              else
+                PYTHON=/mnt/data/python-env/bin/python
+              fi
+              test -x "$PYTHON"
+              export MPLCONFIGDIR=/mnt/data/caches/matplotlib
+              mkdir -p "$MPLCONFIGDIR"
+              "$PYTHON" -c "import torch, jetnet, yaml"
+              "$PYTHON" -c "import tarfile, urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
               mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
 
               cd /tmp/repo/src
@@ -44,14 +53,14 @@ spec:
               mkdir -p "$OUTPUT_PATH"
               printf '%s\n' "$GIT_COMMIT" > "$OUTPUT_PATH/git_commit.txt"
 
-              python prepare_stage1.py \
+              "$PYTHON" prepare_stage1.py \
                 --output-path "$OUTPUT_PATH" \
                 --cache-dir /mnt/data/caches/stage1 \
                 --jet-types g \
                 --num-particles 30 \
                 --import-run "$STAGE1_RUN" \
                 2>&1 | tee -a "$OUTPUT_PATH/startup.log"
-              torchrun --standalone --nproc_per_node=1 train.py \
+              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
                 --config configs/g30-mass-shell-m01.yaml \
                 --set paths.output_path="$OUTPUT_PATH" \
                 --set training.use_icp=false \
