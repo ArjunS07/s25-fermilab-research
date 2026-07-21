@@ -272,6 +272,7 @@ def generate_samples(
             "n_total": int(failures.numel()),
             "n_failed": int((failures >= 0).sum()),
             "n_crossed_max_abs_1e6": int((explosions >= 0).sum()),
+            "n_unstable": int(((failures >= 0) | (explosions >= 0)).sum()),
             "first_failure_step_counts": {
                 str(int(step)): int((failures == step).sum())
                 for step in torch.unique(failures[failures >= 0]).tolist()

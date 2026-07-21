@@ -27,7 +27,7 @@ training:
   use_time_sampling: false
   use_curriculum: false
   prior_dist: axis_aligned_per_jet
-  use_icp: false
+  use_icp: true
   use_ema: true
   lr_schedule: monotonic_cosine
   eta_min_factor: 0.03
@@ -39,6 +39,8 @@ inference:
   prior_dist: axis_aligned_per_jet
   sampler: euler
   mass_shell_max_step_rapidity: 0.5
+  max_invalid_fraction: 0.0
 
 paths:
   cache_dir: /mnt/data/caches
+  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01_phi-v1/icp_cache.pkl

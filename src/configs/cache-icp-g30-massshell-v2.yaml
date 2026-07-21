@@ -13,4 +13,4 @@ cache:
 paths:
   output_path: /mnt/data/output
   cache_dir: /mnt/data/caches
-  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01/icp_cache.pkl
+  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01_phi-v1/icp_cache.pkl

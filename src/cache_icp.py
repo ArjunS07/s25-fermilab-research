@@ -220,7 +220,8 @@ if __name__ == "__main__":
     # Heavy, jetnet-pulling deps imported here so the module (and its worker functions) stay
     # importable for unit tests without a jetnet install.
     from data import get_data_path
-    from util.coordinates import transform_rel_particle_coordinates_to_cartesian
+    from util.coordinates import (deterministic_jet_phi,
+                                  transform_rel_particle_coordinates_to_cartesian)
     from util.distributions import gen_initial_distribution
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -256,7 +257,7 @@ if __name__ == "__main__":
     with open(f"{data_path}/x_train.pkl", "rb") as f:
         X_train = pickle.load(f)
 
-    jet_phi = (2 * torch.pi) * torch.rand(len(X_train))
+    jet_phi = deterministic_jet_phi(len(X_train), args.seed)
     X_transformed = transform_rel_particle_coordinates_to_cartesian(
         X_train, jet_phi=jet_phi).to("cpu")
     if args.num_particles < MAX_N_PARTICLES:
@@ -339,6 +340,8 @@ if __name__ == "__main__":
             "jet_types": list(args.jet_types),
             "prior_dist": args.prior_dist,
             "seed": args.seed,
+            "jet_phi_convention": "index_seeded_v1",
+            "jet_phi_seed": args.seed,
             "num_particles": args.num_particles,
             "geometry": args.geometry,
             "regulator_mass": args.regulator_mass,

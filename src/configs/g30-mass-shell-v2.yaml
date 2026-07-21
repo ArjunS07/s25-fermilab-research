@@ -43,7 +43,8 @@ inference:
   sampler: euler
   mass_shell_max_step_rapidity: 0.5
   mass_shell_max_substeps: 64
+  max_invalid_fraction: 0.001
 
 paths:
   cache_dir: /mnt/data/caches
-  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01/icp_cache.pkl
+  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01_phi-v1/icp_cache.pkl

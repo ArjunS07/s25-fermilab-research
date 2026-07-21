@@ -26,7 +26,8 @@ from util.mass_shell import (
     conditional_vector_field as ms_vector_field,
     pushforward_to_tangent as ms_pushforward, mass_shell_loss,
 )
-from util.coordinates import transform_rel_particle_coordinates_to_cartesian
+from util.coordinates import (deterministic_jet_phi,
+                              transform_rel_particle_coordinates_to_cartesian)
 from jetnet.utils import EtaPhiPtE_to_cartesian, cartesian_to_EtaPhiPtE
 from util.ema import ModelEMA
 from util.file_management import make_clear_folder
@@ -108,7 +109,7 @@ if __name__ == "__main__":
     if args.distributed:
         dist.barrier()  # ranks 1..N-1 wait for rank 0 to create the output dir
 
-    train_jet_phi = (2 * torch.pi) * torch.rand(len(X_train))
+    train_jet_phi = deterministic_jet_phi(len(X_train), RANDOM_SEED)
     X_train_particle_transformed = transform_rel_particle_coordinates_to_cartesian(
         X_train, jet_phi=train_jet_phi).to('cpu')
     X_train_particle_transformed = X_train_particle_transformed[:args.n_train_samples]
@@ -262,6 +263,8 @@ if __name__ == "__main__":
         expected = {"dataset_fingerprint": dataset_fingerprint(X_train_particle_transformed),
                     "dataset_indices": list(range(n_train)), "jet_types": list(args.jet_types),
                     "prior_dist": args.prior_dist, "seed": RANDOM_SEED,
+                    "jet_phi_convention": "index_seeded_v1",
+                    "jet_phi_seed": RANDOM_SEED,
                     "num_particles": args.num_particles, "final_scale": float(final_scale),
                     "geometry": ("mass_shell" if args.use_hyperbolic and
                                  args.hyperbolic_model == "mass_shell" else "euclidean")}
@@ -709,6 +712,26 @@ if __name__ == "__main__":
             torch.save(prior_samples[:10000].cpu(), f"{model_output_path}/prior_samples_subset.pt")
         except Exception as e:
             print(f"Error saving sample subset: {e}")
+
+        if args.max_invalid_fraction is not None:
+            diagnostics_path = f"{model_output_path}/generation_diagnostics.json"
+            if not os.path.isfile(diagnostics_path):
+                raise RuntimeError(
+                    "inference.max_invalid_fraction requires generation diagnostics"
+                )
+            with open(diagnostics_path) as handle:
+                generation_diagnostics = json.load(handle)
+            n_total = int(generation_diagnostics["n_total"])
+            n_unstable = int(generation_diagnostics.get(
+                "n_unstable", generation_diagnostics["n_failed"]
+            ))
+            invalid_fraction = n_unstable / max(n_total, 1)
+            if invalid_fraction > args.max_invalid_fraction:
+                raise RuntimeError(
+                    "generation stability gate failed: "
+                    f"invalid_fraction={invalid_fraction:.6f} exceeds "
+                    f"max_invalid_fraction={args.max_invalid_fraction:.6f}"
+                )
 
         eval_info = {}
         try:

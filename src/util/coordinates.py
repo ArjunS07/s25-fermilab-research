@@ -70,3 +70,15 @@ def build_reference_vectors(jet_eta, jet_pt, final_scale, device, jet_phi=None,
     e_t = torch.zeros(batch, 4, device=device, dtype=jet_p4.dtype)
     e_t[:, 0] = 1.0
     return torch.stack([e_t, jet_p4], dim=1)
+
+def deterministic_jet_phi(n_jets: int, seed: int = 42) -> torch.Tensor:
+    """Return an index-stable azimuth assignment without touching global RNG state.
+
+    Exact paired-prior caches are only meaningful when cache construction and
+    training rotate each dataset row by the same azimuth.  A private CPU
+    generator makes that contract independent of CUDA/DDP initialization and
+    any random draws performed earlier in either process.
+    """
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(seed)
+    return (2 * torch.pi) * torch.rand(n_jets, generator=generator)

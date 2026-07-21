@@ -129,6 +129,9 @@ class InferenceConfig(BaseModel):
     # Each nominal interval is subdivided until ||v||_g * dt / m is at most this value.
     mass_shell_max_step_rapidity: float | None = Field(default=None, gt=0)
     mass_shell_max_substeps: int = Field(default=64, ge=1)
+    # Optional experiment gate. Training exits non-zero after writing diagnostics
+    # when the generated non-finite/exploding trajectory fraction exceeds this value.
+    max_invalid_fraction: float | None = Field(default=None, ge=0, le=1)
     vf_mode: Literal["cfg", "nocfg", "both", "none"] = "none"
     skip_samples: bool = False
     skip_metrics: bool = False
@@ -271,6 +274,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         sampler=cfg.inference.sampler,
         mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
         mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
+        max_invalid_fraction=cfg.inference.max_invalid_fraction,
         use_cosine_lr=cfg.training.use_cosine_lr,
         lr_schedule=cfg.training.lr_schedule,
         lr_t0=cfg.training.lr_t0,
