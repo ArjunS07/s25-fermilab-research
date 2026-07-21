@@ -1,6 +1,7 @@
 import torch
 import tempfile
 from pathlib import Path
+import __main__
 
 from jet_attr_model_v2 import JetAttributeModelV2
 from util.jet_attributes import load_model
@@ -46,3 +47,19 @@ def test_v2_state_dict_payload_round_trip():
     assert isinstance(loaded, JetAttributeModelV2)
     assert all(torch.equal(a, b) for a, b in zip(model.state_dict().values(),
                                                  loaded.state_dict().values()))
+
+
+def test_loader_recovers_prepublication_main_module_checkpoint():
+    model = JetAttributeModelV2(max_particles=30, mixtures=2, hidden=16)
+    original_module = JetAttributeModelV2.__module__
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "legacy-main.pth"
+        JetAttributeModelV2.__module__ = "__main__"
+        __main__.JetAttributeModelV2 = JetAttributeModelV2
+        try:
+            torch.save(model, path)
+        finally:
+            JetAttributeModelV2.__module__ = original_module
+            delattr(__main__, "JetAttributeModelV2")
+        loaded = load_model(path)
+    assert isinstance(loaded, JetAttributeModelV2)

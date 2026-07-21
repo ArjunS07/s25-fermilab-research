@@ -6,7 +6,25 @@ MAX_N_PARTICLES = 150  # Maximum number of particles in a jet
 MIN_N_PARTICLES = 4  # Minimum number of particles in a jet
 
 def load_model(model_path, device=torch.device("cpu")):
-    model = torch.load(model_path, map_location=device, weights_only=False)
+    try:
+        model = torch.load(model_path, map_location=device, weights_only=False)
+    except AttributeError as error:
+        # One pre-publication Stage-1 v2 artifact was serialized while its training script
+        # was __main__. Recover that exact checkpoint without weakening the portable format
+        # used by all subsequent saves.
+        if "JetAttributeModelV2" not in str(error):
+            raise
+        import __main__
+        from jet_attr_model_v2 import JetAttributeModelV2
+        previous = getattr(__main__, "JetAttributeModelV2", None)
+        __main__.JetAttributeModelV2 = JetAttributeModelV2
+        try:
+            model = torch.load(model_path, map_location=device, weights_only=False)
+        finally:
+            if previous is None:
+                delattr(__main__, "JetAttributeModelV2")
+            else:
+                __main__.JetAttributeModelV2 = previous
     if isinstance(model, dict) and model.get("format") == "jet_attribute_v2_state_dict":
         from jet_attr_model_v2 import JetAttributeModelV2
         model_v2 = JetAttributeModelV2(**model["config"])
