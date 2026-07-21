@@ -7,6 +7,17 @@ import torch
 from prepare_stage1 import cache_key, resolve_stage1, stage1_spec, validate_bundle
 
 
+class _DatasetLike:
+    def __init__(self):
+        self.particles = torch.zeros(2, 30, 4)
+        self.jets = torch.zeros(2, 5)
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return self.particles, self.jets
+        return self.particles[index], self.jets[index]
+
+
 def _legacy_bundle(path, type_ids=(0,), particles=30, with_summary=False):
     data = path / "data"
     data.mkdir(parents=True)
@@ -51,6 +62,17 @@ def test_legacy_summary_avoids_loading_large_pickle(tmp_path):
     _legacy_bundle(legacy, with_summary=True)
     legacy.joinpath("data", "x_train.pkl").write_bytes(b"not a pickle")
     validate_bundle(legacy, stage1_spec(["g"], 30), require_metadata=False)
+
+
+def test_unversioned_dataset_object_is_validated_through_full_slice(tmp_path):
+    bundle = tmp_path / "dataset-object"
+    data = bundle / "data"
+    data.mkdir(parents=True)
+    with (data / "x_train.pkl").open("wb") as handle:
+        pickle.dump(_DatasetLike(), handle)
+    (data / "x_test.pkl").write_bytes(b"present")
+    (bundle / "jet_attr_model.pth").write_bytes(b"model")
+    validate_bundle(bundle, stage1_spec(["g"], 30), require_metadata=False)
 
 
 @pytest.mark.parametrize("jet_types,particles", [(["q"], 30), (["g"], 150)])

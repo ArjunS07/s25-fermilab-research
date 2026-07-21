@@ -87,7 +87,8 @@ def validate_bundle(bundle: Path, spec: dict, require_metadata: bool = True) -> 
 
     # Oldest runs have no summary; validate their actual data as a fallback.
     with (bundle / "data" / "x_train.pkl").open("rb") as handle:
-        particles, jet_features = pickle.load(handle)
+        dataset = pickle.load(handle)
+    particles, jet_features = dataset[:]
     if particles.shape[1] != spec["num_particles"]:
         raise ValueError(
             f"legacy Stage-1 particle count {particles.shape[1]} != {spec['num_particles']}"
