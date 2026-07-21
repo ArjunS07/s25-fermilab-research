@@ -116,7 +116,16 @@ def main():
         if epoch % 100 == 0:
             print(f"Stage1-v2 epoch {epoch}/{args.num_epochs}: nll={loss.item():.5f}", flush=True)
     model.eval().cpu()
-    torch.save(model, f"{args.output_path}/jet_attr_model.pth")
+    torch.save({
+        "format": "jet_attribute_v2_state_dict",
+        "config": {
+            "max_particles": model.max_particles,
+            "num_types": model.num_types,
+            "mixtures": model.mixtures,
+            "hidden": model.net[0].out_features,
+        },
+        "state_dict": model.state_dict(),
+    }, f"{args.output_path}/jet_attr_model.pth")
 
 
 if __name__ == "__main__":

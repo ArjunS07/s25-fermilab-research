@@ -7,6 +7,11 @@ MIN_N_PARTICLES = 4  # Minimum number of particles in a jet
 
 def load_model(model_path, device=torch.device("cpu")):
     model = torch.load(model_path, map_location=device, weights_only=False)
+    if isinstance(model, dict) and model.get("format") == "jet_attribute_v2_state_dict":
+        from jet_attr_model_v2 import JetAttributeModelV2
+        model_v2 = JetAttributeModelV2(**model["config"])
+        model_v2.load_state_dict(model["state_dict"])
+        return model_v2.to(device)
     return model
 
 def one_hot_enc_jet_type(y, num_classes=NUM_CLASSES):
