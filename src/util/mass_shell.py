@@ -142,6 +142,23 @@ def pushforward_to_tangent(p: torch.Tensor, v_cartesian: torch.Tensor, m: float)
     return out
 
 
+def parallel_transport(p: torch.Tensor, q: torch.Tensor, v: torch.Tensor,
+                       m: float) -> torch.Tensor:
+    """Parallel-transport ``v`` from ``T_p H_m`` to ``T_q H_m``.
+
+    The closed-form transport along the unique geodesic is
+
+        PT_{p->q}(v) = v - <q,v> / (m^2 + <p,q>) * (p + q).
+
+    Inputs broadcast over arbitrary leading dimensions. All arithmetic and the returned
+    tangent vector are float64, matching the other mass-shell geometry primitives.
+    """
+    p64, q64, v64 = _to_f64(p, q, v)
+    denom = (m * m + dotsq4(p64, q64)).unsqueeze(-1).clamp(min=_EPS)
+    qv = dotsq4(q64, v64).unsqueeze(-1)
+    return v64 - (qv / denom) * (p64 + q64)
+
+
 def geodesic_interpolant(x_0: torch.Tensor, x_1: torch.Tensor, t: torch.Tensor,
                          m: float) -> torch.Tensor:
     """Conditional path x_t = exp_{x_1}((1-t) log_{x_1}(x_0)) (Chen & Lipman 2024, Eq. 15).

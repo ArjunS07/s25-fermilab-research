@@ -231,7 +231,8 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
 
     # ── Compute canonical cache path ──────────────────────────────────────────
-    cache_path = canonical_cache_path(args.cache_dir, args.jet_types, args.num_particles)
+    cache_path = (args.icp_cache_path or
+                  canonical_cache_path(args.cache_dir, args.jet_types, args.num_particles))
     logging.info(f"Cache target: {cache_path}")
 
     if os.path.exists(cache_path):
@@ -291,6 +292,7 @@ if __name__ == "__main__":
                 prior_dist=args.prior_dist,
                 jet_features=X_train[:][1][start:end],
                 jet_phi=jet_phi[start:end],
+                model_scale=final_scale,
             ).numpy().astype(np.float32)
         )
     x_0_np = np.concatenate(x_0_parts, axis=0)   # (N, P, 4)

@@ -59,7 +59,8 @@ def parse_args():
 
 _ARCH_KEYS = ("n_hidden", "n_layers", "use_residual", "use_reference_vectors",
               "use_node_scalars", "node_scalar_seed", "use_adaln", "use_attention",
-              "use_hyperbolic", "hyperbolic_model", "regulator_mass")
+              "use_hyperbolic", "hyperbolic_model", "regulator_mass", "backbone",
+              "include_mass_condition", "num_attention_heads", "vector_channels")
 
 
 def _resolve_architecture(args, ckpt):
@@ -89,7 +90,9 @@ def _resolve_architecture(args, ckpt):
 def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
                      num_particles, device, use_reference_vectors=False, use_node_scalars=False,
                      node_scalar_seed="physics",
-                     use_adaln=False, use_attention=False, preloaded_ckpt=None):
+                     use_adaln=False, use_attention=False, backbone="legacy",
+                     include_mass_condition=False, num_attention_heads=8,
+                     vector_channels=16, regulator_mass=0.5, preloaded_ckpt=None):
     model = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=num_particles,
@@ -102,6 +105,11 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
         node_scalar_seed=node_scalar_seed,
         use_adaln=use_adaln,
         use_attention=use_attention,
+        backbone=backbone,
+        include_mass_condition=include_mass_condition,
+        num_attention_heads=num_attention_heads,
+        vector_channels=vector_channels,
+        regulator_mass=regulator_mass,
     ).to(device)
 
     ckpt = preloaded_ckpt if preloaded_ckpt is not None else torch.load(checkpoint_path, map_location=device)
@@ -165,6 +173,11 @@ def main():
         node_scalar_seed=getattr(args, "node_scalar_seed", "physics"),
         use_adaln=args.use_adaln,
         use_attention=args.use_attention,
+        backbone=args.backbone,
+        include_mass_condition=args.include_mass_condition,
+        num_attention_heads=args.num_attention_heads,
+        vector_channels=args.vector_channels,
+        regulator_mass=args.regulator_mass,
         preloaded_ckpt=ckpt,
     )
 

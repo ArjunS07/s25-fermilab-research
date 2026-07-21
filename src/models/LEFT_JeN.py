@@ -353,7 +353,10 @@ class LEFTJeN(nn.Module):
                  use_residual_update=True, include_pt=False,
                  use_reference_vectors=False, use_node_scalars=False,
                  node_scalar_seed="physics",
-                 node_scalar_dim=None, use_adaln=False, use_attention=False):
+                 node_scalar_dim=None, use_adaln=False, use_attention=False,
+                 backbone="legacy", include_mass_condition=False,
+                 num_attention_heads=8, vector_channels=16,
+                 regulator_mass=0.5):
         super().__init__()
         self.max_particles = max_particles
         self.embed_dim = embed_dim
@@ -368,11 +371,18 @@ class LEFTJeN(nn.Module):
         self.node_scalar_seed = node_scalar_seed
         self.use_adaln = use_adaln
         self.use_attention = use_attention
+        self.backbone = backbone
+        self.include_mass_condition = include_mass_condition
         self.node_scalar_dim = node_scalar_dim if node_scalar_dim is not None else embed_dim
         # Number of reference virtual particles when enabled: e_t=(1,0,0,0) and jet 4-momentum.
         self.num_references = 2
 
-        if use_residual_update:
+        if backbone not in ("legacy", "tangent_attention"):
+            raise ValueError(f"unknown backbone {backbone!r}")
+        if backbone == "tangent_attention" and not use_reference_vectors:
+            raise ValueError("tangent_attention requires typed reference vectors")
+
+        if use_residual_update and backbone == "legacy":
             max_alpha = 0.25 + (num_layers - 1) * 0.03
             if max_alpha > 1.0:
                 raise ValueError(
@@ -380,25 +390,40 @@ class LEFTJeN(nn.Module):
                     f"(max alpha={max_alpha:.2f}). Reduce num_layers or adjust the schedule."
                 )
 
-        self.time_embedding = TimeEmbedding(embed_dim=embed_dim)
-        self.global_embedding = GlobalEmbedding(max_num_jet_types, max_particles, embed_dim, include_pt=include_pt)
-        self.layers = nn.ModuleList([
-            LorentzEquivariantLayer(embed_dim, message_dim, hidden_dim,
-                                    use_node_scalars=use_node_scalars,
-                                    node_scalar_dim=self.node_scalar_dim,
-                                    use_adaln=use_adaln,
-                                    use_attention=use_attention)
-            for _ in range(num_layers)
-        ])
-
         # Learned null conditioning token. Replaces the all-zeros null vector so the
         # unconditional representation is clearly separated from low-value conditioning.
         # n_particles_idx marks the slot that is preserved even in the null vector
         # (it is redundant with the mask, so zeroing it provides no extra guidance signal).
-        cond_dim = max_num_jet_types + 1 + (1 if include_pt else 0)
+        cond_dim = max_num_jet_types + 1 + (1 if include_pt else 0) + (1 if include_mass_condition else 0)
         self.cond_dim = cond_dim
         self.n_particles_idx = max_num_jet_types  # index of n_particles in cond vector
         self.null_cond = nn.Parameter(torch.zeros(cond_dim))
+
+        if backbone == "tangent_attention":
+            from models.tangent_attention import TangentAttentionBackbone
+            self.tangent_backbone = TangentAttentionBackbone(
+                cond_dim=cond_dim,
+                width=hidden_dim,
+                num_layers=num_layers,
+                num_heads=num_attention_heads,
+                vector_channels=vector_channels,
+                regulator_mass=regulator_mass,
+            )
+            self.time_embedding = None
+            self.global_embedding = None
+            self.layers = nn.ModuleList()
+        else:
+            self.time_embedding = TimeEmbedding(embed_dim=embed_dim)
+            self.global_embedding = GlobalEmbedding(
+                max_num_jet_types, max_particles, embed_dim, include_pt=include_pt)
+            self.layers = nn.ModuleList([
+                LorentzEquivariantLayer(embed_dim, message_dim, hidden_dim,
+                                        use_node_scalars=use_node_scalars,
+                                        node_scalar_dim=self.node_scalar_dim,
+                                        use_adaln=use_adaln,
+                                        use_attention=use_attention)
+                for _ in range(num_layers)
+            ])
 
         # Per-node scalar seed input dim. "physics" and "zero" produce 3-dim invariants (m², E,
         # axis); "conditions" broadcasts jet_conditions (cond_dim) per particle so the h_i
@@ -471,6 +496,14 @@ class LEFTJeN(nn.Module):
         """
         if self.use_reference_vectors and ref_vectors is None:
             raise ValueError("use_reference_vectors=True requires ref_vectors of shape (B, R, 4).")
+
+        if self.backbone == "tangent_attention":
+            if jet_conditions.shape[-1] != self.cond_dim:
+                raise ValueError(
+                    f"tangent_attention expected {self.cond_dim} conditions, "
+                    f"got {jet_conditions.shape[-1]}"
+                )
+            return self.tangent_backbone(x, t, jet_conditions, mask, ref_vectors)
 
         t_emb = self.time_embedding(t)
         g0 = self.global_embedding(jet_conditions)
@@ -638,12 +671,13 @@ class LEFTJeN(nn.Module):
 
         model_dtype = next(self.parameters()).dtype
         model_refs = ref_vectors.to(model_dtype) if ref_vectors is not None else None
-        vel_cartesian = self.forward(x=y_t.to(model_dtype), t=t_batch.to(model_dtype),
+        model_state = y_t if self.backbone == "tangent_attention" else y_t.to(model_dtype)
+        vel_cartesian = self.forward(x=model_state, t=t_batch.to(model_dtype),
                                      jet_conditions=jet_conditions.to(model_dtype), mask=mask,
                                      ref_vectors=model_refs)
         if use_cfg:
             null_cond = self.make_null_cond(jet_conditions)
-            vel_uncond = self.forward(x=y_t.to(model_dtype), t=t_batch.to(model_dtype),
+            vel_uncond = self.forward(x=model_state, t=t_batch.to(model_dtype),
                                       jet_conditions=null_cond.to(model_dtype), mask=mask,
                                       ref_vectors=model_refs)
             vel_cartesian = vel_cartesian + guidance_weight * (vel_cartesian - vel_uncond)

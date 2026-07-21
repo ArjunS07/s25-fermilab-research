@@ -1,0 +1,58 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-train-g30-massshell-v2
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: as-jet-train-pvc-2
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
+              ENV_ARCHIVE=/mnt/data/caches/runtime/python-env-py310-torch271.tar
+              mkdir -p /tmp/runtime
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID-g30-massshell-v2"
+              OUT="/mnt/data/output/$RUN_ID"
+              mkdir -p "$OUT"
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" \
+                --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 \
+                --model-version v2
+              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+                --config configs/g30-mass-shell-v2.yaml \
+                --set paths.output_path="$OUT"
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/data
+          resources:
+            requests:
+              nvidia.com/a40: 1
+              cpu: "2"
+              memory: 24Gi
+            limits:
+              nvidia.com/a40: 1
+              cpu: "2.4"
+              memory: 24Gi

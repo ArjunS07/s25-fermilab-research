@@ -145,6 +145,11 @@ if __name__ == "__main__":
         node_scalar_seed=args.node_scalar_seed,
         use_adaln=args.use_adaln,
         use_attention=args.use_attention,
+        backbone=args.backbone,
+        include_mass_condition=args.include_mass_condition,
+        num_attention_heads=args.num_attention_heads,
+        vector_channels=args.vector_channels,
+        regulator_mass=args.regulator_mass,
     ).to(device)
     
     start_epoch = 0
@@ -189,6 +194,11 @@ if __name__ == "__main__":
         "use_node_scalars": args.use_node_scalars,
         "use_adaln": args.use_adaln,
         "use_attention": args.use_attention,
+        "backbone": args.backbone,
+        "include_mass_condition": args.include_mass_condition,
+        "num_attention_heads": args.num_attention_heads,
+        "vector_channels": args.vector_channels,
+        "regulator_mass": args.regulator_mass,
         "jet_types": args.jet_types,
         "final_scale": float(final_scale),
     }
@@ -200,7 +210,8 @@ if __name__ == "__main__":
         if prev is not None:
             mism = {k: (prev.get(k), run_config.get(k))
                     for k in ("n_layers", "n_hidden", "num_particles", "use_reference_vectors",
-                              "use_node_scalars", "use_adaln", "use_attention")
+                              "use_node_scalars", "use_adaln", "use_attention", "backbone",
+                              "include_mass_condition", "num_attention_heads", "vector_channels")
                     if prev.get(k) != run_config.get(k)}
             if mism:
                 print(f"WARNING: resume architecture flags differ from checkpoint: {mism}. "
@@ -279,10 +290,15 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     if args.use_cosine_lr:
-        t0 = args.lr_t0 if args.lr_t0 > 0 else (args.num_epochs // 4) if args.num_epochs >= 20 else max(1, args.num_epochs // 2)
-        cosine_sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer, T_0=t0, T_mult=1, eta_min=lr * args.eta_min_factor
-        )
+        if args.lr_schedule == "monotonic_cosine":
+            cosine_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=max(1, args.num_epochs - args.lr_warmup_epochs),
+                eta_min=lr * args.eta_min_factor)
+        else:
+            t0 = args.lr_t0 if args.lr_t0 > 0 else (args.num_epochs // 4) if args.num_epochs >= 20 else max(1, args.num_epochs // 2)
+            cosine_sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                optimizer, T_0=t0, T_mult=1, eta_min=lr * args.eta_min_factor
+            )
         if args.lr_warmup_epochs > 0:
             warmup_sched = torch.optim.lr_scheduler.LinearLR(
                 optimizer, start_factor=1e-6, end_factor=1.0,
@@ -369,6 +385,7 @@ if __name__ == "__main__":
         # Guard for local testing
         accumulation_steps = min(args.target_batch_size // args.batch_size, args.n_train_samples // args.batch_size - 1)
         accumulated_loss = 0
+        accumulated_batches = 0
         total_n_accumulations = 0
 
         for i, (batch_jet_info, batch_particle_info, batch_jet_phi, batch_x0_cached) in enumerate(train_loader):
@@ -378,13 +395,19 @@ if __name__ == "__main__":
 
             batch_jet_n_particles = batch_jet_info[:, 3]
             batch_jet_pt = batch_jet_info[:, 1]  # normalized pT from FeaturewiseLinear
+            batch_jet_mass = batch_jet_info[:, 2]
             encoded_jet_types = jet_attributes.one_hot_enc_jet_type(batch_jet_info[:, 4].long()).to(device)
-            # Conditioning vector: [one_hot_type, n_particles, pT]
-            batch_jet_info_cropped = torch.cat([
+            # Legacy checkpoints consume raw pT. v2 uses model-scaled pT and mass.
+            cond_pt = (batch_jet_pt / final_scale
+                       if args.backbone == "tangent_attention" else batch_jet_pt)
+            condition_parts = [
                 encoded_jet_types,
                 batch_jet_n_particles.unsqueeze(-1),
-                batch_jet_pt.unsqueeze(-1),
-            ], dim=-1).to(device)
+                cond_pt.unsqueeze(-1),
+            ]
+            if args.include_mass_condition:
+                condition_parts.append((batch_jet_mass / final_scale).unsqueeze(-1))
+            batch_jet_info_cropped = torch.cat(condition_parts, dim=-1).to(device)
 
             # Per-sample CFG dropout: each sample independently drops jet type + pT
             # conditioning. n_particles is preserved because it is already encoded in
@@ -407,7 +430,7 @@ if __name__ == "__main__":
                    gen_initial_distribution(x_1=x_1, prior_dist=args.prior_dist,
                                             jet_features=batch_jet_info,
                                             jet_phi=batch_jet_phi.to(device),
-                                            device=device).to(device))
+                                            device=device, model_scale=final_scale).to(device))
 
             mask_exp = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
             x_1 = mask_exp * x_1
@@ -420,7 +443,9 @@ if __name__ == "__main__":
                 from util.coordinates import build_reference_vectors
                 ref_vectors = build_reference_vectors(batch_jet_info[:, 0], batch_jet_info[:, 1],
                                                       final_scale, device,
-                                                      jet_phi=batch_jet_phi.to(device))
+                                                      jet_phi=batch_jet_phi.to(device),
+                                                      jet_mass=(batch_jet_info[:, 2]
+                                                                if args.include_mass_condition else None))
 
 
             # mean_std_masked_tensor("x_0", x_0, true_masks)
@@ -442,7 +467,8 @@ if __name__ == "__main__":
 
                 model_dtype = next(raw_model.parameters()).dtype
                 model_refs = ref_vectors.to(model_dtype) if ref_vectors is not None else None
-                pred = model.forward(x=x_t.to(model_dtype), t=t.to(model_dtype),
+                model_x = x_t if args.backbone == "tangent_attention" else x_t.to(model_dtype)
+                pred = model.forward(x=model_x, t=t.to(model_dtype),
                                      jet_conditions=batch_jet_info_cropped.to(model_dtype),
                                      mask=true_masks, ref_vectors=model_refs)
                 pred_tan = ms_pushforward(x_t, pred.to(torch.float64), m) * mask_exp64
@@ -480,15 +506,15 @@ if __name__ == "__main__":
                 n_real = true_masks.sum().clamp(min=1)
                 loss = ((conditional_u_t - pred).square() * mask_exp).sum() / (n_real * NUM_PARTICLE_FEATURES)
 
-            is_last_accum_step = ((i + 1) % accumulation_steps == 0)
+            accumulated_batches += 1
+            is_last_accum_step = (((i + 1) % accumulation_steps == 0)
+                                  or (i + 1 == len(train_loader)))
             ctx = model.no_sync() if (args.distributed and not is_last_accum_step) else nullcontext()
             with ctx:
                 loss.backward()
-            # Divide by accumulation_steps here so accumulated_loss is the running average,
-            # not the sum. This keeps epoch_loss in the same units as the per-batch loss.
-            accumulated_loss += loss.item() / accumulation_steps
+            accumulated_loss += loss.item()
 
-            if (i + 1) % accumulation_steps == 0:
+            if is_last_accum_step:
                 grad_stats = {}
                 for name, param in raw_model.named_parameters():
                     if param.grad is not None:
@@ -514,7 +540,7 @@ if __name__ == "__main__":
 
                 for param in model.parameters():
                     if param.grad is not None:
-                        param.grad /= accumulation_steps
+                        param.grad /= accumulated_batches
                 
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
                 optimizer.step()
@@ -522,9 +548,10 @@ if __name__ == "__main__":
                 if ema is not None:
                     ema.update(raw_model)
 
-                epoch_loss += accumulated_loss  # already averaged over accumulation_steps
+                epoch_loss += accumulated_loss / accumulated_batches
                 total_n_accumulations += 1
                 accumulated_loss = 0
+                accumulated_batches = 0
 
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()

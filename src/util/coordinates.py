@@ -1,5 +1,15 @@
 import torch
-from jetnet.utils import EtaPhiPtE_to_cartesian
+
+
+def eta_phi_pt_e_to_cartesian(values):
+    """Convert ``(..., eta, phi, pT, E)`` to ``(..., E, px, py, pz)``."""
+    eta, phi, pt, energy = values.unbind(dim=-1)
+    return torch.stack([
+        energy,
+        pt * torch.cos(phi),
+        pt * torch.sin(phi),
+        pt * torch.sinh(eta),
+    ], dim=-1)
 
 
 def transform_rel_particle_coordinates_to_cartesian(X, jet_phi=None):
@@ -29,24 +39,34 @@ def transform_rel_particle_coordinates_to_cartesian(X, jet_phi=None):
     energy = pt * torch.cosh(eta)
 
     polar_abs = torch.stack([eta, phi, pt, energy], dim=-1)
-    cartesian = EtaPhiPtE_to_cartesian(polar_abs)
+    cartesian = eta_phi_pt_e_to_cartesian(polar_abs)
     return torch.cat([cartesian, masks.unsqueeze(-1)], dim=-1)
 
 
-def build_reference_vectors(jet_eta, jet_pt, final_scale, device, jet_phi=None):
-    """Build ``(e_t, jet_p4)`` from the physical massless conditioning jet.
+def build_reference_vectors(jet_eta, jet_pt, final_scale, device, jet_phi=None,
+                            jet_mass=None):
+    """Build typed ``(e_t, jet_p4)`` references from conditioning attributes.
 
     Pass the same ``jet_phi`` used to orient particles and the aligned prior. If
-    omitted, a uniform orientation is sampled. Returns shape ``(B, 2, 4)``.
+    omitted, a uniform orientation is sampled. ``jet_mass=None`` preserves the legacy
+    massless reference. Supplying mass constructs the physical massive jet four-vector.
+    Returns shape ``(B, 2, 4)`` in model-scaled units for the jet reference.
     """
     batch = jet_eta.shape[0]
     phi = (
         (2 * torch.pi) * torch.rand(batch, device=device)
         if jet_phi is None else jet_phi.to(device)
     )
-    energy = jet_pt * torch.cosh(jet_eta)
-    polar = torch.stack([jet_eta, phi, jet_pt, energy], dim=-1)
-    jet_p4 = EtaPhiPtE_to_cartesian(polar) / final_scale
+    mass = (torch.zeros_like(jet_pt) if jet_mass is None else jet_mass.to(device))
+    transverse_mass = torch.sqrt(jet_pt.square() + mass.square())
+    energy = transverse_mass * torch.cosh(jet_eta)
+    pz = transverse_mass * torch.sinh(jet_eta)
+    jet_p4 = torch.stack([
+        energy,
+        jet_pt * torch.cos(phi),
+        jet_pt * torch.sin(phi),
+        pz,
+    ], dim=-1) / final_scale
     e_t = torch.zeros(batch, 4, device=device, dtype=jet_p4.dtype)
     e_t[:, 0] = 1.0
     return torch.stack([e_t, jet_p4], dim=1)

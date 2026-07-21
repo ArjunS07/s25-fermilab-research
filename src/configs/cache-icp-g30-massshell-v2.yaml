@@ -1,0 +1,16 @@
+data:
+  jet_types: ["g"]
+  num_particles: 30
+
+cache:
+  geometry: mass_shell
+  regulator_mass: 0.1
+  prior_dist: axis_aligned_per_jet
+  seed: 42
+  n_workers: 16
+  skip_if_exists: true
+
+paths:
+  output_path: /mnt/data/output
+  cache_dir: /mnt/data/caches
+  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01/icp_cache.pkl

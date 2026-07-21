@@ -63,6 +63,8 @@ def generate_samples(
         hyperbolic_model='poincare',
         regulator_mass=0.5,
         use_reference_vectors=False,
+        backbone='legacy',
+        include_mass_condition=False,
         sampler='euler',
         prior_dist='isotropic_com',
         mass_shell_max_step_rapidity=None,
@@ -102,13 +104,14 @@ def generate_samples(
             # generated_jet_attrs layout: [one_hot(5), eta, pt, mass, n_particles]
             jet_one_hot_enc = generated_jet_attrs[:, :5].to(device)
             gen_pt = generated_jet_attrs[:, 6].to(device)   # normalized pT from NF
+            gen_mass = generated_jet_attrs[:, 7].to(device)
             gen_n_particles = generated_jet_attrs[:, -1].long().to(device)
             gen_n_particles = gen_n_particles.clamp(max=max_particles_per_jet)
 
             # Build jet_features for priors that need jet-axis info.
             jet_features = None
             jet_phi = (2 * torch.pi) * torch.rand(current_batch_size, device=device)
-            if prior_dist in ('axis_aligned', 'jet_ref_frame'):
+            if prior_dist in ('axis_aligned', 'axis_aligned_per_jet', 'jet_ref_frame'):
                 gen_eta = generated_jet_attrs[:, 5].to(device)
                 gen_pt_prior = gen_pt
                 jet_features = torch.stack([gen_eta, gen_pt_prior], dim=-1)
@@ -119,7 +122,8 @@ def generate_samples(
                 prior_dist=prior_dist,
                 jet_features=jet_features,
                 jet_phi=jet_phi,
-                device=device
+                device=device,
+                model_scale=final_scale,
             )
             x = x.to(device)
 
@@ -134,19 +138,23 @@ def generate_samples(
             if use_hyperbolic and hyperbolic_model == 'mass_shell':
                 from util.mass_shell import project_to_shell
                 prior_x = project_to_shell(prior_x, regulator_mass) * masks.unsqueeze(-1)
-            # Conditioning vector: [one_hot_type, n_particles, pT]
-            cond = torch.cat([
+            cond_pt = gen_pt / final_scale if backbone == 'tangent_attention' else gen_pt
+            condition_parts = [
                 jet_one_hot_enc,
                 gen_n_particles.unsqueeze(-1).float(),
-                gen_pt.unsqueeze(-1),
-            ], dim=-1).to(device)
+                cond_pt.unsqueeze(-1),
+            ]
+            if include_mass_condition:
+                condition_parts.append((gen_mass / final_scale).unsqueeze(-1))
+            cond = torch.cat(condition_parts, dim=-1).to(device)
 
             # Reference virtual particles, reconstructed from the sampled jet attributes.
             ref_vectors = None
             if use_reference_vectors:
                 gen_eta = generated_jet_attrs[:, 5].to(device)  # jet eta (layout: [onehot(5), eta, pt, mass, n])
                 ref_vectors = build_reference_vectors(gen_eta, gen_pt, final_scale, device,
-                                                      jet_phi=jet_phi)
+                                                      jet_phi=jet_phi,
+                                                      jet_mass=(gen_mass if include_mass_condition else None))
 
             if use_hyperbolic and hyperbolic_model == 'mass_shell':
                 # Integrate the ODE geodesically on the mass shell. The state stays on H_m

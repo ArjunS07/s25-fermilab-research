@@ -141,6 +141,18 @@ def test_unknown_field_rejected():
         TrainRunConfig(training={"typo_field": 1})
 
 
+def test_tangent_attention_requires_typed_mass_shell_contract():
+    with pytest.raises(ValidationError):
+        TrainRunConfig(model={"backbone": "tangent_attention"})
+    cfg = TrainRunConfig(model={
+        "backbone": "tangent_attention", "use_reference_vectors": True,
+        "include_mass_condition": True, "use_hyperbolic": True,
+        "hyperbolic_model": "mass_shell", "n_hidden": 128,
+        "num_attention_heads": 4,
+    })
+    assert cfg.model.backbone == "tangent_attention"
+
+
 # ── Dotlist overrides ────────────────────────────────────────────────────────
 
 def test_apply_dotlist_overrides_nested_scalar():
@@ -254,6 +266,8 @@ def test_run_config_dict_matches_legacy_keys():
         "num_particles", "n_layers", "n_hidden", "use_residual", "include_pt",
         "use_reference_vectors", "use_node_scalars", "node_scalar_seed",
         "use_adaln", "use_attention", "jet_types", "final_scale",
+        "backbone", "include_mass_condition", "num_attention_heads",
+        "vector_channels", "regulator_mass",
     }
     assert d["num_particles"] == 30
     assert d["jet_types"] == ["g"]

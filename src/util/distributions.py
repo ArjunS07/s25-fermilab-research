@@ -1,12 +1,12 @@
 import torch
-from jetnet.utils import EtaPhiPtE_to_cartesian
+from util.coordinates import eta_phi_pt_e_to_cartesian
 from util.hyperbolic import (
     to_poincare_ball, from_poincare_ball,
     geodesic_interpolant, conditional_vector_field, pushforward,
 )
 
 
-def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, prior_dist='isotropic_com', jet_features=None, jet_phi=None, device='cpu'):
+def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, prior_dist='isotropic_com', jet_features=None, jet_phi=None, device='cpu', model_scale=None):
 
     if x_1 is not None:
         batch_size, num_particles = x_1.shape[:2]
@@ -69,7 +69,7 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         p0 = pt * torch.cosh(eta)
 
         stacked = torch.stack([eta, phi, pt, p0], axis=-1)
-        return EtaPhiPtE_to_cartesian(stacked)
+        return eta_phi_pt_e_to_cartesian(stacked)
 
     elif prior_dist == 'axis_aligned':
         # Collimated, positive-energy, (near-)lightlike prior around the jet axis. Shortens
@@ -94,11 +94,32 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         p0 = pt * torch.cosh(eta)  # massless => E = |p| > 0 (positive-energy, lightlike)
 
         stacked = torch.stack([eta, phi, pt, p0], axis=-1)
-        particles = EtaPhiPtE_to_cartesian(stacked)
+        particles = eta_phi_pt_e_to_cartesian(stacked)
 
         # Normalize to unit std (scalar, direction-preserving) to match the scaled space.
         current_std = particles.std().clamp(min=1e-8)
         return particles * (1.0 / current_std)
+
+    elif prior_dist == 'axis_aligned_per_jet':
+        # Batch-independent physical prior. Positive lognormal weights are normalized within
+        # each jet, and one scalar correction makes the transverse vector sum match the
+        # conditioning pT exactly. The result is then put directly in model-scaled units.
+        if jet_features is None or model_scale is None:
+            raise ValueError("axis_aligned_per_jet requires jet_features and model_scale")
+        device = jet_features.device
+        jet_eta = jet_features[:, 0]
+        jet_pt = jet_features[:, 1]
+        phi0 = ((2 * torch.pi) * torch.rand(batch_size, device=device)
+                if jet_phi is None else jet_phi.to(device))
+        eta = jet_eta.unsqueeze(1) + 0.15 * torch.randn(batch_size, num_particles, device=device)
+        phi = phi0.unsqueeze(1) + 0.15 * torch.randn(batch_size, num_particles, device=device)
+        weights = torch.softmax(torch.randn(batch_size, num_particles, device=device), dim=1)
+        ux, uy = torch.cos(phi), torch.sin(phi)
+        resultant = torch.sqrt((weights * ux).sum(1).square() + (weights * uy).sum(1).square())
+        pt = weights * (jet_pt / resultant.clamp(min=1e-4)).unsqueeze(1)
+        energy = pt * torch.cosh(eta)
+        particles = eta_phi_pt_e_to_cartesian(torch.stack([eta, phi, pt, energy], dim=-1))
+        return particles / float(model_scale)
 
     else:
         raise ValueError(f"Unknown prior_dist: {prior_dist}")

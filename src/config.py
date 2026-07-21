@@ -13,7 +13,7 @@ import os
 from typing import Any, Literal, Optional
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class DataConfig(BaseModel):
@@ -21,6 +21,7 @@ class DataConfig(BaseModel):
 
     jet_types: list[str] = Field(default_factory=lambda: ["g", "q", "t"])
     num_particles: int = 150
+    stage1_model_version: Literal["legacy", "v2"] = "legacy"
 
 
 class InferDataConfig(DataConfig):
@@ -51,6 +52,25 @@ class ModelConfig(BaseModel):
     # Phase-4 ablation knob; smaller = more massless/relativistic but numerically stiffer
     # (near-light-like, high curvature). 0.5 is a conditioned starting point.
     regulator_mass: float = 0.5
+    # v2 keeps the ODE coordinates fixed inside the network and refines invariant scalar
+    # plus tangent-vector channels with typed reference cross-attention.
+    backbone: Literal["legacy", "tangent_attention"] = "legacy"
+    include_mass_condition: bool = False
+    num_attention_heads: int = Field(default=8, ge=1)
+    vector_channels: int = Field(default=16, ge=1)
+
+    @model_validator(mode="after")
+    def validate_tangent_attention_contract(self):
+        if self.backbone == "tangent_attention":
+            if not self.use_reference_vectors:
+                raise ValueError("tangent_attention requires model.use_reference_vectors=true")
+            if not self.include_mass_condition:
+                raise ValueError("tangent_attention requires model.include_mass_condition=true")
+            if not self.use_hyperbolic or self.hyperbolic_model != "mass_shell":
+                raise ValueError("tangent_attention currently requires mass-shell geometry")
+            if self.n_hidden % self.num_attention_heads:
+                raise ValueError("model.n_hidden must be divisible by model.num_attention_heads")
+        return self
 
 
 class TrainingConfig(BaseModel):
@@ -69,6 +89,7 @@ class TrainingConfig(BaseModel):
     lr: float = 6e-4
     weight_decay: float = 1e-6
     use_cosine_lr: bool = True
+    lr_schedule: Literal["legacy_restarts", "monotonic_cosine"] = "legacy_restarts"
     lr_t0: int = 0
     lr_warmup_epochs: int = 10
     eta_min_factor: float = 0.3
@@ -82,7 +103,8 @@ class TrainingConfig(BaseModel):
     ema_decay: float = 0.999
 
     prior_dist: Literal[
-        "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned"
+        "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned",
+        "axis_aligned_per_jet"
     ] = "isotropic_com"
 
     # ICP is opt-in. A cache present on a shared PVC must never silently change a baseline.
@@ -111,7 +133,8 @@ class InferenceConfig(BaseModel):
     skip_samples: bool = False
     skip_metrics: bool = False
     prior_dist: Literal[
-        "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned"
+        "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned",
+        "axis_aligned_per_jet"
     ] = "isotropic_com"
 
 
@@ -138,7 +161,7 @@ class CacheConfig(BaseModel):
     # mass shell (Phase 4); no rotation, since Euclidean Kabsch is not valid on the shell.
     geometry: Literal["euclidean", "mass_shell"] = "euclidean"
     regulator_mass: float = 0.5
-    prior_dist: Literal["isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned"] = "isotropic_com"
+    prior_dist: Literal["isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned", "axis_aligned_per_jet"] = "isotropic_com"
     seed: int = 42
 
 
@@ -249,11 +272,16 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
         mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
         use_cosine_lr=cfg.training.use_cosine_lr,
+        lr_schedule=cfg.training.lr_schedule,
         lr_t0=cfg.training.lr_t0,
         lr_warmup_epochs=cfg.training.lr_warmup_epochs,
         use_hyperbolic=cfg.model.use_hyperbolic,
         hyperbolic_model=cfg.model.hyperbolic_model,
         regulator_mass=cfg.model.regulator_mass,
+        backbone=cfg.model.backbone,
+        include_mass_condition=cfg.model.include_mass_condition,
+        num_attention_heads=cfg.model.num_attention_heads,
+        vector_channels=cfg.model.vector_channels,
         use_curriculum=cfg.training.use_curriculum,
         use_time_sampling=cfg.training.use_time_sampling,
         use_reference_vectors=cfg.model.use_reference_vectors,
@@ -298,6 +326,10 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         use_hyperbolic=cfg.model.use_hyperbolic,
         hyperbolic_model=cfg.model.hyperbolic_model,
         regulator_mass=cfg.model.regulator_mass,
+        backbone=cfg.model.backbone,
+        include_mass_condition=cfg.model.include_mass_condition,
+        num_attention_heads=cfg.model.num_attention_heads,
+        vector_channels=cfg.model.vector_channels,
         sampler=cfg.inference.sampler,
         mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
         mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
@@ -319,6 +351,7 @@ def cache_config_to_namespace(cfg: CacheRunConfig) -> argparse.Namespace:
         jet_types=cfg.data.jet_types,
         num_particles=cfg.data.num_particles,
         cache_dir=cfg.paths.cache_dir,
+        icp_cache_path=cfg.paths.icp_cache_path,
         n_samples=cfg.cache.n_samples,
         n_workers=cfg.cache.n_workers,
         icp_max_iter=cfg.cache.icp_max_iter,
@@ -332,7 +365,7 @@ def cache_config_to_namespace(cfg: CacheRunConfig) -> argparse.Namespace:
 
 def generation_controls_from_namespace(args: argparse.Namespace) -> dict:
     """Return generation controls shared by train-time and standalone evaluation."""
-    return {
+    controls = {
         "use_cfg": args.use_cfg,
         "cfg_guidance_weight": args.cfg_guidance_weight,
         "use_hyperbolic": args.use_hyperbolic,
@@ -345,6 +378,13 @@ def generation_controls_from_namespace(args: argparse.Namespace) -> dict:
         "integration_end_time": args.integration_end_time,
         "prior_dist": args.prior_dist,
     }
+    # Older callers/tests construct a minimal Namespace. Only v2-aware namespaces carry
+    # these controls, preserving the exact legacy kwargs contract.
+    if hasattr(args, "backbone"):
+        controls["backbone"] = args.backbone
+    if hasattr(args, "include_mass_condition"):
+        controls["include_mass_condition"] = args.include_mass_condition
+    return controls
 
 
 def run_config_dict(cfg: TrainRunConfig, final_scale: float) -> dict:
@@ -361,6 +401,11 @@ def run_config_dict(cfg: TrainRunConfig, final_scale: float) -> dict:
         "node_scalar_seed": cfg.model.node_scalar_seed,
         "use_adaln": cfg.model.use_adaln,
         "use_attention": cfg.model.use_attention,
+        "backbone": cfg.model.backbone,
+        "include_mass_condition": cfg.model.include_mass_condition,
+        "num_attention_heads": cfg.model.num_attention_heads,
+        "vector_channels": cfg.model.vector_channels,
+        "regulator_mass": cfg.model.regulator_mass,
         "jet_types": cfg.data.jet_types,
         "final_scale": float(final_scale),
     }

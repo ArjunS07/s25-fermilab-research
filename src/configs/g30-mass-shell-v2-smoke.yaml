@@ -1,0 +1,44 @@
+data:
+  jet_types: ["g"]
+  num_particles: 30
+  stage1_model_version: v2
+
+model:
+  backbone: tangent_attention
+  n_hidden: 128
+  n_layers: 4
+  use_residual: true
+  use_reference_vectors: true
+  include_mass_condition: true
+  num_attention_heads: 4
+  vector_channels: 8
+  use_hyperbolic: true
+  hyperbolic_model: mass_shell
+  regulator_mass: 0.1
+
+training:
+  n_train_samples: 10000
+  batch_size: 25
+  target_batch_size: 100
+  cfg_null_dropout_rate: 0.0
+  num_epochs: 2
+  epoch_frac: 0.1
+  time_sampling: uniform
+  use_time_sampling: false
+  use_curriculum: false
+  prior_dist: axis_aligned_per_jet
+  use_icp: false
+  use_ema: true
+  lr_schedule: monotonic_cosine
+  eta_min_factor: 0.03
+
+inference:
+  n_samples: 1000
+  batch_size: 64
+  integration_steps: 16
+  prior_dist: axis_aligned_per_jet
+  sampler: euler
+  mass_shell_max_step_rapidity: 0.5
+
+paths:
+  cache_dir: /mnt/data/caches
