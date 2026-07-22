@@ -67,16 +67,26 @@ def dataset_fingerprint(x: torch.Tensor) -> str:
     return h.hexdigest()
 
 
-def normalized_dataset_fingerprint(x: torch.Tensor, final_scale: float) -> str:
-    """Fingerprint the normalized 4-vector state used to build an ICP cache.
+def source_dataset_fingerprint(dataset, n_samples: int, num_particles: int) -> str:
+    """Fingerprint ordered source tensors without hardware-dependent transforms.
 
-    Cache construction divides the physical four-vector columns by ``final_scale``
-    before hashing.  Training must validate against that same representation, not
-    the unscaled data tensor.  Keep the mask/auxiliary columns unchanged.
+    Cartesian conversion evaluates trigonometric functions, whose final bits can
+    differ across CPU architectures.  Hash the raw JetNet tensors instead and
+    keep the transform convention in separate cache metadata.
     """
-    normalized = x.detach().cpu().clone()
-    normalized[..., :4] /= final_scale
-    return dataset_fingerprint(normalized)
+    particles, jet_features = dataset[:]
+    tensors = (
+        particles[:n_samples, :num_particles].detach().cpu().contiguous(),
+        jet_features[:n_samples].detach().cpu().contiguous(),
+    )
+    h = hashlib.sha256()
+    for name, tensor in zip(("particles", "jet_features"), tensors):
+        array = tensor.numpy()
+        h.update(name.encode())
+        h.update(str(array.shape).encode())
+        h.update(str(array.dtype).encode())
+        h.update(array.tobytes())
+    return h.hexdigest()
 
 
 def validate_cache_metadata(payload, expected):
@@ -359,8 +369,11 @@ if __name__ == "__main__":
         "assignment_cost": args.assignment_cost,
         "regulator_mass": args.regulator_mass,
         "metadata": {
-            "dataset_fingerprint": normalized_dataset_fingerprint(
-                X_transformed, final_scale
+            # Retain this derived-state hash for diagnostics only.  It is not a
+            # portable validation key because trig implementations vary by CPU.
+            "dataset_fingerprint": dataset_fingerprint(X_scaled),
+            "source_dataset_fingerprint": source_dataset_fingerprint(
+                X_train, n_total, args.num_particles
             ),
             "dataset_indices": list(range(n_total)),
             "jet_types": list(args.jet_types),

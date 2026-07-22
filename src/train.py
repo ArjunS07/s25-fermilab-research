@@ -36,7 +36,7 @@ from util.metrics import run_save_metrics
 # from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import get_data_path
-from cache_icp import (normalized_dataset_fingerprint, resolve_training_cache_path,
+from cache_icp import (resolve_training_cache_path, source_dataset_fingerprint,
                        validate_cache_metadata)
 from util.mask_helpers import mean_std_masked_tensor
 from config import (TrainRunConfig, build_config, parse_config_cli, train_config_to_namespace,
@@ -261,8 +261,8 @@ if __name__ == "__main__":
         with open(icp_cache_path, "rb") as f:
             icp_payload = pickle.load(f)
         n_train = len(X_train_particle_transformed)
-        expected = {"dataset_fingerprint": normalized_dataset_fingerprint(
-                        X_train_particle_transformed, final_scale),
+        expected = {"source_dataset_fingerprint": source_dataset_fingerprint(
+                        X_train, n_train, args.num_particles),
                     "dataset_indices": list(range(n_train)), "jet_types": list(args.jet_types),
                     "prior_dist": args.prior_dist, "seed": RANDOM_SEED,
                     "jet_phi_convention": "index_seeded_v1",

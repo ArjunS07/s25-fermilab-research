@@ -12,8 +12,8 @@ import torch
 # math is covered scipy-free in test_mass_shell.py; these worker tests need the assignment.
 pytest.importorskip("scipy")
 
-from cache_icp import (_permute_geodesic, _icp_permute_worker, dataset_fingerprint,
-                       resolve_training_cache_path, normalized_dataset_fingerprint,
+from cache_icp import (_permute_geodesic, _icp_permute_worker,
+                       resolve_training_cache_path, source_dataset_fingerprint,
                        validate_cache_metadata,
                        CACHE_FORMAT_VERSION)
 
@@ -118,16 +118,17 @@ def test_paired_cache_metadata_rejects_dataset_reordering():
         validate_cache_metadata({"perm_cache": np.zeros((2, 3))}, metadata)
 
 
-def test_training_fingerprint_matches_normalized_cache_representation():
-    x = torch.tensor(
-        [[[10.0, 2.0, -4.0, 6.0, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0]]],
-        dtype=torch.float32,
-    )
-    scale = 2.5
-    cache_state = x.clone()
-    cache_state[..., :4] /= scale
+def test_source_fingerprint_is_order_sensitive_and_transform_independent():
+    particles = torch.arange(40, dtype=torch.float32).reshape(2, 4, 5)
+    jets = torch.arange(10, dtype=torch.float32).reshape(2, 5)
+    dataset = (particles, jets)
 
-    assert normalized_dataset_fingerprint(x, scale) == dataset_fingerprint(cache_state)
+    expected = source_dataset_fingerprint(dataset, n_samples=2, num_particles=3)
+    # A derived Cartesian representation is deliberately absent from the API.
+    assert expected == source_dataset_fingerprint(dataset, n_samples=2, num_particles=3)
+    reordered = (particles.flip(0), jets.flip(0))
+    assert expected != source_dataset_fingerprint(reordered, n_samples=2, num_particles=3)
+    assert expected != source_dataset_fingerprint(dataset, n_samples=1, num_particles=3)
 
 
 def test_geodesic_alignment_reduces_same_realization_cost():
