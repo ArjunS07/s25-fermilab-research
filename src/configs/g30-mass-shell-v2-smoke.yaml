@@ -17,17 +17,18 @@ model:
   regulator_mass: 0.1
 
 training:
-  n_train_samples: 10000
+  n_train_samples: 1000000
   batch_size: 25
   target_batch_size: 100
   cfg_null_dropout_rate: 0.0
   num_epochs: 2
-  epoch_frac: 0.1
+  epoch_frac: 0.008
   time_sampling: uniform
   use_time_sampling: false
   use_curriculum: false
   prior_dist: axis_aligned_per_jet
   use_icp: true
+  icp_assignment_cost: squared_geodesic
   use_ema: true
   lr_schedule: monotonic_cosine
   eta_min_factor: 0.03
@@ -43,4 +44,4 @@ inference:
 
 paths:
   cache_dir: /mnt/data/caches
-  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01_phi-v1/icp_cache.pkl
+  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01_phi-v1-d2/icp_cache.pkl

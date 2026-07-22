@@ -120,8 +120,8 @@ def _align_point_clouds_till_converge(x_0_orig, x1, max_iter=200):
 
     return best_x_0, best_perm, best_rot
 
-def _permute_geodesic(x_0_real, x_1_real, m):
-    """Permutation-only assignment minimising total geodesic distance on the mass shell.
+def _permute_geodesic(x_0_real, x_1_real, m, assignment_cost="geodesic"):
+    """Permutation-only assignment on mass-shell geodesic distance or squared distance.
 
     Both clouds are lifted onto H_m (regulator mass m), the pairwise geodesic-distance matrix
     is built, and a single Hungarian assignment gives the net permutation. No rotation step —
@@ -137,6 +137,10 @@ def _permute_geodesic(x_0_real, x_1_real, m):
     # Pairwise geodesic cost: cost[i, j] = d(prior_i, target_j). Only real particles enter,
     # so no real particle can ever be assigned to apex-parked padding (masking guard).
     cost = geodesic_cost_matrix(x_0_real, x_1_real, m)             # (n, n)
+    if assignment_cost == "squared_geodesic":
+        cost = cost.square()
+    elif assignment_cost != "geodesic":
+        raise ValueError(f"unsupported mass-shell assignment cost: {assignment_cost}")
     cost_np = cost.numpy().astype(np.float64)
     _, col_ind = linear_sum_assignment(cost_np)
     # perm is applied at train time as x_0_reordered = x_0[perm], so position k must hold the
@@ -165,7 +169,7 @@ def _icp_permute_worker(task):
     For geometry == "mass_shell" the alternating step is replaced by a single permutation-only
     Hungarian assignment on geodesic distance over the mass shell (rot stays identity).
 
-    task : (idx, x_0_full, x_1_full, n_real, max_iter, geometry, regulator_mass)
+    task : (idx, x_0_full, x_1_full, n_real, max_iter, geometry, regulator_mass[, assignment_cost])
         idx            – global index in the cache array (returned to reconstruct order)
         x_0_full       – (max_particles, 4) float32 numpy array  (prior, normalised)
         x_1_full       – (max_particles, 4) float32 numpy array  (target, normalised)
@@ -178,7 +182,12 @@ def _icp_permute_worker(task):
         perm_full  – (max_particles,) int32: net permutation (identity for padding)
         rot        – (3, 3) float32: cumulative rotation matrix for 3-momenta
     """
-    idx, x_0_full, x_1_full, n_real, max_iter, geometry, regulator_mass = task
+    if len(task) == 7:
+        idx, x_0_full, x_1_full, n_real, max_iter, geometry, regulator_mass = task
+        assignment_cost = "geodesic" if geometry == "mass_shell" else "euclidean"
+    else:
+        (idx, x_0_full, x_1_full, n_real, max_iter, geometry,
+         regulator_mass, assignment_cost) = task
 
     max_particles = x_0_full.shape[0]
     perm_full = np.arange(max_particles, dtype=np.int32)
@@ -196,7 +205,9 @@ def _icp_permute_worker(task):
     x_1_t = torch.from_numpy(x_1_real.astype(np.float64))
 
     if geometry == "mass_shell":
-        best_perm, best_rot = _permute_geodesic(x_0_t, x_1_t, regulator_mass)
+        best_perm, best_rot = _permute_geodesic(
+            x_0_t, x_1_t, regulator_mass, assignment_cost
+        )
     else:
         _x_0_aligned, best_perm, best_rot = _align_point_clouds_till_converge(x_0_t, x_1_t, max_iter=max_iter)
 
@@ -298,11 +309,11 @@ if __name__ == "__main__":
         )
     x_0_np = np.concatenate(x_0_parts, axis=0)   # (N, P, 4)
 
-    logging.info(f"ICP geometry: {args.geometry}"
+    logging.info(f"ICP geometry: {args.geometry}, assignment cost: {args.assignment_cost}"
                  + (f" (regulator mass m={args.regulator_mass})" if args.geometry == "mass_shell" else ""))
     tasks = [
         (i, x_0_np[i], x_1_np[i], int(n_real_np[i]), args.icp_max_iter,
-         args.geometry, args.regulator_mass)
+         args.geometry, args.regulator_mass, args.assignment_cost)
         for i in range(n_total)
     ]
 
@@ -333,6 +344,7 @@ if __name__ == "__main__":
         "num_particles": args.num_particles,
         "n_samples": n_total,
         "geometry": args.geometry,
+        "assignment_cost": args.assignment_cost,
         "regulator_mass": args.regulator_mass,
         "metadata": {
             "dataset_fingerprint": dataset_fingerprint(X_scaled),
@@ -344,6 +356,7 @@ if __name__ == "__main__":
             "jet_phi_seed": args.seed,
             "num_particles": args.num_particles,
             "geometry": args.geometry,
+            "assignment_cost": args.assignment_cost,
             "regulator_mass": args.regulator_mass,
             "final_scale": final_scale,
         },

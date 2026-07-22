@@ -28,6 +28,7 @@ training:
   use_curriculum: false
   prior_dist: axis_aligned_per_jet
   use_icp: true
+  icp_assignment_cost: squared_geodesic
   use_ema: true
   ema_decay: 0.999
   use_cosine_lr: true
@@ -47,4 +48,4 @@ inference:
 
 paths:
   cache_dir: /mnt/data/caches
-  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01_phi-v1/icp_cache.pkl
+  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01_phi-v1-d2/icp_cache.pkl

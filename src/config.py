@@ -109,6 +109,7 @@ class TrainingConfig(BaseModel):
 
     # ICP is opt-in. A cache present on a shared PVC must never silently change a baseline.
     use_icp: bool = False
+    icp_assignment_cost: Literal["euclidean", "geodesic", "squared_geodesic"] = "euclidean"
 
     distributed: bool = False
 
@@ -163,9 +164,24 @@ class CacheConfig(BaseModel):
     # (the default). "mass_shell" = permutation-only Hungarian on geodesic distance over the
     # mass shell (Phase 4); no rotation, since Euclidean Kabsch is not valid on the shell.
     geometry: Literal["euclidean", "mass_shell"] = "euclidean"
+    assignment_cost: Literal["euclidean", "geodesic", "squared_geodesic"] | None = None
     regulator_mass: float = 0.5
     prior_dist: Literal["isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned", "axis_aligned_per_jet"] = "isotropic_com"
     seed: int = 42
+
+    @model_validator(mode="after")
+    def validate_assignment_cost(self):
+        if self.assignment_cost is None:
+            self.assignment_cost = ("euclidean" if self.geometry == "euclidean"
+                                    else "geodesic")
+        allowed = ({"euclidean"} if self.geometry == "euclidean"
+                   else {"geodesic", "squared_geodesic"})
+        if self.assignment_cost not in allowed:
+            raise ValueError(
+                f"cache.assignment_cost={self.assignment_cost!r} is incompatible with "
+                f"cache.geometry={self.geometry!r}"
+            )
+        return self
 
 
 class TrainRunConfig(BaseModel):
@@ -294,6 +310,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         use_attention=cfg.model.use_attention,
         prior_dist=cfg.training.prior_dist,
         use_icp=cfg.training.use_icp,
+        icp_assignment_cost=cfg.training.icp_assignment_cost,
         eta_min_factor=cfg.training.eta_min_factor,
         use_ema=cfg.training.use_ema,
         ema_decay=cfg.training.ema_decay,
@@ -361,6 +378,7 @@ def cache_config_to_namespace(cfg: CacheRunConfig) -> argparse.Namespace:
         icp_max_iter=cfg.cache.icp_max_iter,
         skip_if_exists=cfg.cache.skip_if_exists,
         geometry=cfg.cache.geometry,
+        assignment_cost=cfg.cache.assignment_cost,
         regulator_mass=cfg.cache.regulator_mass,
         prior_dist=cfg.cache.prior_dist,
         seed=cfg.cache.seed,

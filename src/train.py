@@ -270,6 +270,7 @@ if __name__ == "__main__":
                                  args.hyperbolic_model == "mass_shell" else "euclidean")}
         if expected["geometry"] == "mass_shell":
             expected["regulator_mass"] = args.regulator_mass
+            expected["assignment_cost"] = args.icp_assignment_cost
         validate_cache_metadata(icp_payload, expected)
         paired_x0_cache = torch.from_numpy(icp_payload["paired_x0"]).float()
         paired_x0_cache = paired_x0_cache[:n_train, :args.num_particles]

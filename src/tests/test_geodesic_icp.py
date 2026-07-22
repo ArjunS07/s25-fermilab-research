@@ -46,6 +46,18 @@ def test_permute_geodesic_recovers_known_permutation():
     assert np.allclose(rot, np.eye(3), atol=0)
 
 
+def test_squared_geodesic_is_a_real_assignment_ablation(monkeypatch):
+    # Linear distance prefers the diagonal (0 + 4 < 2.1 + 2.1), whereas
+    # squared distance prefers the off-diagonal (0 + 16 > 4.41 + 4.41).
+    cost = torch.tensor([[0.0, 2.1], [2.1, 4.0]], dtype=torch.float64)
+    monkeypatch.setattr("util.mass_shell.geodesic_cost_matrix", lambda *args: cost)
+    x = torch.zeros(2, 4, dtype=torch.float64)
+    linear, _ = _permute_geodesic(x, x, 0.1, "geodesic")
+    squared, _ = _permute_geodesic(x, x, 0.1, "squared_geodesic")
+    assert linear.tolist() == [0, 1]
+    assert squared.tolist() == [1, 0]
+
+
 def test_worker_mass_shell_geometry():
     """The worker dispatches to the geodesic path and returns identity rotation + valid perm."""
     max_p = 8

@@ -4,6 +4,7 @@ data:
 
 cache:
   geometry: mass_shell
+  assignment_cost: squared_geodesic
   regulator_mass: 0.1
   prior_dist: axis_aligned_per_jet
   seed: 42
@@ -13,4 +14,4 @@ cache:
 paths:
   output_path: /mnt/data/output
   cache_dir: /mnt/data/caches
-  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01_phi-v1/icp_cache.pkl
+  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01_phi-v1-d2/icp_cache.pkl
