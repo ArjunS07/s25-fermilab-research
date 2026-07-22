@@ -67,6 +67,18 @@ def dataset_fingerprint(x: torch.Tensor) -> str:
     return h.hexdigest()
 
 
+def normalized_dataset_fingerprint(x: torch.Tensor, final_scale: float) -> str:
+    """Fingerprint the normalized 4-vector state used to build an ICP cache.
+
+    Cache construction divides the physical four-vector columns by ``final_scale``
+    before hashing.  Training must validate against that same representation, not
+    the unscaled data tensor.  Keep the mask/auxiliary columns unchanged.
+    """
+    normalized = x.detach().cpu().clone()
+    normalized[..., :4] /= final_scale
+    return dataset_fingerprint(normalized)
+
+
 def validate_cache_metadata(payload, expected):
     metadata = payload.get("metadata")
     if payload.get("format_version") != CACHE_FORMAT_VERSION or metadata is None:
@@ -347,7 +359,9 @@ if __name__ == "__main__":
         "assignment_cost": args.assignment_cost,
         "regulator_mass": args.regulator_mass,
         "metadata": {
-            "dataset_fingerprint": dataset_fingerprint(X_scaled),
+            "dataset_fingerprint": normalized_dataset_fingerprint(
+                X_transformed, final_scale
+            ),
             "dataset_indices": list(range(n_total)),
             "jet_types": list(args.jet_types),
             "prior_dist": args.prior_dist,

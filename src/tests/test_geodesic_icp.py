@@ -12,8 +12,10 @@ import torch
 # math is covered scipy-free in test_mass_shell.py; these worker tests need the assignment.
 pytest.importorskip("scipy")
 
-from cache_icp import (_permute_geodesic, _icp_permute_worker, resolve_training_cache_path,
-                       validate_cache_metadata, CACHE_FORMAT_VERSION)
+from cache_icp import (_permute_geodesic, _icp_permute_worker, dataset_fingerprint,
+                       resolve_training_cache_path, normalized_dataset_fingerprint,
+                       validate_cache_metadata,
+                       CACHE_FORMAT_VERSION)
 
 
 def test_icp_opt_out_ignores_existing_shared_cache():
@@ -114,6 +116,18 @@ def test_paired_cache_metadata_rejects_dataset_reordering():
         validate_cache_metadata(payload, {**metadata, "dataset_indices": [1, 0]})
     with pytest.raises(ValueError, match="legacy"):
         validate_cache_metadata({"perm_cache": np.zeros((2, 3))}, metadata)
+
+
+def test_training_fingerprint_matches_normalized_cache_representation():
+    x = torch.tensor(
+        [[[10.0, 2.0, -4.0, 6.0, 1.0], [0.0, 0.0, 0.0, 0.0, 0.0]]],
+        dtype=torch.float32,
+    )
+    scale = 2.5
+    cache_state = x.clone()
+    cache_state[..., :4] /= scale
+
+    assert normalized_dataset_fingerprint(x, scale) == dataset_fingerprint(cache_state)
 
 
 def test_geodesic_alignment_reduces_same_realization_cost():
