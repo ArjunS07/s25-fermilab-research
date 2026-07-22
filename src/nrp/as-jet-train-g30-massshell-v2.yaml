@@ -25,7 +25,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="28a071ea440a7faa0e358c74bf0b96eb147a3dab"
+              GIT_COMMIT="741ea448e60b174d06159637f96ebb61826b9919"
               test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
               ENV_ARCHIVE=/mnt/data/caches/runtime/python-env-py310-torch271.tar
               mkdir -p /tmp/runtime
