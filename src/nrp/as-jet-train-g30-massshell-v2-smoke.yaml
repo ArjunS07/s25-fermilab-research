@@ -25,7 +25,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="af2409d525c4262857efd306d22e8632b587cb64"
+              GIT_COMMIT="28a071ea440a7faa0e358c74bf0b96eb147a3dab"
               test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
               ENV_ARCHIVE=/mnt/data/caches/runtime/python-env-py310-torch271.tar
               mkdir -p /tmp/runtime
@@ -43,7 +43,7 @@ spec:
                 --model-version v2
               "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
                 --config configs/g30-mass-shell-v2-smoke.yaml \
-                --set paths.output_path="$OUT"
+                --set paths.output_path="$OUT" 2>&1 | tee "$OUT/run.log"
           volumeMounts:
             - name: data
               mountPath: /mnt/data
