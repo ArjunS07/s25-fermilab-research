@@ -335,7 +335,7 @@ if __name__ == "__main__":
     probe_steps = set(args.stability_probe_steps)
     probe_jet_attr_model = None
 
-    def run_stability_probe(optimizer_step: int) -> None:
+    def run_stability_probe(optimizer_step: int, epoch: int | None = None) -> None:
         """Run a deterministic EMA sampler probe without perturbing training state."""
         global probe_jet_attr_model
         if optimizer_step not in probe_steps:
@@ -352,6 +352,21 @@ if __name__ == "__main__":
             raw_state = {k: v.detach().clone() for k, v in raw_model.state_dict().items()}
             was_training = raw_model.training
             try:
+                if args.stability_probe_save_checkpoints:
+                    probe_ckpt = {
+                        "epoch": epoch,
+                        "model_state_dict": raw_model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "losses": losses,
+                        "global_optimizer_step": optimizer_step,
+                        "config": run_config,
+                        "full_config": full_config,
+                    }
+                    if args.use_cosine_lr:
+                        probe_ckpt["scheduler_state_dict"] = scheduler.state_dict()
+                    if ema is not None:
+                        probe_ckpt["ema_state_dict"] = ema.state_dict()
+                    torch.save(probe_ckpt, f"{probe_dir}/checkpoint.pth")
                 if ema is not None:
                     ema.copy_to(raw_model)
                 random.seed(args.inference_seed)
@@ -411,7 +426,7 @@ if __name__ == "__main__":
         if args.distributed:
             dist.barrier()
 
-    run_stability_probe(global_optimizer_step)
+    run_stability_probe(global_optimizer_step, start_epoch - 1)
 
     
     total_epochs = start_epoch + args.num_epochs
@@ -677,7 +692,7 @@ if __name__ == "__main__":
                 if optimizer_limit_reached(global_optimizer_step, args.max_optimizer_steps):
                     reached_optimizer_limit = True
 
-                run_stability_probe(global_optimizer_step)
+                run_stability_probe(global_optimizer_step, epoch)
                 
             del x_1, x_0, t, x_t, pred, loss
             if torch.cuda.is_available():

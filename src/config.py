@@ -85,6 +85,7 @@ class TrainingConfig(BaseModel):
     epoch_frac: float = 1.0
     max_optimizer_steps: Optional[int] = Field(default=None, ge=1)
     stability_probe_steps: list[int] = Field(default_factory=list)
+    stability_probe_save_checkpoints: bool = False
     qualification_min_loss_improvement: float | None = Field(default=None, ge=0, le=1)
     sigma_min: float = 1e-4
     train_space: Literal["cartesian", "polar"] = "cartesian"
@@ -295,6 +296,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         epoch_frac=cfg.training.epoch_frac,
         max_optimizer_steps=cfg.training.max_optimizer_steps,
         stability_probe_steps=cfg.training.stability_probe_steps,
+        stability_probe_save_checkpoints=cfg.training.stability_probe_save_checkpoints,
         qualification_min_loss_improvement=cfg.training.qualification_min_loss_improvement,
         sigma_min=cfg.training.sigma_min,
         train_space=cfg.training.train_space,

@@ -12,6 +12,7 @@ model:
   include_mass_condition: true
   num_attention_heads: 8
   vector_channels: 16
+  velocity_readout_init: zero
   use_hyperbolic: true
   hyperbolic_model: mass_shell
   regulator_mass: 0.1
@@ -21,7 +22,13 @@ training:
   batch_size: 50
   target_batch_size: 250
   cfg_null_dropout_rate: 0.0
-  num_epochs: 200
+  # 202 epochs provide enough minibatches to stop at exactly 100k optimizer
+  # updates; the explicit step cap is the reproducible compute contract.
+  num_epochs: 202
+  max_optimizer_steps: 100000
+  stability_probe_steps: [0, 100, 500, 1000, 2000, 5000, 10000, 20000, 40000, 60000, 80000, 100000]
+  stability_probe_save_checkpoints: true
+  qualification_min_loss_improvement: 0.1
   train_space: cartesian
   time_sampling: uniform
   use_time_sampling: false
@@ -44,7 +51,10 @@ inference:
   sampler: euler
   mass_shell_max_step_rapidity: 0.5
   mass_shell_max_substeps: 64
-  max_invalid_fraction: 0.001
+  max_invalid_fraction: 0.0
+  stability_probe_samples: 64
+  stability_probe_integration_steps: 8
+  skip_metrics: false
 
 paths:
   cache_dir: /mnt/data/caches

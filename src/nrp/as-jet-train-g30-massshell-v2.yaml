@@ -43,7 +43,7 @@ spec:
                 --model-version v2
               "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
                 --config configs/g30-mass-shell-v2.yaml \
-                --set paths.output_path="$OUT"
+                --set paths.output_path="$OUT" 2>&1 | tee "$OUT/run.log"
           volumeMounts:
             - name: data
               mountPath: /mnt/data

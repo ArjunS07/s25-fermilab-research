@@ -38,6 +38,7 @@ def test_train_defaults_match_legacy_argparse():
     assert cfg.training.epoch_frac == 1.0
     assert cfg.training.max_optimizer_steps is None
     assert cfg.training.stability_probe_steps == []
+    assert cfg.training.stability_probe_save_checkpoints is False
     assert cfg.training.qualification_min_loss_improvement is None
     assert cfg.training.sigma_min == 1e-4
     assert cfg.training.train_space == "cartesian"
