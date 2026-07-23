@@ -36,6 +36,9 @@ def test_train_defaults_match_legacy_argparse():
     assert cfg.training.cfg_null_dropout_rate == 0.2
     assert cfg.training.num_epochs == 100
     assert cfg.training.epoch_frac == 1.0
+    assert cfg.training.max_optimizer_steps is None
+    assert cfg.training.stability_probe_steps == []
+    assert cfg.training.qualification_min_loss_improvement is None
     assert cfg.training.sigma_min == 1e-4
     assert cfg.training.train_space == "cartesian"
     assert cfg.training.time_sampling == "power_law"
@@ -93,6 +96,9 @@ def test_infer_defaults_match_legacy_argparse():
     assert cfg.inference.vf_mode == "none"
     assert cfg.inference.skip_samples is False
     assert cfg.inference.skip_metrics is False
+    assert cfg.inference.stability_probe_samples == 64
+    assert cfg.inference.stability_probe_integration_steps == 8
+    assert cfg.model.velocity_readout_init == "small_normal"
 
 
 def test_cache_defaults_match_legacy_argparse():
@@ -151,6 +157,20 @@ def test_tangent_attention_requires_typed_mass_shell_contract():
         "num_attention_heads": 4,
     })
     assert cfg.model.backbone == "tangent_attention"
+
+
+def test_qualification_steps_are_sorted_bounded_and_nonnegative():
+    cfg = TrainRunConfig(training={
+        "max_optimizer_steps": 2000,
+        "stability_probe_steps": [0, 100, 500, 2000],
+    })
+    assert cfg.training.stability_probe_steps[-1] == 2000
+    for invalid in ([100, 0], [0, 0], [-1], [2001]):
+        with pytest.raises(ValidationError):
+            TrainRunConfig(training={
+                "max_optimizer_steps": 2000,
+                "stability_probe_steps": invalid,
+            })
 
 
 # ── Dotlist overrides ────────────────────────────────────────────────────────
@@ -267,7 +287,7 @@ def test_run_config_dict_matches_legacy_keys():
         "use_reference_vectors", "use_node_scalars", "node_scalar_seed",
         "use_adaln", "use_attention", "jet_types", "final_scale",
         "backbone", "include_mass_condition", "num_attention_heads",
-        "vector_channels", "regulator_mass",
+        "vector_channels", "regulator_mass", "velocity_readout_init",
     }
     assert d["num_particles"] == 30
     assert d["jet_types"] == ["g"]

@@ -356,7 +356,7 @@ class LEFTJeN(nn.Module):
                  node_scalar_dim=None, use_adaln=False, use_attention=False,
                  backbone="legacy", include_mass_condition=False,
                  num_attention_heads=8, vector_channels=16,
-                 regulator_mass=0.5):
+                 regulator_mass=0.5, velocity_readout_init="small_normal"):
         super().__init__()
         self.max_particles = max_particles
         self.embed_dim = embed_dim
@@ -408,6 +408,7 @@ class LEFTJeN(nn.Module):
                 num_heads=num_attention_heads,
                 vector_channels=vector_channels,
                 regulator_mass=regulator_mass,
+                readout_init=velocity_readout_init,
             )
             self.time_embedding = None
             self.global_embedding = None
@@ -564,6 +565,7 @@ class LEFTJeN(nn.Module):
         regulator_mass: float = 0.5,
         max_step_rapidity: float = None,
         max_substeps: int = 64,
+        return_diagnostics: bool = False,
     ) -> torch.Tensor:
         """
         Riemannian Euler step in the Poincaré ball (default) or on the mass shell.
@@ -576,6 +578,7 @@ class LEFTJeN(nn.Module):
                 y_t, jet_conditions, mask, t_start, t_end,
                 regulator_mass, use_cfg, guidance_weight, ref_vectors,
                 max_step_rapidity, max_substeps,
+                return_diagnostics,
             )
 
         from util.hyperbolic import from_poincare_ball, exp_map, pushforward, clamp_to_ball
@@ -619,17 +622,28 @@ class LEFTJeN(nn.Module):
         ref_vectors: torch.Tensor,
         max_step_rapidity: float = None,
         max_substeps: int = 64,
+        return_diagnostics: bool = False,
     ) -> torch.Tensor:
         """Riemannian Euler step on the mass shell H_m. The state y_t is already on the shell
         (a Cartesian on-shell 4-vector), so it is fed to the model directly; the predicted
         Cartesian velocity is projected onto the tangent space and the geodesic exp map takes
         the step. Masked/padded rows stay put (zero tangent velocity) and remain on the shell."""
-        from util.mass_shell import exp_map, project_to_shell, tangent_norm
+        from util.mass_shell import (MassShellIntegrationError, exp_map,
+                                     project_to_shell, tangent_norm)
 
         if max_step_rapidity is None:
             vel_tan = self._mass_shell_velocity(
                 y_t, jet_conditions, mask, t_start, m, use_cfg, guidance_weight, ref_vectors)
-            return project_to_shell(exp_map(y_t, vel_tan * (t_end - t_start), m), m)
+            result = project_to_shell(exp_map(y_t, vel_tan * (t_end - t_start), m), m)
+            if return_diagnostics:
+                real_norms = tangent_norm(vel_tan).squeeze(-1)[mask > 0]
+                max_norm = float(real_norms.max().detach().cpu()) if real_norms.numel() else 0.0
+                return result, {
+                    "substeps": 1,
+                    "max_tangent_norm": max_norm,
+                    "max_step_rapidity": max_norm * abs(float(t_end - t_start)) / float(m),
+                }
+            return result
 
         if max_step_rapidity <= 0 or max_substeps < 1:
             raise ValueError("adaptive mass-shell limits must be positive")
@@ -638,33 +652,75 @@ class LEFTJeN(nn.Module):
         current_t = float(t_start.detach().cpu())
         end_t = float(t_end.detach().cpu())
         n_substeps = 0
+        max_norm_seen = 0.0
+        max_rapidity_seen = 0.0
         while current_t < end_t - 1e-15:
             t_scalar = torch.as_tensor(current_t, device=y_t.device, dtype=t_start.dtype)
             vel_tan = self._mass_shell_velocity(
                 state, jet_conditions, mask, t_scalar, m, use_cfg, guidance_weight, ref_vectors)
             real_norms = tangent_norm(vel_tan).squeeze(-1)[mask > 0]
+            if real_norms.numel() and not torch.isfinite(real_norms).all():
+                raise MassShellIntegrationError(
+                    "nonfinite_velocity",
+                    "mass-shell tangent velocity contains non-finite values",
+                    t_start=float(t_start), t_end=float(t_end), current_t=current_t,
+                    completed_substeps=n_substeps,
+                )
             max_norm = float(real_norms.max().detach().cpu()) if real_norms.numel() else 0.0
+            max_norm_seen = max(max_norm_seen, max_norm)
             remaining = end_t - current_t
             allowed_dt = remaining if max_norm == 0.0 else min(
                 remaining, float(max_step_rapidity) * float(m) / max_norm)
             if not allowed_dt > 0 or not torch.isfinite(torch.tensor(allowed_dt)):
-                raise FloatingPointError("adaptive mass-shell integration produced an invalid step size")
+                raise MassShellIntegrationError(
+                    "invalid_step_size",
+                    "adaptive mass-shell integration produced an invalid step size",
+                    t_start=float(t_start), t_end=float(t_end), current_t=current_t,
+                    completed_substeps=n_substeps, max_tangent_norm=max_norm,
+                    allowed_dt=float(allowed_dt),
+                )
+            max_rapidity_seen = max(
+                max_rapidity_seen, max_norm * allowed_dt / float(m)
+            )
             n_substeps += 1
             if n_substeps > max_substeps:
-                raise FloatingPointError(
+                estimated_remaining = int(np.ceil(remaining / allowed_dt))
+                raise MassShellIntegrationError(
+                    "substep_limit",
                     f"adaptive mass-shell integration exceeded {max_substeps} substeps in "
-                    f"[{float(t_start):.6g}, {float(t_end):.6g}]"
+                    f"[{float(t_start):.6g}, {float(t_end):.6g}]",
+                    t_start=float(t_start), t_end=float(t_end), current_t=current_t,
+                    completed_substeps=n_substeps - 1,
+                    estimated_required_substeps=(n_substeps - 1 + estimated_remaining),
+                    max_tangent_norm=max_norm_seen,
+                    max_step_rapidity=max_rapidity_seen,
                 )
             state = project_to_shell(exp_map(state, vel_tan * allowed_dt, m), m)
             if not torch.isfinite(state).all():
-                raise FloatingPointError("adaptive mass-shell integration produced a non-finite state")
+                finite_state = state[torch.isfinite(state)]
+                raise MassShellIntegrationError(
+                    "nonfinite_state",
+                    "adaptive mass-shell integration produced a non-finite state",
+                    t_start=float(t_start), t_end=float(t_end), current_t=current_t,
+                    completed_substeps=n_substeps,
+                    state_max_abs=(float(finite_state.abs().max().detach().cpu())
+                                   if finite_state.numel() else None),
+                    max_tangent_norm=max_norm_seen,
+                    max_step_rapidity=max_rapidity_seen,
+                )
             current_t = min(end_t, current_t + allowed_dt)
+        if return_diagnostics:
+            return state, {
+                "substeps": n_substeps,
+                "max_tangent_norm": max_norm_seen,
+                "max_step_rapidity": max_rapidity_seen,
+            }
         return state
 
     def _mass_shell_velocity(self, y_t, jet_conditions, mask, t, m, use_cfg,
                              guidance_weight, ref_vectors):
         """Evaluate the learned field and project it into the float64 tangent space."""
-        from util.mass_shell import pushforward_to_tangent
+        from util.mass_shell import MassShellIntegrationError, pushforward_to_tangent
 
         batch_size = y_t.shape[0]
         t_batch = t.unsqueeze(0).expand(batch_size)
@@ -675,12 +731,32 @@ class LEFTJeN(nn.Module):
         vel_cartesian = self.forward(x=model_state, t=t_batch.to(model_dtype),
                                      jet_conditions=jet_conditions.to(model_dtype), mask=mask,
                                      ref_vectors=model_refs)
+        if not torch.isfinite(vel_cartesian).all():
+            finite_velocity = vel_cartesian[torch.isfinite(vel_cartesian)]
+            raise MassShellIntegrationError(
+                "nonfinite_velocity",
+                "tangent-attention model produced a non-finite Cartesian velocity",
+                current_t=float(t),
+                model_output_max_abs=(float(finite_velocity.abs().max().detach().cpu())
+                                      if finite_velocity.numel() else None),
+            )
         if use_cfg:
             null_cond = self.make_null_cond(jet_conditions)
             vel_uncond = self.forward(x=model_state, t=t_batch.to(model_dtype),
                                       jet_conditions=null_cond.to(model_dtype), mask=mask,
                                       ref_vectors=model_refs)
             vel_cartesian = vel_cartesian + guidance_weight * (vel_cartesian - vel_uncond)
+
+        if not torch.isfinite(vel_cartesian).all():
+            finite_velocity = vel_cartesian[torch.isfinite(vel_cartesian)]
+            raise MassShellIntegrationError(
+                "nonfinite_velocity",
+                "guided mass-shell Cartesian velocity contains non-finite values",
+                current_t=float(t),
+                model_output_max_abs=(float(finite_velocity.abs().max().detach().cpu())
+                                      if finite_velocity.numel() else None),
+                use_cfg=bool(use_cfg),
+            )
 
         return pushforward_to_tangent(y_t, vel_cartesian, m) * mask.unsqueeze(-1)
 

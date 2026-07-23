@@ -41,6 +41,22 @@ _EPS = 1e-12
 _S_MAX = 30.0
 
 
+class MassShellIntegrationError(FloatingPointError):
+    """Structured failure raised by adaptive mass-shell integration."""
+
+    def __init__(self, reason: str, message: str, **diagnostics):
+        super().__init__(message)
+        self.reason = reason
+        self.diagnostics = diagnostics
+
+    def as_dict(self) -> dict:
+        return {
+            "reason": self.reason,
+            "message": str(self),
+            **self.diagnostics,
+        }
+
+
 def _to_f64(*tensors):
     return tuple(t.to(torch.float64) for t in tensors)
 

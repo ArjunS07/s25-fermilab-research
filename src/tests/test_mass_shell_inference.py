@@ -9,7 +9,7 @@ mask (padding parked at the apex), and work with references + CFG on.
 import pytest
 import torch
 
-from util.mass_shell import project_to_shell
+from util.mass_shell import MassShellIntegrationError, project_to_shell
 from util.minkowski_utils import normsq4
 from tests.lorentz_test_utils import build_model, sample_inputs
 
@@ -143,8 +143,28 @@ def test_adaptive_step_fails_instead_of_publishing_unbounded_substeps(monkeypatc
     original = model._mass_shell_velocity
     monkeypatch.setattr(model, "_mass_shell_velocity",
                         lambda *args, **kwargs: 100.0 * original(*args, **kwargs))
-    with pytest.raises(FloatingPointError, match="exceeded 1 substeps"):
+    with pytest.raises(MassShellIntegrationError, match="exceeded 1 substeps") as caught:
         model.step_hyperbolic(
             y0, cond, mask, torch.tensor(0.0, dtype=torch.float64),
             torch.tensor(0.1, dtype=torch.float64), hyperbolic_model="mass_shell",
             regulator_mass=M, max_step_rapidity=0.01, max_substeps=1)
+    record = caught.value.as_dict()
+    assert record["reason"] == "substep_limit"
+    assert record["completed_substeps"] == 1
+    assert record["estimated_required_substeps"] > 1
+
+
+def test_adaptive_step_returns_structured_success_telemetry():
+    model = build_model(seed=0)
+    x, _, cond, mask, _ = sample_inputs(seed=3)
+    y0 = project_to_shell(x * mask.unsqueeze(-1), M)
+    out, telemetry = model.step_hyperbolic(
+        y0, cond, mask, torch.tensor(0.0, dtype=torch.float64),
+        torch.tensor(0.01, dtype=torch.float64), hyperbolic_model="mass_shell",
+        regulator_mass=M, max_step_rapidity=1e6, max_substeps=4,
+        return_diagnostics=True,
+    )
+    assert torch.isfinite(out).all()
+    assert telemetry["substeps"] == 1
+    assert telemetry["max_tangent_norm"] >= 0
+    assert telemetry["max_step_rapidity"] >= 0

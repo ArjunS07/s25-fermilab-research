@@ -58,6 +58,7 @@ class ModelConfig(BaseModel):
     include_mass_condition: bool = False
     num_attention_heads: int = Field(default=8, ge=1)
     vector_channels: int = Field(default=16, ge=1)
+    velocity_readout_init: Literal["small_normal", "zero"] = "small_normal"
 
     @model_validator(mode="after")
     def validate_tangent_attention_contract(self):
@@ -82,6 +83,9 @@ class TrainingConfig(BaseModel):
     cfg_null_dropout_rate: float = 0.2
     num_epochs: int = 100
     epoch_frac: float = 1.0
+    max_optimizer_steps: Optional[int] = Field(default=None, ge=1)
+    stability_probe_steps: list[int] = Field(default_factory=list)
+    qualification_min_loss_improvement: float | None = Field(default=None, ge=0, le=1)
     sigma_min: float = 1e-4
     train_space: Literal["cartesian", "polar"] = "cartesian"
     time_sampling: Literal["uniform", "power_law", "lognorm"] = "power_law"
@@ -113,6 +117,17 @@ class TrainingConfig(BaseModel):
 
     distributed: bool = False
 
+    @model_validator(mode="after")
+    def validate_qualification_steps(self):
+        if any(step < 0 for step in self.stability_probe_steps):
+            raise ValueError("training.stability_probe_steps must be non-negative")
+        if self.stability_probe_steps != sorted(set(self.stability_probe_steps)):
+            raise ValueError("training.stability_probe_steps must be sorted and unique")
+        if (self.max_optimizer_steps is not None and self.stability_probe_steps
+                and self.stability_probe_steps[-1] > self.max_optimizer_steps):
+            raise ValueError("stability probe step exceeds training.max_optimizer_steps")
+        return self
+
 
 class InferenceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -133,6 +148,8 @@ class InferenceConfig(BaseModel):
     # Optional experiment gate. Training exits non-zero after writing diagnostics
     # when the generated non-finite/exploding trajectory fraction exceeds this value.
     max_invalid_fraction: float | None = Field(default=None, ge=0, le=1)
+    stability_probe_samples: int = Field(default=64, ge=1)
+    stability_probe_integration_steps: int = Field(default=8, ge=1)
     vf_mode: Literal["cfg", "nocfg", "both", "none"] = "none"
     skip_samples: bool = False
     skip_metrics: bool = False
@@ -276,6 +293,9 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         cfg_null_dropout_rate=cfg.training.cfg_null_dropout_rate,
         num_epochs=cfg.training.num_epochs,
         epoch_frac=cfg.training.epoch_frac,
+        max_optimizer_steps=cfg.training.max_optimizer_steps,
+        stability_probe_steps=cfg.training.stability_probe_steps,
+        qualification_min_loss_improvement=cfg.training.qualification_min_loss_improvement,
         sigma_min=cfg.training.sigma_min,
         train_space=cfg.training.train_space,
         time_sampling=cfg.training.time_sampling,
@@ -291,6 +311,9 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
         mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
         max_invalid_fraction=cfg.inference.max_invalid_fraction,
+        stability_probe_samples=cfg.inference.stability_probe_samples,
+        stability_probe_integration_steps=cfg.inference.stability_probe_integration_steps,
+        skip_metrics=cfg.inference.skip_metrics,
         use_cosine_lr=cfg.training.use_cosine_lr,
         lr_schedule=cfg.training.lr_schedule,
         lr_t0=cfg.training.lr_t0,
@@ -302,6 +325,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         include_mass_condition=cfg.model.include_mass_condition,
         num_attention_heads=cfg.model.num_attention_heads,
         vector_channels=cfg.model.vector_channels,
+        velocity_readout_init=cfg.model.velocity_readout_init,
         use_curriculum=cfg.training.use_curriculum,
         use_time_sampling=cfg.training.use_time_sampling,
         use_reference_vectors=cfg.model.use_reference_vectors,
@@ -351,6 +375,7 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         include_mass_condition=cfg.model.include_mass_condition,
         num_attention_heads=cfg.model.num_attention_heads,
         vector_channels=cfg.model.vector_channels,
+        velocity_readout_init=cfg.model.velocity_readout_init,
         sampler=cfg.inference.sampler,
         mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
         mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
@@ -427,6 +452,7 @@ def run_config_dict(cfg: TrainRunConfig, final_scale: float) -> dict:
         "include_mass_condition": cfg.model.include_mass_condition,
         "num_attention_heads": cfg.model.num_attention_heads,
         "vector_channels": cfg.model.vector_channels,
+        "velocity_readout_init": cfg.model.velocity_readout_init,
         "regulator_mass": cfg.model.regulator_mass,
         "jet_types": cfg.data.jet_types,
         "final_scale": float(final_scale),

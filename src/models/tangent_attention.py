@@ -132,7 +132,8 @@ class TangentAttentionBlock(nn.Module):
 
 class TangentAttentionBackbone(nn.Module):
     def __init__(self, cond_dim: int, width: int, num_layers: int, num_heads: int,
-                 vector_channels: int, regulator_mass: float):
+                 vector_channels: int, regulator_mass: float,
+                 readout_init: str = "small_normal"):
         super().__init__()
         self.regulator_mass = regulator_mass
         self.cond_embed = nn.Sequential(nn.Linear(cond_dim, width), nn.SiLU(), nn.Linear(width, width))
@@ -143,7 +144,12 @@ class TangentAttentionBackbone(nn.Module):
             for _ in range(num_layers)
         ])
         self.readout = nn.Linear(width, vector_channels)
-        nn.init.normal_(self.readout.weight, std=1e-3)
+        if readout_init == "small_normal":
+            nn.init.normal_(self.readout.weight, std=1e-3)
+        elif readout_init == "zero":
+            nn.init.zeros_(self.readout.weight)
+        else:
+            raise ValueError(f"unknown tangent velocity readout initialization {readout_init!r}")
         nn.init.zeros_(self.readout.bias)
 
     def forward(self, x, t, conditions, mask, references):

@@ -79,3 +79,16 @@ def test_mass_condition_changes_output():
     assert not torch.allclose(
         model(x, t, cond, mask, refs), model(x, t, changed, mask, refs), atol=1e-7
     )
+
+
+def test_zero_readout_initialization_produces_zero_initial_velocity():
+    x, t, cond, mask, refs, mass = _inputs()
+    torch.manual_seed(4)
+    zero_model = LEFTJeN(
+        max_num_jet_types=5, max_particles=6, hidden_dim=32, num_layers=2,
+        include_pt=True, use_reference_vectors=True, backbone="tangent_attention",
+        include_mass_condition=True, num_attention_heads=4, vector_channels=4,
+        regulator_mass=mass, velocity_readout_init="zero",
+    ).eval()
+    assert torch.equal(zero_model(x, t, cond, mask, refs), torch.zeros_like(x))
+    assert torch.count_nonzero(zero_model.tangent_backbone.readout.weight) == 0
