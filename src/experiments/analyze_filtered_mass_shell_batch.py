@@ -84,7 +84,7 @@ def metric_summary(test_rel, gen_rel):
     result["w1m"] = float(jetnet_eval.w1m(jets1=gen, jets2=test)[0])
     result["w1p"] = jetnet_eval.w1p(jets1=gen, jets2=test)[0].tolist()
     result["w1efp"] = jetnet_eval.w1efp(jets1=gen, jets2=test)[0].tolist()
-    result["fpd"] = float(jetnet_eval.fpd(
+    result["fpd_flat_legacy"] = float(jetnet_eval.fpd(
         real_features=test.reshape(n, -1),
         gen_features=gen.reshape(n, -1),
         seed=42,
