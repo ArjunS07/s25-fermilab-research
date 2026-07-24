@@ -91,6 +91,8 @@ def test_infer_defaults_match_legacy_argparse():
     assert cfg.inference.sampler == "euler"
     assert cfg.inference.mass_shell_max_step_rapidity is None
     assert cfg.inference.mass_shell_max_substeps == 64
+    assert cfg.inference.warn_invalid_fraction is None
+    assert cfg.inference.max_invalid_fraction is None
     assert cfg.model.use_reference_vectors is False
     assert cfg.model.use_node_scalars is False
     assert cfg.model.use_adaln is False
@@ -172,6 +174,19 @@ def test_qualification_steps_are_sorted_bounded_and_nonnegative():
                 "max_optimizer_steps": 2000,
                 "stability_probe_steps": invalid,
             })
+
+
+def test_invalid_fraction_warning_must_not_exceed_hard_gate():
+    cfg = TrainRunConfig(inference={
+        "warn_invalid_fraction": 0.0001,
+        "max_invalid_fraction": 0.001,
+    })
+    assert cfg.inference.warn_invalid_fraction == 0.0001
+    with pytest.raises(ValidationError):
+        TrainRunConfig(inference={
+            "warn_invalid_fraction": 0.01,
+            "max_invalid_fraction": 0.001,
+        })
 
 
 # ── Dotlist overrides ────────────────────────────────────────────────────────

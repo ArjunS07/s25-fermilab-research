@@ -149,6 +149,9 @@ class InferenceConfig(BaseModel):
     # Optional experiment gate. Training exits non-zero after writing diagnostics
     # when the generated non-finite/exploding trajectory fraction exceeds this value.
     max_invalid_fraction: float | None = Field(default=None, ge=0, le=1)
+    # Softer reporting threshold. Exceeding it is recorded as a qualification warning
+    # but does not suppress physics metrics.
+    warn_invalid_fraction: float | None = Field(default=None, ge=0, le=1)
     stability_probe_samples: int = Field(default=64, ge=1)
     stability_probe_integration_steps: int = Field(default=8, ge=1)
     vf_mode: Literal["cfg", "nocfg", "both", "none"] = "none"
@@ -158,6 +161,16 @@ class InferenceConfig(BaseModel):
         "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned",
         "axis_aligned_per_jet"
     ] = "isotropic_com"
+
+    @model_validator(mode="after")
+    def validate_invalid_fraction_thresholds(self):
+        if (self.warn_invalid_fraction is not None
+                and self.max_invalid_fraction is not None
+                and self.warn_invalid_fraction > self.max_invalid_fraction):
+            raise ValueError(
+                "inference.warn_invalid_fraction must not exceed max_invalid_fraction"
+            )
+        return self
 
 
 class PathConfig(BaseModel):
@@ -313,6 +326,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
         mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
         max_invalid_fraction=cfg.inference.max_invalid_fraction,
+        warn_invalid_fraction=cfg.inference.warn_invalid_fraction,
         stability_probe_samples=cfg.inference.stability_probe_samples,
         stability_probe_integration_steps=cfg.inference.stability_probe_integration_steps,
         skip_metrics=cfg.inference.skip_metrics,

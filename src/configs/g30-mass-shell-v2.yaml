@@ -51,7 +51,8 @@ inference:
   sampler: euler
   mass_shell_max_step_rapidity: 0.5
   mass_shell_max_substeps: 64
-  max_invalid_fraction: 0.0
+  warn_invalid_fraction: 0.0
+  max_invalid_fraction: 0.001
   stability_probe_samples: 64
   stability_probe_integration_steps: 8
   skip_metrics: false

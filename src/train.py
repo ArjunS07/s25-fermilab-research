@@ -858,6 +858,7 @@ if __name__ == "__main__":
         generation_diagnostics = None
         invalid_fraction = None
         if (args.max_invalid_fraction is not None
+                or args.warn_invalid_fraction is not None
                 or args.qualification_min_loss_improvement is not None):
             diagnostics_path = f"{model_output_path}/generation_diagnostics.json"
             if not os.path.isfile(diagnostics_path):
@@ -873,6 +874,7 @@ if __name__ == "__main__":
             invalid_fraction = n_unstable / max(n_total, 1)
 
         qualification_errors = []
+        qualification_warnings = []
         qualification_summary = None
         if args.max_optimizer_steps is not None:
             optimizer_log = f"{model_output_path}/optimizer_steps.csv"
@@ -902,6 +904,7 @@ if __name__ == "__main__":
                 "losses_finite": losses_finite,
                 "gradients_finite": gradients_finite,
                 "invalid_fraction": invalid_fraction,
+                "warn_invalid_fraction": args.warn_invalid_fraction,
                 "max_invalid_fraction": args.max_invalid_fraction,
                 "no_explosions": no_explosions,
             }
@@ -926,9 +929,18 @@ if __name__ == "__main__":
                 f"invalid_fraction={invalid_fraction:.6f} exceeds "
                 f"max_invalid_fraction={args.max_invalid_fraction:.6f}"
             )
+        if (args.warn_invalid_fraction is not None and invalid_fraction is not None
+                and invalid_fraction > args.warn_invalid_fraction):
+            warning = (
+                f"invalid_fraction={invalid_fraction:.6f} exceeds warning threshold "
+                f"{args.warn_invalid_fraction:.6f}"
+            )
+            qualification_warnings.append(warning)
+            print(f"WARNING: {warning}; continuing to physics metrics")
         if qualification_summary is not None:
             qualification_summary["passed"] = not qualification_errors
             qualification_summary["errors"] = qualification_errors
+            qualification_summary["warnings"] = qualification_warnings
             with open(f"{model_output_path}/qualification_summary.json", "w") as handle:
                 json.dump(qualification_summary, handle, indent=2)
         if qualification_errors:
