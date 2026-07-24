@@ -1,6 +1,7 @@
 import seaborn as sns
 import torch
 import matplotlib.pyplot as plt
+import os
 
 from jetnet.utils import EtaPhiPtE_to_cartesian
 
@@ -86,6 +87,7 @@ def generate_samples(
         prior_dist='isotropic_com',
         mass_shell_max_step_rapidity=None,
         mass_shell_max_substeps=64,
+        replay_bundle_path=None,
 ):
 
 
@@ -105,8 +107,34 @@ def generate_samples(
     all_failure_steps = []
     all_explosion_steps = []
     all_generated_jet_attrs = []
+    all_jet_phi = []
+    all_masks = []
+    all_internal_prior = []
     all_failure_records = []
     all_step_telemetry = []
+
+    replay_bundle = None
+    if replay_bundle_path:
+        replay_bundle = torch.load(replay_bundle_path, map_location="cpu")
+        if replay_bundle.get("format_version") != 1:
+            raise ValueError("unsupported replay bundle format")
+        metadata = replay_bundle.get("metadata", {})
+        expected = {
+            "n_samples": int(n_samples),
+            "num_particles": int(max_particles_per_jet),
+            "prior_dist": prior_dist,
+            "final_scale": float(final_scale),
+            "use_hyperbolic": bool(use_hyperbolic),
+            "hyperbolic_model": hyperbolic_model,
+            "regulator_mass": float(regulator_mass),
+        }
+        mismatches = {
+            key: (metadata.get(key), value)
+            for key, value in expected.items()
+            if metadata.get(key) != value
+        }
+        if mismatches:
+            raise ValueError(f"incompatible replay bundle metadata: {mismatches}")
 
     with torch.no_grad():
         model.eval()
@@ -117,9 +145,15 @@ def generate_samples(
         for start_idx in range(0, n_samples, batch_size):
             current_batch_size = min(batch_size, n_samples - start_idx)
 
-            generated_jet_attrs, _ = jet_attributes.generate_jets(
-                jet_attr_model, device, n_jet_types=n_jet_types, num_jets=current_batch_size
-            )
+            if replay_bundle is None:
+                generated_jet_attrs, _ = jet_attributes.generate_jets(
+                    jet_attr_model, device, n_jet_types=n_jet_types,
+                    num_jets=current_batch_size
+                )
+            else:
+                generated_jet_attrs = replay_bundle["generated_jet_attrs"][
+                    start_idx:start_idx + current_batch_size
+                ].to(device)
             # generated_jet_attrs layout: [one_hot(5), eta, pt, mass, n_particles]
             jet_one_hot_enc = generated_jet_attrs[:, :5].to(device)
             gen_pt = generated_jet_attrs[:, 6].to(device)   # normalized pT from NF
@@ -129,34 +163,50 @@ def generate_samples(
 
             # Build jet_features for priors that need jet-axis info.
             jet_features = None
-            jet_phi = (2 * torch.pi) * torch.rand(current_batch_size, device=device)
+            jet_phi = (
+                (2 * torch.pi) * torch.rand(current_batch_size, device=device)
+                if replay_bundle is None else
+                replay_bundle["jet_phi"][start_idx:start_idx + current_batch_size].to(device)
+            )
             if prior_dist in ('axis_aligned', 'axis_aligned_per_jet', 'jet_ref_frame'):
                 gen_eta = generated_jet_attrs[:, 5].to(device)
                 gen_pt_prior = gen_pt
                 jet_features = torch.stack([gen_eta, gen_pt_prior], dim=-1)
 
-            x = gen_initial_distribution(
-                batch_size=current_batch_size,
-                num_particles=max_particles_per_jet,
-                prior_dist=prior_dist,
-                jet_features=jet_features,
-                jet_phi=jet_phi,
-                device=device,
-                model_scale=final_scale,
-            )
-            x = x.to(device)
+            if replay_bundle is None:
+                x = gen_initial_distribution(
+                    batch_size=current_batch_size,
+                    num_particles=max_particles_per_jet,
+                    prior_dist=prior_dist,
+                    jet_features=jet_features,
+                    jet_phi=jet_phi,
+                    device=device,
+                    model_scale=final_scale,
+                ).to(device)
 
             masks = jet_attributes.generate_masks(
                 gen_n_particles,
                 max_particles_per_jet=max_particles_per_jet,
                 device=device
             )
+            if replay_bundle is not None:
+                saved_masks = replay_bundle["masks"][
+                    start_idx:start_idx + current_batch_size
+                ].to(device)
+                if not torch.equal(masks.cpu(), saved_masks.cpu()):
+                    raise ValueError("replay bundle mask disagrees with Stage-1 multiplicity")
+                x = replay_bundle["internal_prior"][
+                    start_idx:start_idx + current_batch_size
+                ].to(device)
             # Preserve the exact integration start, including sampled attributes,
             # multiplicity mask, orientation, and any geometry-specific projection.
             prior_x = x * masks.unsqueeze(-1)
             if use_hyperbolic and hyperbolic_model == 'mass_shell':
                 from util.mass_shell import project_to_shell
-                prior_x = project_to_shell(prior_x, regulator_mass) * masks.unsqueeze(-1)
+                if replay_bundle is None:
+                    prior_x = project_to_shell(prior_x, regulator_mass) * masks.unsqueeze(-1)
+                else:
+                    prior_x = x * masks.unsqueeze(-1)
             cond_pt = gen_pt / final_scale if backbone == 'tangent_attention' else gen_pt
             condition_parts = [
                 jet_one_hot_enc,
@@ -264,6 +314,9 @@ def generate_samples(
             all_pt_cond.append(gen_pt.cpu())
             all_jet_types.append(jet_one_hot_enc.argmax(dim=-1).cpu())
             all_generated_jet_attrs.append(generated_jet_attrs.cpu())
+            all_jet_phi.append(jet_phi.cpu())
+            all_masks.append(masks.cpu())
+            all_internal_prior.append(prior_x.cpu())
             if use_hyperbolic and hyperbolic_model == 'mass_shell':
                 all_failure_steps.append(failure_step.cpu())
                 all_explosion_steps.append(explosion_step.cpu())
@@ -277,6 +330,25 @@ def generate_samples(
     all_prior_samples_cat = torch.cat(all_prior_samples, dim=0)
     all_pt_cond_cat   = torch.cat(all_pt_cond, dim=0)
     all_jet_types_cat = torch.cat(all_jet_types, dim=0)
+
+    if replay_bundle is None:
+        bundle = {
+            "format_version": 1,
+            "metadata": {
+                "n_samples": int(n_samples),
+                "num_particles": int(max_particles_per_jet),
+                "prior_dist": prior_dist,
+                "final_scale": float(final_scale),
+                "use_hyperbolic": bool(use_hyperbolic),
+                "hyperbolic_model": hyperbolic_model,
+                "regulator_mass": float(regulator_mass),
+            },
+            "generated_jet_attrs": torch.cat(all_generated_jet_attrs),
+            "jet_phi": torch.cat(all_jet_phi),
+            "masks": torch.cat(all_masks),
+            "internal_prior": torch.cat(all_internal_prior),
+        }
+        torch.save(bundle, os.path.join(root_output_path, "replay_bundle.pt"))
 
     if all_failure_steps:
         import json

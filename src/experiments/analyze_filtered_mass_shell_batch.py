@@ -89,6 +89,11 @@ def metric_summary(test_rel, gen_rel):
         gen_features=gen.reshape(n, -1),
         seed=42,
     )[0])
+    test_efp = jetnet_eval.get_fpd_kpd_jet_features(test)
+    gen_efp = jetnet_eval.get_fpd_kpd_jet_features(gen)
+    result["fpd"] = float(jetnet_eval.fpd(
+        real_features=test_efp, gen_features=gen_efp, seed=42,
+    )[0])
     return result
 
 
@@ -135,6 +140,9 @@ def main():
 
     attrs_parts = []
     replay_prior_parts = []
+    replay_phi_parts = []
+    replay_mask_parts = []
+    replay_internal_prior_parts = []
     for start in range(0, args.n_samples, args.batch_size):
         size = min(args.batch_size, args.n_samples - start)
         attrs, _ = jet_attributes.generate_jets(stage1, device, n_jet_types=1, num_jets=size)
@@ -143,6 +151,7 @@ def main():
         pt = attrs[:, 6]
         n_particles = attrs[:, -1].long().clamp(max=samples.shape[1])
         jet_phi = 2 * torch.pi * torch.rand(size, device=device)
+        replay_phi_parts.append(jet_phi.cpu())
         prior = gen_initial_distribution(
             batch_size=size,
             num_particles=samples.shape[1],
@@ -156,8 +165,10 @@ def main():
             n_particles, max_particles_per_jet=samples.shape[1], device=device
         )
         prior = project_to_shell(prior * mask.unsqueeze(-1), args.regulator_mass)
-        prior = massless_energy_view(prior, mask)
-        replay_prior_parts.append((scale * prior).cpu())
+        replay_mask_parts.append(mask.cpu())
+        replay_internal_prior_parts.append(prior.cpu())
+        physical_prior = massless_energy_view(prior, mask)
+        replay_prior_parts.append((scale * physical_prior).cpu())
     attrs = torch.cat(attrs_parts)
     replay_prior = torch.cat(replay_prior_parts)
     finite_prior = torch.isfinite(saved_prior) & torch.isfinite(replay_prior)
@@ -166,6 +177,24 @@ def main():
     if prior_max_abs_diff > 1e-8:
         raise RuntimeError(f"Stage-1 replay failed prior verification: {prior_max_abs_diff}")
     torch.save(attrs, os.path.join(args.out_dir, "replayed_stage1_attributes.pt"))
+    torch.save({
+        "format_version": 1,
+        "metadata": {
+            "n_samples": int(args.n_samples),
+            "num_particles": int(samples.shape[1]),
+            "prior_dist": "axis_aligned_per_jet",
+            "final_scale": float(scale),
+            "use_hyperbolic": True,
+            "hyperbolic_model": "mass_shell",
+            "regulator_mass": float(args.regulator_mass),
+            "provenance": "historical_rng_replay_verified_against_prior_samples",
+            "physical_prior_max_abs_diff": prior_max_abs_diff,
+        },
+        "generated_jet_attrs": attrs,
+        "jet_phi": torch.cat(replay_phi_parts),
+        "masks": torch.cat(replay_mask_parts),
+        "internal_prior": torch.cat(replay_internal_prior_parts),
+    }, os.path.join(args.out_dir, "replay_bundle.pt"))
 
     train_jets = x_train[:][1].cpu()
     train_stage1 = torch.stack([
@@ -199,6 +228,14 @@ def main():
             finite & inside(gen_stage1, train_q999) & inside(gen_features, test_q999)
         ),
     }
+    test_masks = {
+        name: torch.ones(len(test_features), dtype=torch.bool)
+        for name in masks
+    }
+    # Quantile trimming is a sensitivity check, not a production score. Apply the
+    # endpoint component symmetrically so it cannot improve metrics merely by
+    # deleting generated tails while retaining the corresponding real tails.
+    test_masks["combined_q999_sensitivity"] = inside(test_features, test_q999)
 
     test_rel = EtaPhiPtE_to_relEtaPhiPt(test_polar) * test_mask.unsqueeze(-1)
     gen_polar = cartesian_to_EtaPhiPtE(samples)
@@ -207,10 +244,12 @@ def main():
     sensitivity = {}
     for name, mask in masks.items():
         selected = mask.nonzero(as_tuple=False).flatten()
+        selected_test = test_masks[name].nonzero(as_tuple=False).flatten()
         sensitivity[name] = {
             "retained": int(mask.sum()),
             "removed": int((~mask).sum()),
-            "metrics": metric_summary(test_rel, gen_rel[selected]),
+            "test_retained": int(test_masks[name].sum()),
+            "metrics": metric_summary(test_rel[selected_test], gen_rel[selected]),
         }
 
     combined = masks["combined_train_test_range"]
@@ -239,6 +278,29 @@ def main():
         "sensitivity": sensitivity,
         "combined_filtered_full_metrics": filtered_metrics,
     }
+    diagnostics_path = os.path.join(args.eval_dir, "generation_diagnostics.json")
+    if os.path.exists(diagnostics_path):
+        with open(diagnostics_path) as handle:
+            diagnostics = json.load(handle)
+        failed_indices = [
+            int(record["index"])
+            for record in diagnostics.get("noteworthy_trajectories", [])
+            if int(record.get("failure_step", -1)) >= 0
+        ]
+        tail_mask = ~inside(gen_stage1, train_q999)
+        failed = torch.zeros(len(attrs), dtype=torch.bool)
+        failed[failed_indices] = True
+        tail_fail = int((failed & tail_mask).sum())
+        bulk_fail = int((failed & ~tail_mask).sum())
+        report["failure_tail_enrichment"] = {
+            "failed_total": int(failed.sum()),
+            "tail_count": int(tail_mask.sum()),
+            "tail_failures": tail_fail,
+            "bulk_count": int((~tail_mask).sum()),
+            "bulk_failures": bulk_fail,
+            "tail_failure_rate": tail_fail / max(int(tail_mask.sum()), 1),
+            "bulk_failure_rate": bulk_fail / max(int((~tail_mask).sum()), 1),
+        }
     with open(os.path.join(args.out_dir, "filtered_analysis.json"), "w") as handle:
         json.dump(report, handle, indent=2)
     print(json.dumps(report["sensitivity"], indent=2))

@@ -74,6 +74,7 @@ def test_train_defaults_match_legacy_argparse():
 def test_infer_defaults_match_legacy_argparse():
     cfg = InferRunConfig()
     assert cfg.paths.out_dir is None
+    assert cfg.paths.replay_bundle_path is None
     assert cfg.model.n_hidden == 128
     assert cfg.model.n_layers == 3
     assert cfg.model.use_residual is False
@@ -86,6 +87,7 @@ def test_infer_defaults_match_legacy_argparse():
     assert cfg.inference.batch_size == 256
     assert cfg.inference.cfg_guidance_weight == 2.0
     assert cfg.inference.use_cfg is False
+    assert cfg.inference.use_ema_weights is False
     assert cfg.inference.seed == 42
     assert cfg.model.use_hyperbolic is False
     assert cfg.inference.sampler == "euler"

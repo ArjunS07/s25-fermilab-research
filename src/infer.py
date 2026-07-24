@@ -94,7 +94,8 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
                      use_adaln=False, use_attention=False, backbone="legacy",
                      include_mass_condition=False, num_attention_heads=8,
                      vector_channels=16, regulator_mass=0.5,
-                     velocity_readout_init="small_normal", preloaded_ckpt=None):
+                     velocity_readout_init="small_normal", preloaded_ckpt=None,
+                     use_ema_weights=False):
     model = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=num_particles,
@@ -117,8 +118,12 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
 
     ckpt = preloaded_ckpt if preloaded_ckpt is not None else torch.load(checkpoint_path, map_location=device)
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
-        model.load_state_dict(ckpt["model_state_dict"])
+        state_key = "ema_state_dict" if use_ema_weights else "model_state_dict"
+        if state_key not in ckpt:
+            raise ValueError(f"checkpoint does not contain requested {state_key}")
+        model.load_state_dict(ckpt[state_key])
         print(f"Loaded checkpoint (epoch {ckpt.get('epoch', '?')}) from {checkpoint_path}")
+        print(f"Weight view: {'EMA' if use_ema_weights else 'raw'}")
     else:
         # Raw state dict saved with torch.save(model.state_dict(), ...)
         model.load_state_dict(ckpt)
@@ -183,6 +188,7 @@ def main():
         velocity_readout_init=args.velocity_readout_init,
         regulator_mass=args.regulator_mass,
         preloaded_ckpt=ckpt,
+        use_ema_weights=args.use_ema_weights,
     )
 
     # ── Stage 1: Vector field visualisation ───────────────────────────────────
@@ -259,6 +265,7 @@ def main():
                 n_jet_types=len(args.jet_types),
                 device=device,
                 batch_size=args.batch_size,
+                replay_bundle_path=args.replay_bundle_path,
                 **generation_controls_from_namespace(args),
             )
             print(f"Sample generation done. Shape: {samples.shape}")
@@ -268,6 +275,9 @@ def main():
             prior_path = os.path.join(out_dir, "prior_samples.pt")
             torch.save(prior_samples.cpu(), prior_path)
             print(f"Saved exact integration prior → {prior_path}")
+            bundle_path = os.path.join(out_dir, "replay_bundle.pt")
+            if os.path.exists(bundle_path):
+                print(f"Saved exact replay bundle → {bundle_path}")
         except Exception as e:
             print(f"\n[ERROR] Sample generation failed: {e}")
             traceback.print_exc()
@@ -316,12 +326,14 @@ def main():
         "generation": {
             "seed": args.seed,
             "use_cfg": args.use_cfg,
+            "use_ema_weights": args.use_ema_weights,
             "cfg_guidance_weight": args.cfg_guidance_weight,
             "integration_steps": args.integration_steps,
             "integration_end_time": args.integration_end_time,
             "sampler": args.sampler,
             "mass_shell_max_step_rapidity": args.mass_shell_max_step_rapidity,
             "mass_shell_max_substeps": args.mass_shell_max_substeps,
+            "replay_bundle_path": args.replay_bundle_path,
         },
         "git_commit": git_commit,
         "config": train_summary.get("config"),

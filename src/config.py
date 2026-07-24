@@ -139,6 +139,7 @@ class InferenceConfig(BaseModel):
     integration_end_time: float = Field(default=0.99999, gt=0, le=1)
     cfg_guidance_weight: float = 2.0
     use_cfg: bool = False
+    use_ema_weights: bool = False
     seed: int = 42
     batch_size: int = 256
     sampler: Literal["euler", "heun"] = "euler"
@@ -180,6 +181,7 @@ class PathConfig(BaseModel):
     resume_weights: Optional[str] = None
     checkpoint_path: Optional[str] = None
     out_dir: Optional[str] = None
+    replay_bundle_path: Optional[str] = None
     icp_cache_path: Optional[str] = None
     cache_dir: str = "/mnt/data/caches"
 
@@ -320,6 +322,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         integration_end_time=cfg.inference.integration_end_time,
         vf_mode=cfg.inference.vf_mode,
         use_cfg=cfg.inference.use_cfg,
+        use_ema_weights=cfg.inference.use_ema_weights,
         cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
         inference_seed=cfg.inference.seed,
         sampler=cfg.inference.sampler,
@@ -371,6 +374,7 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         checkpoint_path=cfg.paths.checkpoint_path,
         output_path=cfg.paths.output_path,
         out_dir=cfg.paths.out_dir,
+        replay_bundle_path=cfg.paths.replay_bundle_path,
         n_hidden=cfg.model.n_hidden,
         n_layers=cfg.model.n_layers,
         use_residual=cfg.model.use_residual,
