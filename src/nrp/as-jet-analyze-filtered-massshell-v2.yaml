@@ -1,0 +1,66 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-analyze-filtered-massshell-v2
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: as-jet-train-pvc-2
+      containers:
+        - name: analyze
+          image: python:3.10-slim
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              SOURCE_RUN="/mnt/data/output/2026-07-23_04-40-41--36429f69-a6a5-49a0-81fd-8f351f5a9c11-g30-massshell-v2"
+              EVAL_DIR="/mnt/data/output/2026-07-24_09-36-46--223fa887-f057-4d4a-8352-a7e53760b052-g30-massshell-v2-eval/eval"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-massshell-v2-filtered-analysis"
+              ENV_ARCHIVE=/mnt/data/caches/runtime/python-env-py310-torch271.tar
+
+              test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
+              test -f "$EVAL_DIR/samples.pt"
+              mkdir -p /tmp/runtime "$OUT"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              export MPLCONFIGDIR=/mnt/data/caches/matplotlib
+              mkdir -p "$MPLCONFIGDIR"
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+
+              "$PYTHON" experiments/analyze_filtered_mass_shell_batch.py \
+                --source-run "$SOURCE_RUN" \
+                --eval-dir "$EVAL_DIR" \
+                --out-dir "$OUT/analysis" \
+                2>&1 | tee "$OUT/run.log"
+
+              test -s "$OUT/analysis/filtered_analysis.json"
+              test -s "$OUT/analysis/combined_filtered_eval/metrics.csv"
+              echo "Filtered analysis complete: $OUT"
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/data
+          resources:
+            requests:
+              nvidia.com/a40: 1
+              cpu: "2"
+              memory: 24Gi
+            limits:
+              nvidia.com/a40: 1
+              cpu: "2.4"
+              memory: 24Gi
