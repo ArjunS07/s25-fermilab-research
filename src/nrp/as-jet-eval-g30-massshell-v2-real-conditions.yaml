@@ -25,7 +25,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              GIT_COMMIT="70ccc598330fd4a753a8a123474f49b226aaff22"
               SOURCE_RUN="/mnt/data/output/2026-07-23_04-40-41--36429f69-a6a5-49a0-81fd-8f351f5a9c11-g30-massshell-v2"
               CHECKPOINT="$SOURCE_RUN/train/stability_probes/step_100000/checkpoint.pth"
               OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-v2-real-conditions"
