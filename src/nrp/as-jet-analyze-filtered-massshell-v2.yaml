@@ -25,7 +25,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="d5545d098c7741c9c32f4647b4e60dc65188bea0"
+              GIT_COMMIT="69f7b11a6dc81bf187c6be1104f59b10a45d365d"
               SOURCE_RUN="/mnt/data/output/2026-07-23_04-40-41--36429f69-a6a5-49a0-81fd-8f351f5a9c11-g30-massshell-v2"
               EVAL_DIR="/mnt/data/output/2026-07-24_09-36-46--223fa887-f057-4d4a-8352-a7e53760b052-g30-massshell-v2-eval/eval"
               OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-massshell-v2-filtered-analysis"
