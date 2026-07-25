@@ -1,0 +1,82 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-eval-g30-massshell-v2-aux-grid
+spec:
+  completions: 4
+  parallelism: 4
+  completionMode: Indexed
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: as-jet-train-pvc-2
+      containers:
+        - name: eval
+          image: python:3.10-slim
+          env:
+            - name: JOB_COMPLETION_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              GIT_COMMIT="1cff886dc8f9d4a0ed8ffbfb05cc03e2275f1fd6"
+              SHARED="/mnt/data/caches/stage1-v3-eval"
+              BUNDLE="$SHARED/g30-v3-50k-seed42-replay.pt"
+              ENV_ARCHIVE=/mnt/data/caches/runtime/python-env-py310-torch271.tar
+              case "$JOB_COMPLETION_INDEX" in
+                0) ARM=base ;;
+                1) ARM=total ;;
+                2) ARM=gram ;;
+                3) ARM=combined ;;
+                *) exit 2 ;;
+              esac
+              SOURCE="$(ls -dt /mnt/data/output/*-g30-massshell-v2-aux-$ARM | head -n 1)"
+              CHECKPOINT="$SOURCE/train/models/final_checkpoint.pth"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-massshell-v2-aux-$ARM-stage1-v3-eval"
+              test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
+              test -f "$CHECKPOINT"
+              test -s "$BUNDLE"
+              mkdir -p /tmp/runtime "$OUT"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              export MPLCONFIGDIR=/mnt/data/caches/matplotlib
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf '%s\n' "$SOURCE" > "$OUT/source_run.txt"
+              "$PYTHON" infer.py \
+                --config configs/infer-g30-massshell-v2.yaml \
+                --set paths.checkpoint_path="$CHECKPOINT" \
+                --set paths.output_path="$SOURCE" \
+                --set paths.out_dir="$OUT/eval" \
+                --set paths.replay_bundle_path="$BUNDLE" \
+                --set inference.use_ema_weights=true \
+                2>&1 | tee "$OUT/run.log"
+              test -s "$OUT/eval/summary.json"
+              test -s "$OUT/eval/generation_diagnostics.json"
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/data
+          resources:
+            requests:
+              nvidia.com/a40: 1
+              cpu: "2"
+              memory: 24Gi
+            limits:
+              nvidia.com/a40: 1
+              cpu: "2.4"
+              memory: 24Gi
