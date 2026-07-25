@@ -21,7 +21,7 @@ class DataConfig(BaseModel):
 
     jet_types: list[str] = Field(default_factory=lambda: ["g", "q", "t"])
     num_particles: int = 150
-    stage1_model_version: Literal["legacy", "v2"] = "legacy"
+    stage1_model_version: Literal["legacy", "v2", "v3"] = "legacy"
 
 
 class InferDataConfig(DataConfig):

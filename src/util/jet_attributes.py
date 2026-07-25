@@ -30,6 +30,11 @@ def load_model(model_path, device=torch.device("cpu")):
         model_v2 = JetAttributeModelV2(**model["config"])
         model_v2.load_state_dict(model["state_dict"])
         return model_v2.to(device)
+    if isinstance(model, dict) and model.get("format") == "jet_attribute_v3_state_dict":
+        from jet_attr_model_v3 import JetAttributeFlowV3
+        model_v3 = JetAttributeFlowV3(**model["config"])
+        model_v3.load_state_dict(model["state_dict"])
+        return model_v3.to(device)
     return model
 
 def one_hot_enc_jet_type(y, num_classes=NUM_CLASSES):

@@ -34,10 +34,17 @@ def stage1_spec(jet_types: list[str], num_particles: int, model_version: str = "
         "cache_version": CACHE_VERSION,
         "jet_types": sorted(set(jet_types), key=JET_TYPE_TO_INDEX.__getitem__),
         "num_particles": int(num_particles),
-        "model": (MODEL_SPEC if model_version == "legacy" else {
-            "version": "discrete-mixture-v2", "num_epochs": 2000,
-            "mixtures": 8, "hidden": 128,
-        }),
+        "model": (
+            MODEL_SPEC if model_version == "legacy" else
+            {
+                "version": "discrete-mixture-v2", "num_epochs": 2000,
+                "mixtures": 8, "hidden": 128,
+            } if model_version == "v2" else {
+                "version": "categorical-spline-flow-v3",
+                "max_steps": 20_000, "num_flows": 10,
+                "hidden_layers": 4, "hidden_units": 128,
+            }
+        ),
     }
 
 
@@ -108,6 +115,11 @@ def publish_bundle(source: Path, destination: Path, spec: dict, source_label: st
     try:
         shutil.copytree(source / "data", staging / "data")
         shutil.copy2(source / "jet_attr_model.pth", staging / "jet_attr_model.pth")
+        if (source / "stage1_v3_training.json").is_file():
+            shutil.copy2(
+                source / "stage1_v3_training.json",
+                staging / "stage1_v3_training.json",
+            )
         (staging / "stage1_metadata.json").write_text(json.dumps({
             "spec": spec,
             "source": source_label,
@@ -128,6 +140,10 @@ def link_bundle(bundle: Path, output: Path) -> None:
         if target.exists() or target.is_symlink():
             raise FileExistsError(f"refusing to replace existing Stage-1 output: {target}")
         target.symlink_to(bundle / name, target_is_directory=(name == "data"))
+    if (bundle / "stage1_v3_training.json").is_file():
+        (output / "stage1_v3_training.json").symlink_to(
+            bundle / "stage1_v3_training.json"
+        )
     (output / "stage1_source.txt").write_text(str(bundle.resolve()) + "\n")
 
 
@@ -147,8 +163,12 @@ def resolve_stage1(
         return bundle, True
 
     if import_run is not None:
-        if model_version == "v2" and not (import_run / "stage1_metadata.json").is_file():
-            raise ValueError("Stage-1 v2 cannot import an unversioned legacy attribute model")
+        if model_version in ("v2", "v3") and not (
+            import_run / "stage1_metadata.json"
+        ).is_file():
+            raise ValueError(
+                f"Stage-1 {model_version} cannot import an unversioned attribute model"
+            )
         validate_bundle(import_run, spec, require_metadata=False)
         publish_bundle(import_run, bundle, spec, str(import_run.resolve()))
         link_bundle(bundle, output)
@@ -160,9 +180,13 @@ def resolve_stage1(
         sys.executable, str(repo_src / "data.py"), "--jet_types", *spec["jet_types"],
         "--num_particles", str(num_particles), "--output_path", str(output),
     ], check=True, cwd=repo_src)
-    model_script = "jet_attr_model_v2.py" if model_version == "v2" else "jet_attr_model.py"
+    model_script = {
+        "legacy": "jet_attr_model.py",
+        "v2": "jet_attr_model_v2.py",
+        "v3": "jet_attr_model_v3.py",
+    }[model_version]
     command = [sys.executable, str(repo_src / model_script), "--output_path", str(output)]
-    if model_version == "v2":
+    if model_version in ("v2", "v3"):
         command.extend(["--max_particles", str(num_particles)])
     subprocess.run(command, check=True, cwd=repo_src)
     validate_bundle(output, spec, require_metadata=False)
@@ -178,7 +202,7 @@ def main() -> None:
     parser.add_argument("--jet-types", nargs="+", required=True)
     parser.add_argument("--num-particles", type=int, required=True)
     parser.add_argument("--import-run", type=Path)
-    parser.add_argument("--model-version", choices=("legacy", "v2"), default="legacy")
+    parser.add_argument("--model-version", choices=("legacy", "v2", "v3"), default="legacy")
     args = parser.parse_args()
     bundle, reused = resolve_stage1(
         args.output_path, args.cache_dir, args.jet_types, args.num_particles, args.import_run,

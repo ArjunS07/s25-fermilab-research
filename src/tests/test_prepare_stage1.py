@@ -40,6 +40,13 @@ def test_cache_key_is_order_independent_for_same_type_set():
     assert cache_key(stage1_spec(["q", "g"], 30)) == cache_key(stage1_spec(["g", "q"], 30))
 
 
+def test_v3_cache_spec_is_distinct_and_records_hybrid_flow():
+    v2 = stage1_spec(["g"], 30, "v2")
+    v3 = stage1_spec(["g"], 30, "v3")
+    assert cache_key(v2) != cache_key(v3)
+    assert v3["model"]["version"] == "categorical-spline-flow-v3"
+
+
 def test_imports_validated_legacy_bundle_then_reuses_cache(tmp_path):
     legacy = tmp_path / "legacy"
     _legacy_bundle(legacy)
