@@ -76,7 +76,7 @@ class GradientCalibration:
         self,
         single_fraction: float = 0.2,
         combined_fraction: float = 0.1,
-        minimum_weight: float = 1e-4,
+        minimum_weight: float = 1e-8,
         maximum_weight: float = 10.0,
     ) -> dict:
         if self.batches == 0:

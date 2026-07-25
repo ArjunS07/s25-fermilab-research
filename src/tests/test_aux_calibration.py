@@ -43,7 +43,7 @@ def test_gradient_calibration_clamps_weights():
         [parameter],
     )
     result = calibration.result()
-    assert result["weights"]["gram_only"] == 1e-4
+    assert result["weights"]["gram_only"] == 1e-8
     assert result["weights"]["total_momentum_only"] == 10.0
 
 
