@@ -32,7 +32,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              GIT_COMMIT="acc52cdd6e88ef59e333d36f608d6673f50b0b8c"
               STAGE2="/mnt/data/output/2026-07-23_04-40-41--36429f69-a6a5-49a0-81fd-8f351f5a9c11-g30-massshell-v2"
               STAGE1="$(ls -dt /mnt/data/output/*-stage1-g30-v3 | head -n 1)"
               SHARED="/mnt/data/caches/stage1-v3-eval"
