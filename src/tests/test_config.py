@@ -44,6 +44,7 @@ def test_train_defaults_match_legacy_argparse():
     assert cfg.training.aux_total_momentum_weight == 0.0
     assert cfg.training.aux_warmup_steps == 0
     assert cfg.training.aux_normalization_eps == 1e-12
+    assert cfg.training.aux_calibration_batches == 0
     assert cfg.training.sigma_min == 1e-4
     assert cfg.training.train_space == "cartesian"
     assert cfg.training.time_sampling == "power_law"
@@ -283,6 +284,7 @@ def test_train_config_to_namespace_attribute_names():
     assert ns.lr == 6e-4
     assert ns.aux_gram_weight == 0.0
     assert ns.aux_total_momentum_weight == 0.0
+    assert ns.aux_calibration_batches == 0
 
 
 def test_auxiliary_losses_require_mass_shell_geometry():
@@ -315,6 +317,11 @@ def test_mass_shell_auxiliary_config_is_valid():
     assert ns.aux_gram_weight == 0.2
     assert ns.aux_total_momentum_weight == 0.3
     assert ns.aux_warmup_steps == 500
+
+
+def test_calibration_mode_requires_mass_shell_references():
+    with pytest.raises(ValidationError, match="mass-shell auxiliary losses require"):
+        TrainRunConfig(training={"aux_calibration_batches": 64})
 
 
 def test_infer_config_to_namespace_attribute_names():

@@ -91,6 +91,7 @@ class TrainingConfig(BaseModel):
     aux_total_momentum_weight: float = Field(default=0.0, ge=0)
     aux_warmup_steps: int = Field(default=0, ge=0)
     aux_normalization_eps: float = Field(default=1e-12, gt=0)
+    aux_calibration_batches: int = Field(default=0, ge=0)
     sigma_min: float = 1e-4
     train_space: Literal["cartesian", "polar"] = "cartesian"
     time_sampling: Literal["uniform", "power_law", "lognorm"] = "power_law"
@@ -235,6 +236,7 @@ class TrainRunConfig(BaseModel):
         has_auxiliary = (
             self.training.aux_gram_weight > 0
             or self.training.aux_total_momentum_weight > 0
+            or self.training.aux_calibration_batches > 0
         )
         if has_auxiliary and (
             not self.model.use_hyperbolic
@@ -245,7 +247,10 @@ class TrainRunConfig(BaseModel):
                 "and model.hyperbolic_model='mass_shell'"
             )
         if (
-            self.training.aux_total_momentum_weight > 0
+            (
+                self.training.aux_total_momentum_weight > 0
+                or self.training.aux_calibration_batches > 0
+            )
             and not self.model.use_reference_vectors
         ):
             raise ValueError(
@@ -345,6 +350,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         aux_total_momentum_weight=cfg.training.aux_total_momentum_weight,
         aux_warmup_steps=cfg.training.aux_warmup_steps,
         aux_normalization_eps=cfg.training.aux_normalization_eps,
+        aux_calibration_batches=cfg.training.aux_calibration_batches,
         sigma_min=cfg.training.sigma_min,
         train_space=cfg.training.train_space,
         time_sampling=cfg.training.time_sampling,

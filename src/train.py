@@ -31,6 +31,7 @@ from util.mass_shell_aux import (
     gram_transport_loss,
     total_momentum_transport_loss,
 )
+from util.aux_calibration import GradientCalibration, shared_backbone_parameters
 from util.coordinates import (deterministic_jet_phi,
                               transform_rel_particle_coordinates_to_cartesian)
 from jetnet.utils import EtaPhiPtE_to_cartesian, cartesian_to_EtaPhiPtE
@@ -174,6 +175,13 @@ if __name__ == "__main__":
             print(f"Resumed from checkpoint at epoch {start_epoch - 1}; "
                   f"running {args.num_epochs} more epochs ({start_epoch}→{start_epoch + args.num_epochs - 1}).")
     aux_start_step = global_optimizer_step
+    calibration = (
+        GradientCalibration() if args.aux_calibration_batches > 0 else None
+    )
+    calibration_parameters = (
+        shared_backbone_parameters(model) if calibration is not None else None
+    )
+    calibration_complete = False
 
     if args.distributed:
         # find_unused_parameters=True: the final layer's global/node-update sub-branch
@@ -432,7 +440,8 @@ if __name__ == "__main__":
         if args.distributed:
             dist.barrier()
 
-    run_stability_probe(global_optimizer_step, start_epoch - 1)
+    if calibration is None:
+        run_stability_probe(global_optimizer_step, start_epoch - 1)
 
     
     total_epochs = start_epoch + args.num_epochs
@@ -598,12 +607,12 @@ if __name__ == "__main__":
                 base_loss = mass_shell_loss(pred_tan, u_t, true_masks, m)
                 gram_loss = base_loss.new_zeros(())
                 total_momentum_loss = base_loss.new_zeros(())
-                if args.aux_gram_weight > 0:
+                if args.aux_gram_weight > 0 or calibration is not None:
                     gram_loss = gram_transport_loss(
                         x_t, pred_tan, u_t, true_masks,
                         eps=args.aux_normalization_eps,
                     )
-                if args.aux_total_momentum_weight > 0:
+                if args.aux_total_momentum_weight > 0 or calibration is not None:
                     total_momentum_loss = total_momentum_transport_loss(
                         pred_tan, u_t, true_masks, ref_vectors[:, 0],
                         eps=args.aux_normalization_eps,
@@ -655,6 +664,29 @@ if __name__ == "__main__":
                 gram_loss = loss.new_zeros(())
                 total_momentum_loss = loss.new_zeros(())
                 aux_warmup = 0.0
+
+            if calibration is not None:
+                calibration.update(
+                    {
+                        "base": base_loss,
+                        "gram": gram_loss,
+                        "total_momentum": total_momentum_loss,
+                    },
+                    calibration_parameters,
+                )
+                if is_rank0:
+                    print(
+                        f"Aux calibration batch "
+                        f"{calibration.batches}/{args.aux_calibration_batches}"
+                    )
+                calibration_complete = (
+                    calibration.batches >= args.aux_calibration_batches
+                )
+                del x_1, x_0, t, x_t, pred, loss, base_loss
+                del gram_loss, total_momentum_loss
+                if calibration_complete:
+                    break
+                continue
 
             accumulated_batches += 1
             is_last_accum_step = (((i + 1) % accumulation_steps == 0)
@@ -758,6 +790,9 @@ if __name__ == "__main__":
             if reached_optimizer_limit:
                 break
 
+        if calibration_complete:
+            break
+
         if args.distributed:
             loss_tensor = torch.tensor(epoch_loss / epoch_optimizer_steps, device=device)
             dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
@@ -788,6 +823,32 @@ if __name__ == "__main__":
             scheduler.step()
         if reached_optimizer_limit:
             break
+
+    if calibration is not None:
+        if not calibration_complete:
+            raise RuntimeError(
+                f"requested {args.aux_calibration_batches} calibration batches, "
+                f"but only observed {calibration.batches}"
+            )
+        if world_size != 1:
+            raise RuntimeError("auxiliary calibration currently requires world_size=1")
+        if is_rank0:
+            calibration_result = calibration.result()
+            calibration_result.update({
+                "checkpoint_optimizer_step": global_optimizer_step,
+                "continuation_start_step": aux_start_step,
+                "shared_parameter_count": sum(
+                    parameter.numel() for parameter in calibration_parameters
+                ),
+            })
+            calibration_path = f"{model_output_path}/aux_calibration.json"
+            with open(calibration_path, "w") as handle:
+                json.dump(calibration_result, handle, indent=2)
+            print(f"Auxiliary gradient calibration saved to {calibration_path}")
+        if args.distributed:
+            dist.barrier()
+            dist.destroy_process_group()
+        sys.exit(0)
 
     if args.distributed:
         dist.barrier()          # all ranks finish training before rank 0 does inference
