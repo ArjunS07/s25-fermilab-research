@@ -387,6 +387,7 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         batch_size=cfg.inference.batch_size,
         cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
         use_cfg=cfg.inference.use_cfg,
+        use_ema_weights=cfg.inference.use_ema_weights,
         seed=cfg.inference.seed,
         use_hyperbolic=cfg.model.use_hyperbolic,
         hyperbolic_model=cfg.model.hyperbolic_model,

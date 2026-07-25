@@ -76,6 +76,20 @@ def inside(values, bounds):
     return ((values >= lower) & (values <= upper)).all(dim=1)
 
 
+def json_ready(value):
+    if isinstance(value, dict):
+        return {key: json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_ready(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if torch.is_tensor(value):
+        return value.detach().cpu().tolist()
+    return value
+
+
 def metric_summary(test_rel, gen_rel):
     n = min(len(test_rel), len(gen_rel))
     test = test_rel[:n, :, :3]
@@ -302,7 +316,7 @@ def main():
             "bulk_failure_rate": bulk_fail / max(int((~tail_mask).sum()), 1),
         }
     with open(os.path.join(args.out_dir, "filtered_analysis.json"), "w") as handle:
-        json.dump(report, handle, indent=2)
+        json.dump(json_ready(report), handle, indent=2)
     print(json.dumps(report["sensitivity"], indent=2))
 
 

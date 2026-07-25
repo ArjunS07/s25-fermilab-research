@@ -104,6 +104,7 @@ def test_infer_defaults_match_legacy_argparse():
     assert cfg.inference.stability_probe_samples == 64
     assert cfg.inference.stability_probe_integration_steps == 8
     assert cfg.model.velocity_readout_init == "small_normal"
+    assert infer_config_to_namespace(cfg).use_ema_weights is False
 
 
 def test_cache_defaults_match_legacy_argparse():
