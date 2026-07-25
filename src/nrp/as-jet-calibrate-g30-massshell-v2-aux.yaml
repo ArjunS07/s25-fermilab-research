@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-calibrate-g30-massshell-v2-aux
+  name: as-jet-calibrate-g30-massshell-v2-aux-v2
 spec:
   ttlSecondsAfterFinished: 86400
   backoffLimit: 0
@@ -25,7 +25,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="1ae94a36a06b9ba1aca295fc433019f33a455206"
+              GIT_COMMIT="0f44b940e3d61d5e988b9c7f054963b438759a9d"
               SOURCE_RUN="/mnt/data/output/2026-07-23_04-40-41--36429f69-a6a5-49a0-81fd-8f351f5a9c11-g30-massshell-v2"
               RESUME="$SOURCE_RUN/train/models/final_checkpoint.pth"
               ENV_ARCHIVE=/mnt/data/caches/runtime/python-env-py310-torch271.tar
