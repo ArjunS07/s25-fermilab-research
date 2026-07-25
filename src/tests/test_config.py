@@ -40,6 +40,10 @@ def test_train_defaults_match_legacy_argparse():
     assert cfg.training.stability_probe_steps == []
     assert cfg.training.stability_probe_save_checkpoints is False
     assert cfg.training.qualification_min_loss_improvement is None
+    assert cfg.training.aux_gram_weight == 0.0
+    assert cfg.training.aux_total_momentum_weight == 0.0
+    assert cfg.training.aux_warmup_steps == 0
+    assert cfg.training.aux_normalization_eps == 1e-12
     assert cfg.training.sigma_min == 1e-4
     assert cfg.training.train_space == "cartesian"
     assert cfg.training.time_sampling == "power_law"
@@ -277,6 +281,40 @@ def test_train_config_to_namespace_attribute_names():
     assert ns.prior_dist == "isotropic_com"
     assert ns.distributed is False
     assert ns.lr == 6e-4
+    assert ns.aux_gram_weight == 0.0
+    assert ns.aux_total_momentum_weight == 0.0
+
+
+def test_auxiliary_losses_require_mass_shell_geometry():
+    with pytest.raises(ValidationError, match="mass-shell auxiliary losses require"):
+        TrainRunConfig(training={"aux_gram_weight": 0.1})
+
+
+def test_total_momentum_loss_requires_reference_vectors():
+    with pytest.raises(ValidationError, match="lab-time reference"):
+        TrainRunConfig(
+            model={"use_hyperbolic": True, "hyperbolic_model": "mass_shell"},
+            training={"aux_total_momentum_weight": 0.1},
+        )
+
+
+def test_mass_shell_auxiliary_config_is_valid():
+    cfg = TrainRunConfig(
+        model={
+            "use_hyperbolic": True,
+            "hyperbolic_model": "mass_shell",
+            "use_reference_vectors": True,
+        },
+        training={
+            "aux_gram_weight": 0.2,
+            "aux_total_momentum_weight": 0.3,
+            "aux_warmup_steps": 500,
+        },
+    )
+    ns = train_config_to_namespace(cfg)
+    assert ns.aux_gram_weight == 0.2
+    assert ns.aux_total_momentum_weight == 0.3
+    assert ns.aux_warmup_steps == 500
 
 
 def test_infer_config_to_namespace_attribute_names():

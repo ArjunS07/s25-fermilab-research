@@ -26,6 +26,11 @@ from util.mass_shell import (
     conditional_vector_field as ms_vector_field,
     pushforward_to_tangent as ms_pushforward, mass_shell_loss,
 )
+from util.mass_shell_aux import (
+    auxiliary_warmup,
+    gram_transport_loss,
+    total_momentum_transport_loss,
+)
 from util.coordinates import (deterministic_jet_phi,
                               transform_rel_particle_coordinates_to_cartesian)
 from jetnet.utils import EtaPhiPtE_to_cartesian, cartesian_to_EtaPhiPtE
@@ -168,6 +173,7 @@ if __name__ == "__main__":
         if is_rank0:
             print(f"Resumed from checkpoint at epoch {start_epoch - 1}; "
                   f"running {args.num_epochs} more epochs ({start_epoch}→{start_epoch + args.num_epochs - 1}).")
+    aux_start_step = global_optimizer_step
 
     if args.distributed:
         # find_unused_parameters=True: the final layer's global/node-update sub-branch
@@ -499,6 +505,10 @@ if __name__ == "__main__":
         # Guard for local testing
         accumulation_steps = min(args.target_batch_size // args.batch_size, args.n_train_samples // args.batch_size - 1)
         accumulated_loss = 0
+        accumulated_base_loss = 0
+        accumulated_gram_loss = 0
+        accumulated_total_momentum_loss = 0
+        accumulated_aux_warmup = 0
         accumulated_batches = 0
 
         for i, (batch_jet_info, batch_particle_info, batch_jet_phi, batch_x0_cached) in enumerate(train_loader):
@@ -585,7 +595,26 @@ if __name__ == "__main__":
                                      jet_conditions=batch_jet_info_cropped.to(model_dtype),
                                      mask=true_masks, ref_vectors=model_refs)
                 pred_tan = ms_pushforward(x_t, pred.to(torch.float64), m) * mask_exp64
-                loss = mass_shell_loss(pred_tan, u_t, true_masks, m)
+                base_loss = mass_shell_loss(pred_tan, u_t, true_masks, m)
+                gram_loss = base_loss.new_zeros(())
+                total_momentum_loss = base_loss.new_zeros(())
+                if args.aux_gram_weight > 0:
+                    gram_loss = gram_transport_loss(
+                        x_t, pred_tan, u_t, true_masks,
+                        eps=args.aux_normalization_eps,
+                    )
+                if args.aux_total_momentum_weight > 0:
+                    total_momentum_loss = total_momentum_transport_loss(
+                        pred_tan, u_t, true_masks, ref_vectors[:, 0],
+                        eps=args.aux_normalization_eps,
+                    )
+                aux_warmup = auxiliary_warmup(
+                    global_optimizer_step, aux_start_step, args.aux_warmup_steps
+                )
+                loss = base_loss + aux_warmup * (
+                    args.aux_gram_weight * gram_loss
+                    + args.aux_total_momentum_weight * total_momentum_loss
+                )
             elif args.use_hyperbolic:
                 # Riemannian flow matching: geodesic interpolant in the Poincaré ball.
                 # x_t is returned in Cartesian for the model; y_t and u_t_ball stay in the ball.
@@ -601,6 +630,10 @@ if __name__ == "__main__":
                 # the Riemannian loss ||v_theta - u_t||^2_g (Equation 14).
                 pred_ball = pushforward(x_t, pred) * mask_exp
                 loss = hyperbolic_loss(pred_ball, u_t_ball, y_t, mask=true_masks)
+                base_loss = loss
+                gram_loss = loss.new_zeros(())
+                total_momentum_loss = loss.new_zeros(())
+                aux_warmup = 0.0
             else:
                 # Euclidean flow matching (polar or Cartesian interpolation).
                 if args.train_space == 'polar':
@@ -618,6 +651,10 @@ if __name__ == "__main__":
 
                 n_real = true_masks.sum().clamp(min=1)
                 loss = ((conditional_u_t - pred).square() * mask_exp).sum() / (n_real * NUM_PARTICLE_FEATURES)
+                base_loss = loss
+                gram_loss = loss.new_zeros(())
+                total_momentum_loss = loss.new_zeros(())
+                aux_warmup = 0.0
 
             accumulated_batches += 1
             is_last_accum_step = (((i + 1) % accumulation_steps == 0)
@@ -626,6 +663,10 @@ if __name__ == "__main__":
             with ctx:
                 loss.backward()
             accumulated_loss += loss.item()
+            accumulated_base_loss += base_loss.item()
+            accumulated_gram_loss += gram_loss.item()
+            accumulated_total_momentum_loss += total_momentum_loss.item()
+            accumulated_aux_warmup += aux_warmup
 
             if is_last_accum_step:
                 grad_stats = {}
@@ -662,6 +703,12 @@ if __name__ == "__main__":
                     ema.update(raw_model)
 
                 optimizer_loss = accumulated_loss / accumulated_batches
+                optimizer_base_loss = accumulated_base_loss / accumulated_batches
+                optimizer_gram_loss = accumulated_gram_loss / accumulated_batches
+                optimizer_total_momentum_loss = (
+                    accumulated_total_momentum_loss / accumulated_batches
+                )
+                optimizer_aux_warmup = accumulated_aux_warmup / accumulated_batches
                 epoch_loss += optimizer_loss
                 epoch_optimizer_steps += 1
                 global_optimizer_step += 1
@@ -670,13 +717,23 @@ if __name__ == "__main__":
                     write_header = not os.path.exists(optimizer_log)
                     with open(optimizer_log, "a") as f:
                         if write_header:
-                            f.write("optimizer_step,epoch,minibatch,loss,unclipped_grad_norm,gradients_finite\n")
+                            f.write(
+                                "optimizer_step,epoch,minibatch,loss,"
+                                "unclipped_grad_norm,gradients_finite,"
+                                "base_loss,gram_loss,total_momentum_loss,aux_warmup\n"
+                            )
                         gradients_finite = bool(torch.isfinite(unclipped_grad_norm).item())
                         f.write(
                             f"{global_optimizer_step},{epoch},{i},{optimizer_loss},"
-                            f"{float(unclipped_grad_norm)},{int(gradients_finite)}\n"
+                            f"{float(unclipped_grad_norm)},{int(gradients_finite)},"
+                            f"{optimizer_base_loss},{optimizer_gram_loss},"
+                            f"{optimizer_total_momentum_loss},{optimizer_aux_warmup}\n"
                         )
                 accumulated_loss = 0
+                accumulated_base_loss = 0
+                accumulated_gram_loss = 0
+                accumulated_total_momentum_loss = 0
+                accumulated_aux_warmup = 0
                 accumulated_batches = 0
 
                 if torch.cuda.is_available():
@@ -694,7 +751,8 @@ if __name__ == "__main__":
 
                 run_stability_probe(global_optimizer_step, epoch)
                 
-            del x_1, x_0, t, x_t, pred, loss
+            del x_1, x_0, t, x_t, pred, loss, base_loss
+            del gram_loss, total_momentum_loss
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             if reached_optimizer_limit:

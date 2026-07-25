@@ -87,6 +87,10 @@ class TrainingConfig(BaseModel):
     stability_probe_steps: list[int] = Field(default_factory=list)
     stability_probe_save_checkpoints: bool = False
     qualification_min_loss_improvement: float | None = Field(default=None, ge=0, le=1)
+    aux_gram_weight: float = Field(default=0.0, ge=0)
+    aux_total_momentum_weight: float = Field(default=0.0, ge=0)
+    aux_warmup_steps: int = Field(default=0, ge=0)
+    aux_normalization_eps: float = Field(default=1e-12, gt=0)
     sigma_min: float = 1e-4
     train_space: Literal["cartesian", "polar"] = "cartesian"
     time_sampling: Literal["uniform", "power_law", "lognorm"] = "power_law"
@@ -226,6 +230,30 @@ class TrainRunConfig(BaseModel):
     inference: InferenceConfig = Field(default_factory=InferenceConfig)
     paths: PathConfig = Field(default_factory=PathConfig)
 
+    @model_validator(mode="after")
+    def validate_mass_shell_auxiliary_losses(self):
+        has_auxiliary = (
+            self.training.aux_gram_weight > 0
+            or self.training.aux_total_momentum_weight > 0
+        )
+        if has_auxiliary and (
+            not self.model.use_hyperbolic
+            or self.model.hyperbolic_model != "mass_shell"
+        ):
+            raise ValueError(
+                "mass-shell auxiliary losses require model.use_hyperbolic=true "
+                "and model.hyperbolic_model='mass_shell'"
+            )
+        if (
+            self.training.aux_total_momentum_weight > 0
+            and not self.model.use_reference_vectors
+        ):
+            raise ValueError(
+                "training.aux_total_momentum_weight requires "
+                "model.use_reference_vectors=true for the lab-time reference"
+            )
+        return self
+
 
 class InferRunConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -313,6 +341,10 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         stability_probe_steps=cfg.training.stability_probe_steps,
         stability_probe_save_checkpoints=cfg.training.stability_probe_save_checkpoints,
         qualification_min_loss_improvement=cfg.training.qualification_min_loss_improvement,
+        aux_gram_weight=cfg.training.aux_gram_weight,
+        aux_total_momentum_weight=cfg.training.aux_total_momentum_weight,
+        aux_warmup_steps=cfg.training.aux_warmup_steps,
+        aux_normalization_eps=cfg.training.aux_normalization_eps,
         sigma_min=cfg.training.sigma_min,
         train_space=cfg.training.train_space,
         time_sampling=cfg.training.time_sampling,
