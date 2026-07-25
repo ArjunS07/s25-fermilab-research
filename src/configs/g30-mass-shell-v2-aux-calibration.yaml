@@ -22,11 +22,9 @@ training:
   batch_size: 50
   target_batch_size: 250
   cfg_null_dropout_rate: 0.0
-  num_epochs: 50
+  num_epochs: 1
   max_optimizer_steps: 120000
-  stability_probe_steps: [105000, 110000, 120000]
-  stability_probe_save_checkpoints: true
-  qualification_min_loss_improvement: null
+  aux_calibration_batches: 64
   train_space: cartesian
   time_sampling: uniform
   use_time_sampling: false
@@ -36,24 +34,17 @@ training:
   icp_assignment_cost: squared_geodesic
   use_ema: true
   ema_decay: 0.999
-  # The original cosine is exhausted at 100k. Loading the optimizer state while
-  # disabling its scheduler keeps the terminal 1.8e-5 LR constant.
   use_cosine_lr: false
   lr: 0.000018
 
 inference:
-  n_samples: 50000
-  batch_size: 128
-  integration_steps: 64
+  n_samples: 128
+  integration_steps: 8
   prior_dist: axis_aligned_per_jet
   sampler: euler
   mass_shell_max_step_rapidity: 0.5
   mass_shell_max_substeps: 64
-  warn_invalid_fraction: 0.0
-  max_invalid_fraction: 0.001
-  stability_probe_samples: 64
-  stability_probe_integration_steps: 8
-  skip_metrics: false
+  skip_metrics: true
 
 paths:
   cache_dir: /mnt/data/caches

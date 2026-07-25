@@ -27,6 +27,9 @@ training:
   stability_probe_steps: [105000, 110000, 120000]
   stability_probe_save_checkpoints: true
   qualification_min_loss_improvement: null
+  aux_gram_weight: 0.0
+  aux_total_momentum_weight: 0.0
+  aux_warmup_steps: 1000
   train_space: cartesian
   time_sampling: uniform
   use_time_sampling: false
@@ -36,8 +39,8 @@ training:
   icp_assignment_cost: squared_geodesic
   use_ema: true
   ema_decay: 0.999
-  # The original cosine is exhausted at 100k. Loading the optimizer state while
-  # disabling its scheduler keeps the terminal 1.8e-5 LR constant.
+  # The original cosine schedule is exhausted at 100k. Preserve optimizer/EMA
+  # state but hold its terminal learning rate fixed for all four arms.
   use_cosine_lr: false
   lr: 0.000018
 
