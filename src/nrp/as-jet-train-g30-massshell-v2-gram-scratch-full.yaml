@@ -1,0 +1,93 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-train-g30-massshell-v2-gram-scratch-full
+spec:
+  completions: 2
+  parallelism: 2
+  completionMode: Indexed
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: as-jet-train-pvc-2
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - name: JOB_COMPLETION_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              GIT_COMMIT="64beed1540a83ec3a95e7d294d6b1ed7ca954664"
+              CONTROL_5K="$(ls -dt /mnt/data/output/*-g30-massshell-v2-scratch-control-5k | head -n 1)"
+              GRAM_5K="$(ls -dt /mnt/data/output/*-g30-massshell-v2-scratch-gram50-5k | head -n 1)"
+              CAL_RUN="$(ls -dt /mnt/data/output/*-g30-massshell-v2-gram-scratch-cal-5k | head -n 1)"
+              CALIBRATION="$CAL_RUN/train/aux_calibration.json"
+              ENV_ARCHIVE=/mnt/data/caches/runtime/python-env-py310-torch271.tar
+              test -s "$CALIBRATION"
+              mkdir -p /tmp/runtime
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              GRAM_WEIGHT="$("$PYTHON" -c 'import json,sys; c=json.load(open(sys.argv[1])); print(2.5*c["weights"]["gram_only"])' "$CALIBRATION")"
+              case "$JOB_COMPLETION_INDEX" in
+                0)
+                  ARM=control
+                  GRAM=0
+                  RESUME="$CONTROL_5K/train/stability_probes/step_005000/checkpoint.pth"
+                  ;;
+                1)
+                  ARM=gram50
+                  GRAM="$GRAM_WEIGHT"
+                  RESUME="$GRAM_5K/train/stability_probes/step_005000/checkpoint.pth"
+                  ;;
+                *) exit 2 ;;
+              esac
+              test -f "$RESUME"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-massshell-v2-scratch-$ARM-full"
+              mkdir -p "$OUT"
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf '%s\n' "$RESUME" > "$OUT/source_checkpoint.txt"
+              cp "$CALIBRATION" "$OUT/gram_calibration_5k.json"
+              printf 'arm=%s\ngram_weight=%s\ntarget_gradient_fraction=0.5\n' \
+                "$ARM" "$GRAM" > "$OUT/arm.txt"
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" \
+                --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 \
+                --model-version v3
+              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+                --config configs/g30-mass-shell-v2-gram-scratch-full.yaml \
+                --set paths.output_path="$OUT" \
+                --set paths.resume_weights="$RESUME" \
+                --set training.aux_gram_weight="$GRAM" \
+                2>&1 | tee "$OUT/run.log"
+              test -s "$OUT/train/models/final_checkpoint.pth"
+              test -s "$OUT/train/metrics.csv"
+              test -s "$OUT/train/generation_diagnostics.json"
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/data
+          resources:
+            requests:
+              nvidia.com/a40: 1
+              cpu: "2"
+              memory: 24Gi
+            limits:
+              nvidia.com/a40: 1
+              cpu: "2.4"
+              memory: 24Gi
