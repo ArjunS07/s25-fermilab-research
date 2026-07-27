@@ -763,6 +763,21 @@ if __name__ == "__main__":
                             f"{optimizer_base_loss},{optimizer_gram_loss},"
                             f"{optimizer_total_momentum_loss},{optimizer_aux_warmup}\n"
                         )
+                    if args.jet_token_mode != "none":
+                        token_log = f"{model_output_path}/jet_token_diagnostics.csv"
+                        token_diagnostics = raw_model.tangent_backbone.last_token_diagnostics
+                        row = {
+                            key: float(torch.stack([block[key] for block in token_diagnostics]).mean())
+                            for key in token_diagnostics[0]
+                        }
+                        token_header = not os.path.exists(token_log)
+                        with open(token_log, "a") as token_file:
+                            if token_header:
+                                token_file.write("optimizer_step," + ",".join(row) + "\n")
+                            token_file.write(
+                                f"{global_optimizer_step}," +
+                                ",".join(str(row[key]) for key in row) + "\n"
+                            )
                 accumulated_loss = 0
                 accumulated_base_loss = 0
                 accumulated_gram_loss = 0
