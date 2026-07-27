@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-cache-icp-g30-massshell-v2
+  name: as-jet-cache-icp-g30-massshell
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -39,7 +39,7 @@ spec:
               "$PYTHON" prepare_stage1.py --output-path "$OUT" \
                 --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 \
                 --model-version v2
-              "$PYTHON" cache_icp.py --config configs/cache-icp-g30-massshell-v2.yaml \
+              "$PYTHON" cache_icp.py --config configs/cache-icp-g30-mass-shell.yaml \
                 --set paths.output_path="$OUT"
           volumeMounts:
             - name: data
