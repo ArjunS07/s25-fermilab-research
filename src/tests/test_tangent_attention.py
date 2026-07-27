@@ -1,6 +1,7 @@
 import torch
 
 from models.LEFT_JeN import LEFTJeN
+from models.tangent_attention import mass_shell_barycenter
 from tests.lorentz_test_utils import apply_transform, random_proper_transform
 from util.mass_shell import parallel_transport, project_to_shell
 from util.minkowski_utils import dotsq4, normsq4
@@ -20,13 +21,14 @@ def _inputs(dtype=torch.float64):
     return x, t, cond, mask, refs, mass
 
 
-def _model(mass):
+def _model(mass, jet_token_mode="none"):
     torch.manual_seed(4)
     return LEFTJeN(
         max_num_jet_types=5, max_particles=6, hidden_dim=32, num_layers=2,
         include_pt=True, use_reference_vectors=True, backbone="tangent_attention",
         include_mass_condition=True, num_attention_heads=4, vector_channels=4,
         regulator_mass=mass,
+        jet_token_mode=jet_token_mode,
     ).eval()
 
 
@@ -92,3 +94,70 @@ def test_zero_readout_initialization_produces_zero_initial_velocity():
     ).eval()
     assert torch.equal(zero_model(x, t, cond, mask, refs), torch.zeros_like(x))
     assert torch.count_nonzero(zero_model.tangent_backbone.readout.weight) == 0
+
+
+def test_mass_shell_barycenter_contract():
+    x, _, _, mask, _, mass = _inputs()
+    anchor = mass_shell_barycenter(x, mask, mass)
+    assert torch.allclose(
+        normsq4(anchor), torch.full((2,), mass**2, dtype=torch.float64), atol=1e-10
+    )
+    assert torch.all(anchor[:, 0] > 0)
+
+    permutation = torch.tensor([3, 0, 5, 1, 4, 2])
+    permuted = mass_shell_barycenter(x[:, permutation], mask[:, permutation], mass)
+    assert torch.allclose(permuted, anchor, atol=1e-12)
+
+    transform = random_proper_transform(seed=19)
+    transformed = mass_shell_barycenter(apply_transform(x, transform), mask, mass)
+    assert torch.allclose(transformed, apply_transform(anchor, transform), atol=2e-8, rtol=2e-8)
+
+
+def test_mass_shell_barycenter_rejects_empty_jet():
+    x, _, _, mask, _, mass = _inputs()
+    mask[0] = 0
+    try:
+        mass_shell_barycenter(x, mask, mass)
+    except ValueError as error:
+        assert "at least one real constituent" in str(error)
+    else:
+        raise AssertionError("empty jet was accepted")
+
+
+@torch.no_grad()
+def test_jet_token_modes_are_covariant_tangent_permutation_equivariant_and_padded():
+    x, t, cond, mask, refs, mass = _inputs()
+    transform = random_proper_transform(seed=23)
+    permutation = torch.tensor([3, 0, 5, 1, 4, 2])
+    for mode in ("scalar", "scalar_vector"):
+        model = _model(mass, mode)
+        output = model(x, t, cond, mask, refs)
+        transformed = model(
+            apply_transform(x, transform), t, cond, mask,
+            apply_transform(refs, transform),
+        )
+        assert torch.allclose(
+            transformed, apply_transform(output, transform), atol=3e-6, rtol=3e-6
+        )
+        permuted = model(x[:, permutation], t, cond, mask[:, permutation], refs)
+        assert torch.allclose(permuted, output[:, permutation], atol=3e-6, rtol=3e-6)
+        assert torch.allclose(dotsq4(x, output) * mask, torch.zeros_like(mask), atol=1e-9)
+        assert torch.equal(output[mask == 0], torch.zeros_like(output[mask == 0]))
+
+
+def test_zero_token_readout_initialization_produces_zero_velocity_and_gradients_flow():
+    x, t, cond, mask, refs, mass = _inputs()
+    model = LEFTJeN(
+        max_num_jet_types=5, max_particles=6, hidden_dim=32, num_layers=2,
+        include_pt=True, use_reference_vectors=True, backbone="tangent_attention",
+        include_mass_condition=True, num_attention_heads=4, vector_channels=4,
+        regulator_mass=mass, velocity_readout_init="zero", jet_token_mode="scalar_vector",
+    )
+    assert torch.equal(model(x, t, cond, mask, refs), torch.zeros_like(x))
+    assert torch.count_nonzero(model.tangent_backbone.token_readout[-1].weight) == 0
+
+    torch.nn.init.normal_(model.tangent_backbone.token_readout[-1].weight, std=1e-3)
+    model(x, t, cond, mask, refs).square().sum().backward()
+    assert model.tangent_backbone.token_type.grad is not None
+    assert model.tangent_backbone.token_interactions[0].token_query.weight.grad is not None
+    assert model.tangent_backbone.token_interactions[0].broadcast_gate[0].weight.grad is not None

@@ -351,7 +351,8 @@ def test_run_config_dict_matches_legacy_keys():
         "use_reference_vectors", "use_node_scalars", "node_scalar_seed",
         "use_adaln", "use_attention", "jet_types", "final_scale",
         "backbone", "include_mass_condition", "num_attention_heads",
-        "vector_channels", "regulator_mass", "velocity_readout_init",
+            "vector_channels", "regulator_mass", "velocity_readout_init",
+            "jet_token_mode",
     }
     assert d["num_particles"] == 30
     assert d["jet_types"] == ["g"]
