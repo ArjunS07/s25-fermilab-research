@@ -323,9 +323,6 @@ def generate_samples(
                 all_failure_records.extend(failure_records)
                 all_step_telemetry.extend(step_telemetry)
 
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
     all_samples_cat   = torch.cat(all_samples, dim=0)
     all_prior_samples_cat = torch.cat(all_prior_samples, dim=0)
     all_pt_cond_cat   = torch.cat(all_pt_cond, dim=0)

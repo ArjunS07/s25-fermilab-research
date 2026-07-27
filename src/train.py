@@ -26,12 +26,6 @@ from util.mass_shell import (
     conditional_vector_field as ms_vector_field,
     pushforward_to_tangent as ms_pushforward, mass_shell_loss,
 )
-from util.mass_shell_aux import (
-    auxiliary_warmup,
-    gram_transport_loss,
-    total_momentum_transport_loss,
-)
-from util.aux_calibration import GradientCalibration, shared_backbone_parameters
 from util.coordinates import (deterministic_jet_phi,
                               transform_rel_particle_coordinates_to_cartesian)
 from jetnet.utils import EtaPhiPtE_to_cartesian, cartesian_to_EtaPhiPtE
@@ -81,15 +75,21 @@ if __name__ == "__main__":
     args = train_config_to_namespace(cfg)
 
     _is_torchrun = "RANK" in os.environ and "WORLD_SIZE" in os.environ
-    args.distributed = args.distributed or _is_torchrun
+    torchrun_world_size = int(os.environ["WORLD_SIZE"]) if _is_torchrun else 1
+    # torchrun is also our single-GPU launcher. Do not construct a one-rank DDP
+    # process group: it adds synchronization/unused-parameter overhead without
+    # changing the optimization.
+    args.distributed = args.distributed or torchrun_world_size > 1
 
     if args.distributed:
-        dist.init_process_group(backend="nccl")
         local_rank = int(os.environ["LOCAL_RANK"])
-        rank       = dist.get_rank()
-        world_size = dist.get_world_size()
         device = torch.device(f"cuda:{local_rank}")
         torch.cuda.set_device(device)
+        # Bind NCCL to the process-local GPU up front. Initializing first leaves
+        # the rank-to-device mapping unknown and can hang at the first barrier.
+        dist.init_process_group(backend="nccl", device_id=device)
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
     else:
         rank, world_size = 0, 1
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -160,7 +160,6 @@ if __name__ == "__main__":
         vector_channels=args.vector_channels,
         regulator_mass=args.regulator_mass,
         velocity_readout_init=args.velocity_readout_init,
-        jet_token_mode=args.jet_token_mode,
     ).to(device)
     
     start_epoch = 0
@@ -175,15 +174,6 @@ if __name__ == "__main__":
         if is_rank0:
             print(f"Resumed from checkpoint at epoch {start_epoch - 1}; "
                   f"running {args.num_epochs} more epochs ({start_epoch}→{start_epoch + args.num_epochs - 1}).")
-    aux_start_step = global_optimizer_step
-    calibration = (
-        GradientCalibration() if args.aux_calibration_batches > 0 else None
-    )
-    calibration_parameters = (
-        shared_backbone_parameters(model) if calibration is not None else None
-    )
-    calibration_complete = False
-
     if args.distributed:
         # find_unused_parameters=True: the final layer's global/node-update sub-branch
         # (phi_m, phi_g, global_sf, alpha, +phi_h) produces g_new/h_new that are
@@ -220,7 +210,6 @@ if __name__ == "__main__":
         "num_attention_heads": args.num_attention_heads,
         "vector_channels": args.vector_channels,
         "velocity_readout_init": args.velocity_readout_init,
-        "jet_token_mode": args.jet_token_mode,
         "regulator_mass": args.regulator_mass,
         "jet_types": args.jet_types,
         "final_scale": float(final_scale),
@@ -235,7 +224,7 @@ if __name__ == "__main__":
                     for k in ("n_layers", "n_hidden", "num_particles", "use_reference_vectors",
                               "use_node_scalars", "use_adaln", "use_attention", "backbone",
                               "include_mass_condition", "num_attention_heads", "vector_channels",
-                              "velocity_readout_init", "jet_token_mode")
+                              "velocity_readout_init")
                     if prev.get(k) != run_config.get(k)}
             if mism:
                 print(f"WARNING: resume architecture flags differ from checkpoint: {mism}. "
@@ -442,8 +431,7 @@ if __name__ == "__main__":
         if args.distributed:
             dist.barrier()
 
-    if calibration is None:
-        run_stability_probe(global_optimizer_step, start_epoch - 1)
+    run_stability_probe(global_optimizer_step, start_epoch - 1)
 
     
     total_epochs = start_epoch + args.num_epochs
@@ -513,13 +501,8 @@ if __name__ == "__main__":
         )
 
         optimizer.zero_grad()
-        # Guard for local testing
-        accumulation_steps = min(args.target_batch_size // args.batch_size, args.n_train_samples // args.batch_size - 1)
+        accumulation_steps = args.target_batch_size // args.batch_size
         accumulated_loss = 0
-        accumulated_base_loss = 0
-        accumulated_gram_loss = 0
-        accumulated_total_momentum_loss = 0
-        accumulated_aux_warmup = 0
         accumulated_batches = 0
 
         for i, (batch_jet_info, batch_particle_info, batch_jet_phi, batch_x0_cached) in enumerate(train_loader):
@@ -606,26 +589,7 @@ if __name__ == "__main__":
                                      jet_conditions=batch_jet_info_cropped.to(model_dtype),
                                      mask=true_masks, ref_vectors=model_refs)
                 pred_tan = ms_pushforward(x_t, pred.to(torch.float64), m) * mask_exp64
-                base_loss = mass_shell_loss(pred_tan, u_t, true_masks, m)
-                gram_loss = base_loss.new_zeros(())
-                total_momentum_loss = base_loss.new_zeros(())
-                if args.aux_gram_weight > 0 or calibration is not None:
-                    gram_loss = gram_transport_loss(
-                        x_t, pred_tan, u_t, true_masks,
-                        eps=args.aux_normalization_eps,
-                    )
-                if args.aux_total_momentum_weight > 0 or calibration is not None:
-                    total_momentum_loss = total_momentum_transport_loss(
-                        pred_tan, u_t, true_masks, ref_vectors[:, 0],
-                        eps=args.aux_normalization_eps,
-                    )
-                aux_warmup = auxiliary_warmup(
-                    global_optimizer_step, aux_start_step, args.aux_warmup_steps
-                )
-                loss = base_loss + aux_warmup * (
-                    args.aux_gram_weight * gram_loss
-                    + args.aux_total_momentum_weight * total_momentum_loss
-                )
+                loss = mass_shell_loss(pred_tan, u_t, true_masks, m)
             elif args.use_hyperbolic:
                 # Riemannian flow matching: geodesic interpolant in the Poincaré ball.
                 # x_t is returned in Cartesian for the model; y_t and u_t_ball stay in the ball.
@@ -641,10 +605,6 @@ if __name__ == "__main__":
                 # the Riemannian loss ||v_theta - u_t||^2_g (Equation 14).
                 pred_ball = pushforward(x_t, pred) * mask_exp
                 loss = hyperbolic_loss(pred_ball, u_t_ball, y_t, mask=true_masks)
-                base_loss = loss
-                gram_loss = loss.new_zeros(())
-                total_momentum_loss = loss.new_zeros(())
-                aux_warmup = 0.0
             else:
                 # Euclidean flow matching (polar or Cartesian interpolation).
                 if args.train_space == 'polar':
@@ -662,33 +622,6 @@ if __name__ == "__main__":
 
                 n_real = true_masks.sum().clamp(min=1)
                 loss = ((conditional_u_t - pred).square() * mask_exp).sum() / (n_real * NUM_PARTICLE_FEATURES)
-                base_loss = loss
-                gram_loss = loss.new_zeros(())
-                total_momentum_loss = loss.new_zeros(())
-                aux_warmup = 0.0
-
-            if calibration is not None:
-                calibration.update(
-                    {
-                        "base": base_loss,
-                        "gram": gram_loss,
-                        "total_momentum": total_momentum_loss,
-                    },
-                    calibration_parameters,
-                )
-                if is_rank0:
-                    print(
-                        f"Aux calibration batch "
-                        f"{calibration.batches}/{args.aux_calibration_batches}"
-                    )
-                calibration_complete = (
-                    calibration.batches >= args.aux_calibration_batches
-                )
-                del x_1, x_0, t, x_t, pred, loss, base_loss
-                del gram_loss, total_momentum_loss
-                if calibration_complete:
-                    break
-                continue
 
             accumulated_batches += 1
             is_last_accum_step = (((i + 1) % accumulation_steps == 0)
@@ -697,10 +630,6 @@ if __name__ == "__main__":
             with ctx:
                 loss.backward()
             accumulated_loss += loss.item()
-            accumulated_base_loss += base_loss.item()
-            accumulated_gram_loss += gram_loss.item()
-            accumulated_total_momentum_loss += total_momentum_loss.item()
-            accumulated_aux_warmup += aux_warmup
 
             if is_last_accum_step:
                 grad_stats = {}
@@ -737,12 +666,6 @@ if __name__ == "__main__":
                     ema.update(raw_model)
 
                 optimizer_loss = accumulated_loss / accumulated_batches
-                optimizer_base_loss = accumulated_base_loss / accumulated_batches
-                optimizer_gram_loss = accumulated_gram_loss / accumulated_batches
-                optimizer_total_momentum_loss = (
-                    accumulated_total_momentum_loss / accumulated_batches
-                )
-                optimizer_aux_warmup = accumulated_aux_warmup / accumulated_batches
                 epoch_loss += optimizer_loss
                 epoch_optimizer_steps += 1
                 global_optimizer_step += 1
@@ -753,40 +676,15 @@ if __name__ == "__main__":
                         if write_header:
                             f.write(
                                 "optimizer_step,epoch,minibatch,loss,"
-                                "unclipped_grad_norm,gradients_finite,"
-                                "base_loss,gram_loss,total_momentum_loss,aux_warmup\n"
+                                "unclipped_grad_norm,gradients_finite\n"
                             )
                         gradients_finite = bool(torch.isfinite(unclipped_grad_norm).item())
                         f.write(
                             f"{global_optimizer_step},{epoch},{i},{optimizer_loss},"
-                            f"{float(unclipped_grad_norm)},{int(gradients_finite)},"
-                            f"{optimizer_base_loss},{optimizer_gram_loss},"
-                            f"{optimizer_total_momentum_loss},{optimizer_aux_warmup}\n"
+                            f"{float(unclipped_grad_norm)},{int(gradients_finite)}\n"
                         )
-                    if args.jet_token_mode != "none":
-                        token_log = f"{model_output_path}/jet_token_diagnostics.csv"
-                        token_diagnostics = raw_model.tangent_backbone.last_token_diagnostics
-                        row = {
-                            key: float(torch.stack([block[key] for block in token_diagnostics]).mean())
-                            for key in token_diagnostics[0]
-                        }
-                        token_header = not os.path.exists(token_log)
-                        with open(token_log, "a") as token_file:
-                            if token_header:
-                                token_file.write("optimizer_step," + ",".join(row) + "\n")
-                            token_file.write(
-                                f"{global_optimizer_step}," +
-                                ",".join(str(row[key]) for key in row) + "\n"
-                            )
                 accumulated_loss = 0
-                accumulated_base_loss = 0
-                accumulated_gram_loss = 0
-                accumulated_total_momentum_loss = 0
-                accumulated_aux_warmup = 0
                 accumulated_batches = 0
-
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
             
                 if is_rank0 and global_optimizer_step % 10 == 0:
                     print(
@@ -800,15 +698,9 @@ if __name__ == "__main__":
 
                 run_stability_probe(global_optimizer_step, epoch)
                 
-            del x_1, x_0, t, x_t, pred, loss, base_loss
-            del gram_loss, total_momentum_loss
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            del x_1, x_0, t, x_t, pred, loss
             if reached_optimizer_limit:
                 break
-
-        if calibration_complete:
-            break
 
         if args.distributed:
             loss_tensor = torch.tensor(epoch_loss / epoch_optimizer_steps, device=device)
@@ -840,32 +732,6 @@ if __name__ == "__main__":
             scheduler.step()
         if reached_optimizer_limit:
             break
-
-    if calibration is not None:
-        if not calibration_complete:
-            raise RuntimeError(
-                f"requested {args.aux_calibration_batches} calibration batches, "
-                f"but only observed {calibration.batches}"
-            )
-        if world_size != 1:
-            raise RuntimeError("auxiliary calibration currently requires world_size=1")
-        if is_rank0:
-            calibration_result = calibration.result()
-            calibration_result.update({
-                "checkpoint_optimizer_step": global_optimizer_step,
-                "continuation_start_step": aux_start_step,
-                "shared_parameter_count": sum(
-                    parameter.numel() for parameter in calibration_parameters
-                ),
-            })
-            calibration_path = f"{model_output_path}/aux_calibration.json"
-            with open(calibration_path, "w") as handle:
-                json.dump(calibration_result, handle, indent=2)
-            print(f"Auxiliary gradient calibration saved to {calibration_path}")
-        if args.distributed:
-            dist.barrier()
-            dist.destroy_process_group()
-        sys.exit(0)
 
     if args.distributed:
         dist.barrier()          # all ranks finish training before rank 0 does inference

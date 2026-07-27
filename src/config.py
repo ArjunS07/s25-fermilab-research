@@ -59,11 +59,23 @@ class ModelConfig(BaseModel):
     num_attention_heads: int = Field(default=8, ge=1)
     vector_channels: int = Field(default=16, ge=1)
     velocity_readout_init: Literal["small_normal", "zero"] = "small_normal"
-    jet_token_mode: Literal["none", "scalar", "scalar_vector"] = "none"
 
     @model_validator(mode="after")
     def validate_tangent_attention_contract(self):
         if self.backbone == "tangent_attention":
+            inactive_legacy_flags = [
+                name for name, enabled in (
+                    ("use_residual", self.use_residual),
+                    ("use_node_scalars", self.use_node_scalars),
+                    ("use_adaln", self.use_adaln),
+                    ("use_attention", self.use_attention),
+                ) if enabled
+            ]
+            if inactive_legacy_flags:
+                raise ValueError(
+                    "tangent_attention does not use legacy model flags: "
+                    + ", ".join(inactive_legacy_flags)
+                )
             if not self.use_reference_vectors:
                 raise ValueError("tangent_attention requires model.use_reference_vectors=true")
             if not self.include_mass_condition:
@@ -88,11 +100,6 @@ class TrainingConfig(BaseModel):
     stability_probe_steps: list[int] = Field(default_factory=list)
     stability_probe_save_checkpoints: bool = False
     qualification_min_loss_improvement: float | None = Field(default=None, ge=0, le=1)
-    aux_gram_weight: float = Field(default=0.0, ge=0)
-    aux_total_momentum_weight: float = Field(default=0.0, ge=0)
-    aux_warmup_steps: int = Field(default=0, ge=0)
-    aux_normalization_eps: float = Field(default=1e-12, gt=0)
-    aux_calibration_batches: int = Field(default=0, ge=0)
     sigma_min: float = 1e-4
     train_space: Literal["cartesian", "polar"] = "cartesian"
     time_sampling: Literal["uniform", "power_law", "lognorm"] = "power_law"
@@ -126,6 +133,13 @@ class TrainingConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_qualification_steps(self):
+        if self.target_batch_size < self.batch_size:
+            raise ValueError("training.target_batch_size must be at least training.batch_size")
+        if self.target_batch_size % self.batch_size:
+            raise ValueError(
+                "training.target_batch_size must be divisible by training.batch_size; "
+                "otherwise gradient accumulation silently uses a smaller effective batch"
+            )
         if any(step < 0 for step in self.stability_probe_steps):
             raise ValueError("training.stability_probe_steps must be non-negative")
         if self.stability_probe_steps != sorted(set(self.stability_probe_steps)):
@@ -232,35 +246,6 @@ class TrainRunConfig(BaseModel):
     inference: InferenceConfig = Field(default_factory=InferenceConfig)
     paths: PathConfig = Field(default_factory=PathConfig)
 
-    @model_validator(mode="after")
-    def validate_mass_shell_auxiliary_losses(self):
-        has_auxiliary = (
-            self.training.aux_gram_weight > 0
-            or self.training.aux_total_momentum_weight > 0
-            or self.training.aux_calibration_batches > 0
-        )
-        if has_auxiliary and (
-            not self.model.use_hyperbolic
-            or self.model.hyperbolic_model != "mass_shell"
-        ):
-            raise ValueError(
-                "mass-shell auxiliary losses require model.use_hyperbolic=true "
-                "and model.hyperbolic_model='mass_shell'"
-            )
-        if (
-            (
-                self.training.aux_total_momentum_weight > 0
-                or self.training.aux_calibration_batches > 0
-            )
-            and not self.model.use_reference_vectors
-        ):
-            raise ValueError(
-                "training.aux_total_momentum_weight requires "
-                "model.use_reference_vectors=true for the lab-time reference"
-            )
-        return self
-
-
 class InferRunConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -347,11 +332,6 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         stability_probe_steps=cfg.training.stability_probe_steps,
         stability_probe_save_checkpoints=cfg.training.stability_probe_save_checkpoints,
         qualification_min_loss_improvement=cfg.training.qualification_min_loss_improvement,
-        aux_gram_weight=cfg.training.aux_gram_weight,
-        aux_total_momentum_weight=cfg.training.aux_total_momentum_weight,
-        aux_warmup_steps=cfg.training.aux_warmup_steps,
-        aux_normalization_eps=cfg.training.aux_normalization_eps,
-        aux_calibration_batches=cfg.training.aux_calibration_batches,
         sigma_min=cfg.training.sigma_min,
         train_space=cfg.training.train_space,
         time_sampling=cfg.training.time_sampling,
@@ -384,7 +364,6 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         num_attention_heads=cfg.model.num_attention_heads,
         vector_channels=cfg.model.vector_channels,
         velocity_readout_init=cfg.model.velocity_readout_init,
-        jet_token_mode=cfg.model.jet_token_mode,
         use_curriculum=cfg.training.use_curriculum,
         use_time_sampling=cfg.training.use_time_sampling,
         use_reference_vectors=cfg.model.use_reference_vectors,
@@ -437,7 +416,6 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         num_attention_heads=cfg.model.num_attention_heads,
         vector_channels=cfg.model.vector_channels,
         velocity_readout_init=cfg.model.velocity_readout_init,
-        jet_token_mode=cfg.model.jet_token_mode,
         sampler=cfg.inference.sampler,
         mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
         mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
@@ -515,7 +493,6 @@ def run_config_dict(cfg: TrainRunConfig, final_scale: float) -> dict:
         "num_attention_heads": cfg.model.num_attention_heads,
         "vector_channels": cfg.model.vector_channels,
         "velocity_readout_init": cfg.model.velocity_readout_init,
-        "jet_token_mode": cfg.model.jet_token_mode,
         "regulator_mass": cfg.model.regulator_mass,
         "jet_types": cfg.data.jet_types,
         "final_scale": float(final_scale),

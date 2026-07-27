@@ -40,11 +40,6 @@ def test_train_defaults_match_legacy_argparse():
     assert cfg.training.stability_probe_steps == []
     assert cfg.training.stability_probe_save_checkpoints is False
     assert cfg.training.qualification_min_loss_improvement is None
-    assert cfg.training.aux_gram_weight == 0.0
-    assert cfg.training.aux_total_momentum_weight == 0.0
-    assert cfg.training.aux_warmup_steps == 0
-    assert cfg.training.aux_normalization_eps == 1e-12
-    assert cfg.training.aux_calibration_batches == 0
     assert cfg.training.sigma_min == 1e-4
     assert cfg.training.train_space == "cartesian"
     assert cfg.training.time_sampling == "power_law"
@@ -170,6 +165,19 @@ def test_tangent_attention_requires_typed_mass_shell_contract():
     assert cfg.model.backbone == "tangent_attention"
 
 
+@pytest.mark.parametrize(
+    "legacy_flag", ["use_residual", "use_node_scalars", "use_adaln", "use_attention"]
+)
+def test_tangent_attention_rejects_inactive_legacy_flags(legacy_flag):
+    model = {
+        "backbone": "tangent_attention", "use_reference_vectors": True,
+        "include_mass_condition": True, "use_hyperbolic": True,
+        "hyperbolic_model": "mass_shell", legacy_flag: True,
+    }
+    with pytest.raises(ValidationError, match="does not use legacy model flags"):
+        TrainRunConfig(model=model)
+
+
 def test_qualification_steps_are_sorted_bounded_and_nonnegative():
     cfg = TrainRunConfig(training={
         "max_optimizer_steps": 2000,
@@ -182,6 +190,14 @@ def test_qualification_steps_are_sorted_bounded_and_nonnegative():
                 "max_optimizer_steps": 2000,
                 "stability_probe_steps": invalid,
             })
+
+
+def test_target_batch_size_must_be_exact_accumulation_multiple():
+    cfg = TrainRunConfig(training={"batch_size": 50, "target_batch_size": 250})
+    assert cfg.training.target_batch_size // cfg.training.batch_size == 5
+    for target in (49, 251):
+        with pytest.raises(ValidationError):
+            TrainRunConfig(training={"batch_size": 50, "target_batch_size": target})
 
 
 def test_invalid_fraction_warning_must_not_exceed_hard_gate():
@@ -282,46 +298,6 @@ def test_train_config_to_namespace_attribute_names():
     assert ns.prior_dist == "isotropic_com"
     assert ns.distributed is False
     assert ns.lr == 6e-4
-    assert ns.aux_gram_weight == 0.0
-    assert ns.aux_total_momentum_weight == 0.0
-    assert ns.aux_calibration_batches == 0
-
-
-def test_auxiliary_losses_require_mass_shell_geometry():
-    with pytest.raises(ValidationError, match="mass-shell auxiliary losses require"):
-        TrainRunConfig(training={"aux_gram_weight": 0.1})
-
-
-def test_total_momentum_loss_requires_reference_vectors():
-    with pytest.raises(ValidationError, match="lab-time reference"):
-        TrainRunConfig(
-            model={"use_hyperbolic": True, "hyperbolic_model": "mass_shell"},
-            training={"aux_total_momentum_weight": 0.1},
-        )
-
-
-def test_mass_shell_auxiliary_config_is_valid():
-    cfg = TrainRunConfig(
-        model={
-            "use_hyperbolic": True,
-            "hyperbolic_model": "mass_shell",
-            "use_reference_vectors": True,
-        },
-        training={
-            "aux_gram_weight": 0.2,
-            "aux_total_momentum_weight": 0.3,
-            "aux_warmup_steps": 500,
-        },
-    )
-    ns = train_config_to_namespace(cfg)
-    assert ns.aux_gram_weight == 0.2
-    assert ns.aux_total_momentum_weight == 0.3
-    assert ns.aux_warmup_steps == 500
-
-
-def test_calibration_mode_requires_mass_shell_references():
-    with pytest.raises(ValidationError, match="mass-shell auxiliary losses require"):
-        TrainRunConfig(training={"aux_calibration_batches": 64})
 
 
 def test_infer_config_to_namespace_attribute_names():
@@ -352,7 +328,6 @@ def test_run_config_dict_matches_legacy_keys():
         "use_adaln", "use_attention", "jet_types", "final_scale",
         "backbone", "include_mass_condition", "num_attention_heads",
             "vector_channels", "regulator_mass", "velocity_readout_init",
-            "jet_token_mode",
     }
     assert d["num_particles"] == 30
     assert d["jet_types"] == ["g"]

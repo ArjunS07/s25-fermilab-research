@@ -356,8 +356,7 @@ class LEFTJeN(nn.Module):
                  node_scalar_dim=None, use_adaln=False, use_attention=False,
                  backbone="legacy", include_mass_condition=False,
                  num_attention_heads=8, vector_channels=16,
-                 regulator_mass=0.5, velocity_readout_init="small_normal",
-                 jet_token_mode="none"):
+                 regulator_mass=0.5, velocity_readout_init="small_normal"):
         super().__init__()
         self.max_particles = max_particles
         self.embed_dim = embed_dim
@@ -410,7 +409,6 @@ class LEFTJeN(nn.Module):
                 vector_channels=vector_channels,
                 regulator_mass=regulator_mass,
                 readout_init=velocity_readout_init,
-                jet_token_mode=jet_token_mode,
             )
             self.time_embedding = None
             self.global_embedding = None

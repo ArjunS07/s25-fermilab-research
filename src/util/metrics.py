@@ -205,20 +205,6 @@ def run_save_metrics(
         print(f"Error computing w1p: {e}")
 
     try:
-        # Retain the historical flattened-coordinate number under an explicit legacy
-        # label. JetNet's documented jet FPD contract uses its 36 EFP features instead.
-        N_test = test_rel3.shape[0]
-        N_gen  = gen_rel3.shape[0]
-        eval_info["fpd_flat_legacy"] = jetnet_eval.fpd(
-            real_features=test_rel3.reshape(N_test, -1),
-            gen_features=gen_rel3.reshape(N_gen, -1),
-            seed=42,
-        )
-        print(f"Legacy flattened-coordinate FPD: {eval_info['fpd_flat_legacy']}")
-    except Exception as e:
-        print(f"Error computing legacy flattened-coordinate FPD: {e}")
-
-    try:
         test_efps = jetnet_eval.get_fpd_kpd_jet_features(test_rel3)
         gen_efps = jetnet_eval.get_fpd_kpd_jet_features(gen_rel3)
         eval_info["fpd"] = jetnet_eval.fpd(
