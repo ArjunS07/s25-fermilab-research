@@ -32,7 +32,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              GIT_COMMIT="553c3800b9a162161875c949c65373ba6dc996d6"
               test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
               case "$JOB_COMPLETION_INDEX" in
                 0) MODE=none ;;
