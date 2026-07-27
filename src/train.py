@@ -160,6 +160,7 @@ if __name__ == "__main__":
         vector_channels=args.vector_channels,
         regulator_mass=args.regulator_mass,
         velocity_readout_init=args.velocity_readout_init,
+        jet_token_mode=args.jet_token_mode,
     ).to(device)
     
     start_epoch = 0
@@ -219,6 +220,7 @@ if __name__ == "__main__":
         "num_attention_heads": args.num_attention_heads,
         "vector_channels": args.vector_channels,
         "velocity_readout_init": args.velocity_readout_init,
+        "jet_token_mode": args.jet_token_mode,
         "regulator_mass": args.regulator_mass,
         "jet_types": args.jet_types,
         "final_scale": float(final_scale),
@@ -233,7 +235,7 @@ if __name__ == "__main__":
                     for k in ("n_layers", "n_hidden", "num_particles", "use_reference_vectors",
                               "use_node_scalars", "use_adaln", "use_attention", "backbone",
                               "include_mass_condition", "num_attention_heads", "vector_channels",
-                              "velocity_readout_init")
+                              "velocity_readout_init", "jet_token_mode")
                     if prev.get(k) != run_config.get(k)}
             if mism:
                 print(f"WARNING: resume architecture flags differ from checkpoint: {mism}. "

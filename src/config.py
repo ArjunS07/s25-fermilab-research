@@ -59,6 +59,7 @@ class ModelConfig(BaseModel):
     num_attention_heads: int = Field(default=8, ge=1)
     vector_channels: int = Field(default=16, ge=1)
     velocity_readout_init: Literal["small_normal", "zero"] = "small_normal"
+    jet_token_mode: Literal["none", "scalar", "scalar_vector"] = "none"
 
     @model_validator(mode="after")
     def validate_tangent_attention_contract(self):
@@ -383,6 +384,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         num_attention_heads=cfg.model.num_attention_heads,
         vector_channels=cfg.model.vector_channels,
         velocity_readout_init=cfg.model.velocity_readout_init,
+        jet_token_mode=cfg.model.jet_token_mode,
         use_curriculum=cfg.training.use_curriculum,
         use_time_sampling=cfg.training.use_time_sampling,
         use_reference_vectors=cfg.model.use_reference_vectors,
@@ -435,6 +437,7 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         num_attention_heads=cfg.model.num_attention_heads,
         vector_channels=cfg.model.vector_channels,
         velocity_readout_init=cfg.model.velocity_readout_init,
+        jet_token_mode=cfg.model.jet_token_mode,
         sampler=cfg.inference.sampler,
         mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
         mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
@@ -512,6 +515,7 @@ def run_config_dict(cfg: TrainRunConfig, final_scale: float) -> dict:
         "num_attention_heads": cfg.model.num_attention_heads,
         "vector_channels": cfg.model.vector_channels,
         "velocity_readout_init": cfg.model.velocity_readout_init,
+        "jet_token_mode": cfg.model.jet_token_mode,
         "regulator_mass": cfg.model.regulator_mass,
         "jet_types": cfg.data.jet_types,
         "final_scale": float(final_scale),
