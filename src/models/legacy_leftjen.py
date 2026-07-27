@@ -354,8 +354,7 @@ class LegacyLEFTJeN(nn.Module):
                  use_reference_vectors=False, use_node_scalars=False,
                  node_scalar_seed="physics",
                  node_scalar_dim=None, use_adaln=False, use_attention=False,
-                 backbone="legacy", include_mass_condition=False,
-                 **unused_compatibility_options):
+                 backbone="legacy", include_mass_condition=False):
         super().__init__()
         if backbone != "legacy":
             raise ValueError("LegacyLEFTJeN only implements the historical backbone")

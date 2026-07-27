@@ -1,5 +1,4 @@
 import os
-import sys
 import json
 import time
 import pickle
@@ -19,16 +18,9 @@ from models.LEFT_JeN import LEFTJeN
 from util import jet_attributes
 from util.jet_attributes import NUM_CLASSES
 from jet_attr_model import get_model_pth_path
-from util.distributions import gen_initial_distribution, time_dist, hyperbolic_interpolant
-from util.hyperbolic import pushforward, hyperbolic_loss
-from util.mass_shell import (
-    project_to_shell, geodesic_interpolant as ms_interpolant,
-    conditional_vector_field as ms_vector_field,
-    pushforward_to_tangent as ms_pushforward, mass_shell_loss,
-)
+from util.distributions import gen_initial_distribution, time_dist
 from util.coordinates import (deterministic_jet_phi,
                               transform_rel_particle_coordinates_to_cartesian)
-from jetnet.utils import EtaPhiPtE_to_cartesian, cartesian_to_EtaPhiPtE
 from util.ema import ModelEMA
 from util.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
@@ -38,8 +30,8 @@ from generate_samples import generate_samples
 from data import get_data_path
 from cache_icp import (resolve_training_cache_path, source_dataset_fingerprint,
                        validate_cache_metadata)
-from util.mask_helpers import mean_std_masked_tensor
 from util.qualification import loss_improvement_summary, optimizer_limit_reached
+from training import flow_matching_loss
 from config import (TrainRunConfig, build_config, parse_config_cli, train_config_to_namespace,
                     generation_controls_from_namespace)
 
@@ -564,64 +556,12 @@ if __name__ == "__main__":
                                                       jet_mass=(batch_jet_info[:, 2]
                                                                 if args.include_mass_condition else None))
 
-
-            # mean_std_masked_tensor("x_0", x_0, true_masks)
-            # mean_std_masked_tensor("x_1", x_1, true_masks)
-            
             t = _sample_t(x_0.shape[0]).to(device)
-            t_viewed = t.view(-1, 1, 1)
-
-            if args.use_hyperbolic and args.hyperbolic_model == "mass_shell":
-                # Riemannian flow matching on the mass shell (hyperboloid). x_0/x_1 are lifted
-                # onto H_m; the interpolant, target field and model output all live on/at the
-                # shell (Cartesian on-shell 4-vectors), so no ball<->Cartesian mapping is needed.
-                m = args.regulator_mass
-                p0 = project_to_shell(x_0, m).to(device)
-                p1 = project_to_shell(x_1, m).to(device)
-                x_t = ms_interpolant(p0, p1, t, m)
-                mask_exp64 = mask_exp.to(torch.float64)
-                u_t = ms_vector_field(x_t, p1, t.to(torch.float64), m) * mask_exp64
-
-                model_dtype = next(raw_model.parameters()).dtype
-                model_refs = ref_vectors.to(model_dtype) if ref_vectors is not None else None
-                model_x = x_t if args.backbone == "tangent_attention" else x_t.to(model_dtype)
-                pred = model.forward(x=model_x, t=t.to(model_dtype),
-                                     jet_conditions=batch_jet_info_cropped.to(model_dtype),
-                                     mask=true_masks, ref_vectors=model_refs)
-                pred_tan = ms_pushforward(x_t, pred.to(torch.float64), m) * mask_exp64
-                loss = mass_shell_loss(pred_tan, u_t, true_masks, m)
-            elif args.use_hyperbolic:
-                # Riemannian flow matching: geodesic interpolant in the Poincaré ball.
-                # x_t is returned in Cartesian for the model; y_t and u_t_ball stay in the ball.
-                x_t, y_t, u_t_ball = hyperbolic_interpolant(x_0, x_1, t)
-                x_t = x_t.to(device)
-                y_t = y_t.to(device)
-                u_t_ball = u_t_ball * mask_exp   # zero out padding in target
-
-                pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks, ref_vectors=ref_vectors)
-                pred = pred * mask_exp
-
-                # Push Cartesian model output into the ball tangent space, then compute
-                # the Riemannian loss ||v_theta - u_t||^2_g (Equation 14).
-                pred_ball = pushforward(x_t, pred) * mask_exp
-                loss = hyperbolic_loss(pred_ball, u_t_ball, y_t, mask=true_masks)
-            else:
-                # Euclidean flow matching (polar or Cartesian interpolation).
-                if args.train_space == 'polar':
-                    x_0_polar = cartesian_to_EtaPhiPtE(x_0)
-                    x_1_polar = cartesian_to_EtaPhiPtE(x_1)
-                    x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0_polar + t_viewed * x_1_polar
-                    x_t = EtaPhiPtE_to_cartesian(x_t)
-                else:
-                    x_t = (1 - (1-args.sigma_min)*t_viewed)*x_0 + t_viewed * x_1
-                x_t = x_t.to(device)
-
-                conditional_u_t = (x_1 - ((1-args.sigma_min)*x_0)) * mask_exp
-                pred = model.forward(x=x_t, t=t, jet_conditions=batch_jet_info_cropped, mask=true_masks, ref_vectors=ref_vectors)
-                pred = pred * mask_exp
-
-                n_real = true_masks.sum().clamp(min=1)
-                loss = ((conditional_u_t - pred).square() * mask_exp).sum() / (n_real * NUM_PARTICLE_FEATURES)
+            loss = flow_matching_loss(
+                model=model, raw_model=raw_model, config=args,
+                x0=x_0, x1=x_1, t=t, mask=true_masks,
+                conditions=batch_jet_info_cropped, references=ref_vectors,
+            )
 
             accumulated_batches += 1
             is_last_accum_step = (((i + 1) % accumulation_steps == 0)
@@ -698,7 +638,7 @@ if __name__ == "__main__":
 
                 run_stability_probe(global_optimizer_step, epoch)
                 
-            del x_1, x_0, t, x_t, pred, loss
+            del x_1, x_0, t, loss
             if reached_optimizer_limit:
                 break
 
