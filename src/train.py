@@ -3,6 +3,7 @@ import json
 import time
 import pickle
 import logging
+import math
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -31,6 +32,7 @@ from data import get_data_path
 from cache_icp import (resolve_training_cache_path, source_dataset_fingerprint,
                        validate_cache_metadata)
 from util.qualification import loss_improvement_summary, optimizer_limit_reached
+from util.lr_schedule import build_step_scheduler
 from training import flow_matching_loss
 from config import (TrainRunConfig, build_config, parse_config_cli, train_config_to_namespace,
                     generation_controls_from_namespace)
@@ -294,40 +296,34 @@ if __name__ == "__main__":
         else:
             raise ValueError(f"Unknown time_sampling: {mode}")
 
+    epoch_fraction = args.epoch_frac
+    samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
+    local_samples_per_epoch = (
+        samples_per_epoch // world_size if args.distributed else samples_per_epoch
+    )
+    accumulation_steps = args.target_batch_size // args.batch_size
+    minibatches_per_epoch = math.ceil(local_samples_per_epoch / args.batch_size)
+    optimizer_steps_per_epoch = math.ceil(minibatches_per_epoch / accumulation_steps)
+
     lr = args.lr
     weight_decay = args.weight_decay
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     if args.use_cosine_lr:
-        if args.lr_schedule == "monotonic_cosine":
-            cosine_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=max(1, args.num_epochs - args.lr_warmup_epochs),
-                eta_min=lr * args.eta_min_factor)
-        else:
-            t0 = args.lr_t0 if args.lr_t0 > 0 else (args.num_epochs // 4) if args.num_epochs >= 20 else max(1, args.num_epochs // 2)
-            cosine_sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-                optimizer, T_0=t0, T_mult=1, eta_min=lr * args.eta_min_factor
-            )
-        if args.lr_warmup_epochs > 0:
-            warmup_sched = torch.optim.lr_scheduler.LinearLR(
-                optimizer, start_factor=1e-6, end_factor=1.0,
-                total_iters=args.lr_warmup_epochs
-            )
-            scheduler = torch.optim.lr_scheduler.SequentialLR(
-                optimizer,
-                schedulers=[warmup_sched, cosine_sched],
-                milestones=[args.lr_warmup_epochs]
-            )
-        else:
-            scheduler = cosine_sched
+        scheduler = build_step_scheduler(
+            optimizer,
+            total_steps=args.num_epochs * optimizer_steps_per_epoch,
+            steps_per_epoch=optimizer_steps_per_epoch,
+            warmup_epochs=args.lr_warmup_epochs,
+            eta_min_factor=args.eta_min_factor,
+            schedule=args.lr_schedule,
+            restart_epoch=args.lr_t0,
+        )
 
     if args.resume_weights:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         if args.use_cosine_lr and "scheduler_state_dict" in checkpoint:
             scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-
-    epoch_fraction = args.epoch_frac
-    samples_per_epoch = int(epoch_fraction * len(X_train_particle_transformed))
 
     probe_steps = set(args.stability_probe_steps)
     probe_jet_attr_model = None
@@ -601,6 +597,8 @@ if __name__ == "__main__":
                 
                 unclipped_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
                 optimizer.step()
+                if args.use_cosine_lr:
+                    scheduler.step()
                 optimizer.zero_grad()
                 if ema is not None:
                     ema.update(raw_model)
@@ -616,12 +614,13 @@ if __name__ == "__main__":
                         if write_header:
                             f.write(
                                 "optimizer_step,epoch,minibatch,loss,"
-                                "unclipped_grad_norm,gradients_finite\n"
+                                "unclipped_grad_norm,gradients_finite,learning_rate\n"
                             )
                         gradients_finite = bool(torch.isfinite(unclipped_grad_norm).item())
                         f.write(
                             f"{global_optimizer_step},{epoch},{i},{optimizer_loss},"
-                            f"{float(unclipped_grad_norm)},{int(gradients_finite)}\n"
+                            f"{float(unclipped_grad_norm)},{int(gradients_finite)},"
+                            f"{optimizer.param_groups[0]['lr']}\n"
                         )
                 accumulated_loss = 0
                 accumulated_batches = 0
@@ -668,8 +667,6 @@ if __name__ == "__main__":
                 ckpt["ema_state_dict"] = ema.state_dict()
             torch.save(ckpt, f"{model_output_path}/models/latest_checkpoint.pth")
 
-        if args.use_cosine_lr:
-            scheduler.step()
         if reached_optimizer_limit:
             break
 
