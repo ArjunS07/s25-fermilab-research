@@ -4,9 +4,9 @@ items:
   - &job
     apiVersion: batch/v1
     kind: Job
-    metadata: {name: as-jet-train-g30-msgnn-a}
+    metadata: {name: as-jet-smoke-g30-msgnn-a}
     spec:
-      ttlSecondsAfterFinished: 3600
+      ttlSecondsAfterFinished: 86400
       backoffLimit: 0
       template:
         spec:
@@ -25,15 +25,11 @@ items:
                 - |
                   set -euo pipefail
                   GIT_COMMIT="4387f9993fc3a1481ae78836dca652c9b851e4e6"
-                  LR="REPLACE_AFTER_LR_CAUSALITY_GATE"
-                  LR_STEP_UNIT="REPLACE_AFTER_LR_CAUSALITY_GATE"
-                  test "$LR" != "REPLACE_AFTER_LR_CAUSALITY_GATE"
-                  test "$LR_STEP_UNIT" != "REPLACE_AFTER_LR_CAUSALITY_GATE"
                   case "$ARM" in
                     a) GEOM=readout_only; POOL=false;; b) GEOM=tangent_channels; POOL=false;;
                     c) GEOM=readout_only; POOL=true;; d) GEOM=tangent_channels; POOL=true;;
                   esac
-                  OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-msgnn-$ARM"
+                  OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-msgnn-$ARM-smoke"
                   mkdir -p "$OUT" /tmp/runtime
                   exec > >(tee "$OUT/run.log") 2>&1
                   printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
@@ -46,17 +42,22 @@ items:
                   "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
                     --config configs/g30-mass-shell-gnn.yaml --set paths.output_path="$OUT" \
                     --set model.geometric_state="$GEOM" --set model.use_global_pooling="$POOL" \
-                    --set training.lr="$LR" --set training.lr_step_unit="$LR_STEP_UNIT"
+                    --set training.num_epochs=1 --set training.max_optimizer_steps=20 \
+                    --set training.stability_probe_steps="[0,20]" \
+                    --set training.use_cosine_lr=false --set training.lr=0.0001 \
+                    --set inference.n_samples=64 --set inference.integration_steps=8 \
+                    --set inference.stability_probe_samples=32 \
+                    --set inference.max_invalid_fraction=0 --set inference.skip_metrics=true
               volumeMounts: &mounts [{name: data, mountPath: /mnt/data}]
               resources: &resources
                 requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
                 limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 24Gi}
   - <<: *job
-    metadata: {name: as-jet-train-g30-msgnn-b}
-    spec: {ttlSecondsAfterFinished: 3600, backoffLimit: 0, template: {spec: {restartPolicy: Never, volumes: *volumes, containers: [{name: train, image: "python:3.10-slim", env: [{name: ARM, value: b}, {name: POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}], command: *command, volumeMounts: *mounts, resources: *resources}]}}}
+    metadata: {name: as-jet-smoke-g30-msgnn-b}
+    spec: {ttlSecondsAfterFinished: 86400, backoffLimit: 0, template: {spec: {restartPolicy: Never, volumes: *volumes, containers: [{name: train, image: "python:3.10-slim", env: [{name: ARM, value: b}, {name: POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}], command: *command, volumeMounts: *mounts, resources: *resources}]}}}
   - <<: *job
-    metadata: {name: as-jet-train-g30-msgnn-c}
-    spec: {ttlSecondsAfterFinished: 3600, backoffLimit: 0, template: {spec: {restartPolicy: Never, volumes: *volumes, containers: [{name: train, image: "python:3.10-slim", env: [{name: ARM, value: c}, {name: POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}], command: *command, volumeMounts: *mounts, resources: *resources}]}}}
+    metadata: {name: as-jet-smoke-g30-msgnn-c}
+    spec: {ttlSecondsAfterFinished: 86400, backoffLimit: 0, template: {spec: {restartPolicy: Never, volumes: *volumes, containers: [{name: train, image: "python:3.10-slim", env: [{name: ARM, value: c}, {name: POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}], command: *command, volumeMounts: *mounts, resources: *resources}]}}}
   - <<: *job
-    metadata: {name: as-jet-train-g30-msgnn-d}
-    spec: {ttlSecondsAfterFinished: 3600, backoffLimit: 0, template: {spec: {restartPolicy: Never, volumes: *volumes, containers: [{name: train, image: "python:3.10-slim", env: [{name: ARM, value: d}, {name: POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}], command: *command, volumeMounts: *mounts, resources: *resources}]}}}
+    metadata: {name: as-jet-smoke-g30-msgnn-d}
+    spec: {ttlSecondsAfterFinished: 86400, backoffLimit: 0, template: {spec: {restartPolicy: Never, volumes: *volumes, containers: [{name: train, image: "python:3.10-slim", env: [{name: ARM, value: d}, {name: POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}], command: *command, volumeMounts: *mounts, resources: *resources}]}}}
