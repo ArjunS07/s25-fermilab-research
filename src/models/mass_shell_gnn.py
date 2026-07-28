@@ -32,12 +32,16 @@ class MassShellGNNBlock(nn.Module):
         if tangent_channels:
             self.direction_gate = nn.Linear(width, channels)
             self.transport_gate = nn.Linear(width, channels)
+            self.reference_gate = nn.Sequential(
+                nn.Linear(2 * width, width), nn.SiLU(), nn.Linear(width, channels)
+            )
         if global_pooling:
             self.global_mlp = nn.Sequential(nn.LayerNorm(2 * width),
                                             nn.Linear(2 * width, 2 * width), nn.SiLU(),
                                             nn.Linear(2 * width, width))
 
-    def forward(self, x, h, vectors, cond, global_state, mask, edge, direction, support, mass):
+    def forward(self, x, h, vectors, cond, global_state, mask, edge, direction,
+                projected_refs, typed_refs, support, mass):
         _, n, _ = h.shape
         hn = self.norm(h)
         fields = [hn.unsqueeze(2).expand(-1,-1,n,-1),
@@ -62,6 +66,12 @@ class MassShellGNNBlock(nn.Module):
             transport_gate = (self.transport_gate(message)
                               * support.unsqueeze(-1)).to(torch.float64)
             dv += torch.einsum("bijc,bijcf->bicf", transport_gate, transported)
+            ref_input = torch.cat([
+                hn.unsqueeze(2).expand(-1, -1, 2, -1),
+                typed_refs.unsqueeze(1).expand(-1, n, -1, -1),
+            ], -1)
+            ref_gate = self.reference_gate(ref_input).to(torch.float64)
+            dv += torch.einsum("birc,birf->bicf", ref_gate, projected_refs)
             vectors = vectors + dv / count.to(torch.float64).unsqueeze(-1).unsqueeze(-1)
             vectors = pushforward_to_tangent(x.unsqueeze(2), vectors, mass)
             vectors *= mask[:,:,None,None].to(torch.float64)
@@ -107,10 +117,13 @@ class MassShellGNNBackbone(nn.Module):
         projected=pushforward_to_tangent(x64.unsqueeze(2),refs.unsqueeze(1).expand(-1,n,-1,-1),self.mass)
         ref_norm=torch.sqrt((-normsq4(projected)).clamp_min(0))
         projected=projected/(self.mass+ref_norm).unsqueeze(-1)
+        projected = projected * mask[:, :, None, None].to(torch.float64)
+        typed_refs = cond[:,None,:] + self.ref_roles(torch.arange(2,device=x.device))[None]
         vectors=torch.zeros(*x.shape[:2],self.blocks[0].channels,4,dtype=torch.float64,device=x.device)
         global_state=cond
         for block in self.blocks:
-            h,vectors,global_state=block(x64,h,vectors,cond,global_state,mask,edge,direction,support,self.mass)
+            h,vectors,global_state=block(x64,h,vectors,cond,global_state,mask,edge,direction,
+                                         projected,typed_refs,support,self.mass)
         if self.geometric_state=="tangent_channels":
             velocity=torch.einsum("bic,bicf->bif",self.channel_readout(h).to(torch.float64),vectors)
         else:
@@ -118,9 +131,8 @@ class MassShellGNNBackbone(nn.Module):
             coeff=self.edge_readout(torch.cat([hi,hj,edge],-1)).squeeze(-1).to(torch.float64)*support
             count=support.sum(-1).clamp_min(1).sqrt().to(torch.float64)
             velocity=torch.einsum("bij,bijf->bif",coeff,direction)/count.unsqueeze(-1)
-            typed=cond[:,None,:]+self.ref_roles(torch.arange(2,device=x.device))[None]
             rcoeff=self.ref_readout(torch.cat([h.unsqueeze(2).expand(-1,-1,2,-1),
-                typed.unsqueeze(1).expand(-1,n,-1,-1)],-1)).squeeze(-1)
+                typed_refs.unsqueeze(1).expand(-1,n,-1,-1)],-1)).squeeze(-1)
             velocity+=torch.einsum("bir,birf->bif",rcoeff.to(torch.float64),projected)
         return pushforward_to_tangent(x64,velocity,self.mass)*mask.unsqueeze(-1).to(torch.float64)
 

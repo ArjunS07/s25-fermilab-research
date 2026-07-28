@@ -38,6 +38,7 @@ from generate_samples import generate_samples
 from data import get_data_path
 from config import (InferRunConfig, build_config, parse_config_cli, infer_config_to_namespace,
                     generation_controls_from_namespace)
+from util.checkpoint_config import resolve_architecture
 
 MAX_N_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4
@@ -58,34 +59,17 @@ def parse_args():
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-_ARCH_KEYS = ("n_hidden", "n_layers", "use_residual", "use_reference_vectors",
-              "use_node_scalars", "node_scalar_seed", "use_adaln", "use_attention",
-              "use_hyperbolic", "hyperbolic_model", "regulator_mass", "backbone",
-              "include_mass_condition", "num_attention_heads", "vector_channels",
-              "velocity_readout_init", "geometric_state", "use_global_pooling")
-
-
 def _resolve_architecture(args, ckpt):
     """If the checkpoint carries a self-describing `full_config` (written by
     train.py's config path), use its model architecture and warn if it
     disagrees with any values the user explicitly passed. Falls back to
     `args` unchanged for older checkpoints without `full_config`."""
-    if not isinstance(ckpt, dict):
-        return args
-    full_config = ckpt.get("full_config")
-    if not full_config:
-        return args
-
-    ckpt_model = full_config.get("model", {})
-    mism = {k: (getattr(args, k, None), ckpt_model[k])
-            for k in _ARCH_KEYS if k in ckpt_model and getattr(args, k, None) != ckpt_model[k]}
+    args, mism = resolve_architecture(args, ckpt)
     if mism:
         print(f"WARNING: CLI/config architecture flags differ from checkpoint: {mism}. "
               f"Using checkpoint's architecture (loaded weights would otherwise not match).")
-    for k in _ARCH_KEYS:
-        if k in ckpt_model:
-            setattr(args, k, ckpt_model[k])
-    print("Loaded model architecture from checkpoint config.")
+    if isinstance(ckpt, dict) and ckpt.get("full_config"):
+        print("Loaded model architecture from checkpoint config.")
     return args
 
 

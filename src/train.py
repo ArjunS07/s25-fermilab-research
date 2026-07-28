@@ -22,6 +22,7 @@ from jet_attr_model import get_model_pth_path
 from util.distributions import gen_initial_distribution, time_dist
 from util.coordinates import (deterministic_jet_phi,
                               transform_rel_particle_coordinates_to_cartesian)
+from util.conditioning import scale_condition_pt
 from util.ema import ModelEMA
 from util.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
@@ -560,8 +561,7 @@ if __name__ == "__main__":
             batch_jet_mass = batch_jet_info[:, 2]
             encoded_jet_types = jet_attributes.one_hot_enc_jet_type(batch_jet_info[:, 4].long()).to(device)
             # Legacy checkpoints consume raw pT. v2 uses model-scaled pT and mass.
-            cond_pt = (batch_jet_pt / final_scale
-                       if args.backbone in ("tangent_attention", "mass_shell_gnn") else batch_jet_pt)
+            cond_pt = scale_condition_pt(batch_jet_pt, final_scale, args.backbone)
             condition_parts = [
                 encoded_jet_types,
                 batch_jet_n_particles.unsqueeze(-1),

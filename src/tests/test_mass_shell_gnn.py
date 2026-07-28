@@ -5,6 +5,8 @@ from models.mass_shell_gnn import MassShellGNNBlock
 from tests.lorentz_test_utils import apply_transform, random_proper_transform
 from util.mass_shell import project_to_shell
 from util.minkowski_utils import dotsq4
+from config import InferRunConfig, infer_config_to_namespace
+from util.checkpoint_config import resolve_architecture
 
 def inputs(mass=.1):
     torch.manual_seed(71)
@@ -50,6 +52,7 @@ def test_signed_sum_is_not_softmax_or_convex_average():
     block(torch.ones(1,3,4,dtype=torch.float64),torch.zeros(1,3,4),
           torch.zeros(1,3,2,4,dtype=torch.float64),torch.zeros(1,4),torch.zeros(1,4),
           torch.ones(1,3),torch.zeros(1,3,3,3),torch.zeros(1,3,3,4,dtype=torch.float64),
+          torch.zeros(1,3,2,4,dtype=torch.float64),torch.zeros(1,2,4),
           support,.1); handle.remove()
     assert torch.allclose(captured["x"][...,4:8],torch.full((1,3,4),-2*2**.5))
 
@@ -68,5 +71,34 @@ def test_padding_exactly_excluded_and_tangent_each_block():
 @pytest.mark.parametrize("mode,pool",[("readout_only",False),("tangent_channels",False),
                                        ("readout_only",True),("tangent_channels",True)])
 def test_checkpoint_reconstruction(mode,pool):
-    a=model(mode,pool); b=model(mode,pool); b.load_state_dict(a.state_dict())
+    a=model(mode,pool)
+    model_config = {
+        "backbone":"mass_shell_gnn", "geometric_state":mode,
+        "use_global_pooling":pool, "n_hidden":32, "n_layers":2,
+        "use_reference_vectors":True, "include_mass_condition":True,
+        "use_hyperbolic":True, "hyperbolic_model":"mass_shell",
+        "regulator_mass":.1, "vector_channels":8,
+        "velocity_readout_init":"small_normal",
+    }
+    args=infer_config_to_namespace(InferRunConfig())
+    args,_=resolve_architecture(args,{"full_config":{"model":model_config}})
+    b=LEFTJeN(5,max_particles=5,hidden_dim=args.n_hidden,num_layers=args.n_layers,
+        include_pt=True,use_reference_vectors=args.use_reference_vectors,
+        backbone=args.backbone,include_mass_condition=args.include_mass_condition,
+        vector_channels=args.vector_channels,regulator_mass=args.regulator_mass,
+        velocity_readout_init=args.velocity_readout_init,geometric_state=args.geometric_state,
+        use_global_pooling=args.use_global_pooling)
+    b.load_state_dict(a.state_dict())
     x,t,c,mask,refs=inputs(); assert torch.equal(a(x,t,c,mask,refs),b(x,t,c,mask,refs))
+
+def test_tangent_channels_use_typed_reference_directions_and_backpropagate():
+    x,t,c,mask,refs=inputs(); net=model("tangent_channels",True).train()
+    out=net(x,t,c,mask,refs)
+    swapped=net(x,t,c,mask,refs[:,[1,0]])
+    assert not torch.allclose(out,swapped,atol=1e-7)
+    out.square().sum().backward()
+    block=net.tangent_backbone.blocks[0]
+    for parameter in (block.edge_mlp[0].weight,block.node_mlp[0].weight,
+                      block.direction_gate.weight,block.reference_gate[0].weight,
+                      net.tangent_backbone.channel_readout.weight):
+        assert parameter.grad is not None and parameter.grad.abs().sum()>0

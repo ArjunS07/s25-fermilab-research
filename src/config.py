@@ -32,8 +32,8 @@ class InferDataConfig(DataConfig):
 class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    n_hidden: int = 128
-    n_layers: int = 3
+    n_hidden: int = Field(default=128, ge=1)
+    n_layers: int = Field(default=3, ge=1)
     use_residual: bool = False
     use_reference_vectors: bool = False
     use_node_scalars: bool = False
@@ -64,6 +64,11 @@ class ModelConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_tangent_attention_contract(self):
+        if self.backbone != "mass_shell_gnn":
+            if self.geometric_state != "readout_only" or self.use_global_pooling:
+                raise ValueError(
+                    "geometric_state and use_global_pooling are mass_shell_gnn-only fields"
+                )
         if self.backbone in ("tangent_attention", "mass_shell_gnn"):
             inactive_legacy_flags = [
                 name for name, enabled in (

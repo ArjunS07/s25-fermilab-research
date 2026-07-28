@@ -11,6 +11,7 @@ class ConstantField(torch.nn.Module):
         self.scale = torch.nn.Parameter(torch.tensor(0.01))
 
     def forward(self, x, t, jet_conditions, mask, ref_vectors=None):
+        self.received_dtype = x.dtype
         del t, jet_conditions, ref_vectors
         return torch.ones_like(x) * self.scale * mask.unsqueeze(-1)
 
@@ -41,3 +42,14 @@ def test_mass_shell_geometry_dispatch_is_finite_and_differentiable():
     loss.backward()
     assert torch.isfinite(loss)
     assert model.scale.grad is not None and torch.isfinite(model.scale.grad)
+
+
+def test_mass_shell_gnn_preserves_float64_model_boundary():
+    model = ConstantField()
+    config = SimpleNamespace(
+        use_hyperbolic=True, hyperbolic_model="mass_shell", regulator_mass=0.1,
+        backbone="mass_shell_gnn", train_space="cartesian", sigma_min=1e-4,
+    )
+    loss = flow_matching_loss(model=model, raw_model=model, config=config, **_batch())
+    assert torch.isfinite(loss)
+    assert model.received_dtype == torch.float64

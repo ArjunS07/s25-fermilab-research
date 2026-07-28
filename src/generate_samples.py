@@ -11,6 +11,7 @@ from util.file_management import make_clear_folder
 from util.distributions import gen_initial_distribution
 from util.hyperbolic import to_poincare_ball, from_poincare_ball
 from util.coordinates import build_reference_vectors
+from util.conditioning import scale_condition_pt
 
 plt.rc("mathtext", fontset="cm")
 sns.set_style("whitegrid")
@@ -207,7 +208,7 @@ def generate_samples(
                     prior_x = project_to_shell(prior_x, regulator_mass) * masks.unsqueeze(-1)
                 else:
                     prior_x = x * masks.unsqueeze(-1)
-            cond_pt = gen_pt / final_scale if backbone == 'tangent_attention' else gen_pt
+            cond_pt = scale_condition_pt(gen_pt, final_scale, backbone)
             condition_parts = [
                 jet_one_hot_enc,
                 gen_n_particles.unsqueeze(-1).float(),

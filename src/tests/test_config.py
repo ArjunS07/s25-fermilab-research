@@ -177,6 +177,24 @@ def test_tangent_attention_requires_typed_mass_shell_contract():
     assert cfg.model.backbone == "tangent_attention"
 
 
+@pytest.mark.parametrize("model", [
+    {"use_global_pooling": True},
+    {"geometric_state": "tangent_channels"},
+    {"backbone": "tangent_attention", "use_reference_vectors": True,
+     "include_mass_condition": True, "use_hyperbolic": True,
+     "hyperbolic_model": "mass_shell", "use_global_pooling": True},
+])
+def test_gnn_only_fields_rejected_for_other_backbones(model):
+    with pytest.raises(ValidationError, match="mass_shell_gnn-only"):
+        TrainRunConfig(model=model)
+
+
+@pytest.mark.parametrize("field", ["n_hidden", "n_layers"])
+def test_model_dimensions_must_be_positive(field):
+    with pytest.raises(ValidationError):
+        TrainRunConfig(model={field: 0})
+
+
 @pytest.mark.parametrize(
     "legacy_flag", ["use_residual", "use_node_scalars", "use_adaln", "use_attention"]
 )
