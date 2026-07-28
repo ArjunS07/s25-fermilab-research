@@ -32,6 +32,7 @@ from data import get_data_path
 from cache_icp import (resolve_training_cache_path, source_dataset_fingerprint,
                        validate_cache_metadata)
 from util.qualification import loss_improvement_summary, optimizer_limit_reached
+from util.rng import capture_rng_state, keyed_seed, keyed_torch_rng, restore_rng_state
 from util.lr_schedule import build_epoch_scheduler, build_step_scheduler
 from training import flow_matching_loss
 from config import (TrainRunConfig, build_config, parse_config_cli, train_config_to_namespace,
@@ -136,6 +137,11 @@ if __name__ == "__main__":
         print(f"{X_train_particle_transformed[:, :, 0].std()=} {X_train_particle_transformed[:, :, 1].std()=} {X_train_particle_transformed[:, :, 2].std()=} {X_train_particle_transformed[:, :, 3].std()=}")
         print(f"{X_train_particle_transformed[:, :, 0].max()=} {X_train_particle_transformed[:, :, 1].max()=} {X_train_particle_transformed[:, :, 2].max()=} {X_train_particle_transformed[:, :, 3].max()=}")
         print(f"{X_train_particle_transformed[:, :, 0].min()=} {X_train_particle_transformed[:, :, 1].min()=} {X_train_particle_transformed[:, :, 2].min()=} {X_train_particle_transformed[:, :, 3].min()=}")
+    # Model initialization is an isolated treatment stream. Its parameter count can no
+    # longer perturb data order, time, dropout, or prior draws in another arm.
+    torch.manual_seed(args.model_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.model_seed)
     model: LEFTJeN = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=args.num_particles,
@@ -157,12 +163,14 @@ if __name__ == "__main__":
     ).to(device)
     
     start_epoch = 0
+    resume_minibatch = 0
     losses = []
     global_optimizer_step = 0
     if args.resume_weights:
         checkpoint = torch.load(args.resume_weights, map_location=device)
         model.load_state_dict(checkpoint["model_state_dict"])
-        start_epoch = checkpoint["epoch"] + 1
+        start_epoch = int(checkpoint.get("resume_epoch", checkpoint["epoch"] + 1))
+        resume_minibatch = int(checkpoint.get("resume_minibatch", 0))
         losses = checkpoint.get("losses", [])
         global_optimizer_step = int(checkpoint.get("global_optimizer_step", 0))
         if is_rank0:
@@ -309,11 +317,33 @@ if __name__ == "__main__":
     weight_decay = args.weight_decay
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
+    planned_optimizer_steps = (
+        args.max_optimizer_steps
+        if args.max_optimizer_steps is not None
+        else args.num_epochs * optimizer_steps_per_epoch
+    )
+    schedule_definition = {
+        "lr_step_unit": args.lr_step_unit,
+        "planned_optimizer_steps": planned_optimizer_steps,
+        "optimizer_steps_per_epoch": optimizer_steps_per_epoch,
+        "warmup_epochs": args.lr_warmup_epochs,
+        "eta_min_factor": args.eta_min_factor,
+        "schedule": args.lr_schedule,
+        "restart_epoch": args.lr_t0,
+    }
+    if args.resume_weights and checkpoint.get("schedule_definition") is not None:
+        previous_schedule = checkpoint["schedule_definition"]
+        if previous_schedule != schedule_definition:
+            raise ValueError(
+                "resume schedule definition differs from checkpoint: "
+                f"checkpoint={previous_schedule}, requested={schedule_definition}"
+            )
+
     if args.use_cosine_lr:
         if args.lr_step_unit == "optimizer_step":
             scheduler = build_step_scheduler(
                 optimizer,
-                total_steps=args.num_epochs * optimizer_steps_per_epoch,
+                total_steps=planned_optimizer_steps,
                 steps_per_epoch=optimizer_steps_per_epoch,
                 warmup_epochs=args.lr_warmup_epochs,
                 eta_min_factor=args.eta_min_factor,
@@ -334,11 +364,13 @@ if __name__ == "__main__":
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         if args.use_cosine_lr and "scheduler_state_dict" in checkpoint:
             scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        restore_rng_state(checkpoint.get("rng_state"))
 
     probe_steps = set(args.stability_probe_steps)
     probe_jet_attr_model = None
 
-    def run_stability_probe(optimizer_step: int, epoch: int | None = None) -> None:
+    def run_stability_probe(optimizer_step: int, epoch: int | None = None,
+                            minibatch: int | None = None) -> None:
         """Run a deterministic EMA sampler probe without perturbing training state."""
         global probe_jet_attr_model
         if optimizer_step not in probe_steps:
@@ -356,6 +388,8 @@ if __name__ == "__main__":
             was_training = raw_model.training
             try:
                 if args.stability_probe_save_checkpoints:
+                    probe_at_epoch_end = (minibatch is not None
+                                          and minibatch + 1 >= len(train_loader))
                     probe_ckpt = {
                         "epoch": epoch,
                         "model_state_dict": raw_model.state_dict(),
@@ -364,6 +398,12 @@ if __name__ == "__main__":
                         "global_optimizer_step": optimizer_step,
                         "config": run_config,
                         "full_config": full_config,
+                        "rng_state": capture_rng_state(),
+                        "schedule_definition": schedule_definition,
+                        "resume_epoch": max(0, (epoch + 1 if probe_at_epoch_end else epoch)
+                                            if epoch is not None else 0),
+                        "resume_minibatch": (0 if probe_at_epoch_end else
+                                             minibatch + 1 if minibatch is not None else 0),
                     }
                     if args.use_cosine_lr:
                         probe_ckpt["scheduler_state_dict"] = scheduler.state_dict()
@@ -438,6 +478,8 @@ if __name__ == "__main__":
         global_optimizer_step, args.max_optimizer_steps
     )
     last_completed_epoch = start_epoch - 1
+    next_resume_epoch = start_epoch
+    next_resume_minibatch = resume_minibatch
     for epoch in range(start_epoch, total_epochs):
         if reached_optimizer_limit:
             break
@@ -447,9 +489,8 @@ if __name__ == "__main__":
         # ── Sample epoch indices (uniform or curriculum) ─────────────────────
         # All ranks produce the same indices via a deterministic seed, then each
         # takes its own contiguous slice so every rank sees a diverse bucket mix.
-        _epoch_seed = RANDOM_SEED + epoch * 1000
-        _rng = torch.get_rng_state()
-        torch.manual_seed(_epoch_seed)
+        selection_generator = torch.Generator(device="cpu")
+        selection_generator.manual_seed(keyed_seed(args.data_order_seed, epoch, 0, 0))
 
         if args.use_curriculum:
             # alpha decays linearly from alpha_start (epoch 0) to 0 (final epoch),
@@ -469,14 +510,13 @@ if __name__ == "__main__":
             )
             # Draw with replacement so the curriculum distribution is exact
             epoch_indices = torch.multinomial(
-                sample_weights, samples_per_epoch, replacement=True
+                sample_weights, samples_per_epoch, replacement=True,
+                generator=selection_generator,
             )
         else:
             epoch_indices = torch.randperm(
-                len(X_train_particle_transformed)
+                len(X_train_particle_transformed), generator=selection_generator,
             )[:samples_per_epoch]
-
-        torch.set_rng_state(_rng)  # restore so training noise is unaffected
 
         if args.distributed:
             shard_size = len(epoch_indices) // world_size
@@ -495,7 +535,10 @@ if __name__ == "__main__":
             paired_dataset,
             batch_size=args.batch_size,
             shuffle=True,
-            pin_memory=False
+            pin_memory=False,
+            generator=torch.Generator(device="cpu").manual_seed(
+                keyed_seed(args.data_order_seed, epoch, 1, rank)
+            ),
         )
 
         optimizer.zero_grad()
@@ -504,6 +547,8 @@ if __name__ == "__main__":
         accumulated_batches = 0
 
         for i, (batch_jet_info, batch_particle_info, batch_jet_phi, batch_x0_cached) in enumerate(train_loader):
+            if epoch == start_epoch and i < resume_minibatch:
+                continue
 
             batch_jet_info = batch_jet_info.to(device)
             batch_particle_info = batch_particle_info.to(device)
@@ -528,7 +573,9 @@ if __name__ == "__main__":
             # conditioning. n_particles is preserved because it is already encoded in
             # the particle mask, so nulling it adds no guidance signal and only weakens
             # the unconditional-conditional gap.
-            dropout_mask = torch.rand(batch_jet_info_cropped.shape[0], device=device) < args.cfg_null_dropout_rate
+            with keyed_torch_rng(args.dropout_seed, epoch, i, rank, device):
+                dropout_mask = (torch.rand(batch_jet_info_cropped.shape[0], device=device)
+                                < args.cfg_null_dropout_rate)
             if dropout_mask.any():
                 null_for_batch = raw_model.make_null_cond(batch_jet_info_cropped)
                 batch_jet_info_cropped = torch.where(
@@ -541,11 +588,15 @@ if __name__ == "__main__":
             # TODO: Boost before, can't boost scaled data
             # x_1 = boost_to_com_frame(x_1, mask=true_masks)
             # x_1 = (1/SCALE) * x_1
-            x_0 = (batch_x0_cached.to(device) if paired_x0_cache is not None else
-                   gen_initial_distribution(x_1=x_1, prior_dist=args.prior_dist,
-                                            jet_features=batch_jet_info,
-                                            jet_phi=batch_jet_phi.to(device),
-                                            device=device, model_scale=final_scale).to(device))
+            if paired_x0_cache is not None:
+                x_0 = batch_x0_cached.to(device)
+            else:
+                with keyed_torch_rng(args.prior_seed, epoch, i, rank, device):
+                    x_0 = gen_initial_distribution(
+                        x_1=x_1, prior_dist=args.prior_dist,
+                        jet_features=batch_jet_info, jet_phi=batch_jet_phi.to(device),
+                        device=device, model_scale=final_scale,
+                    ).to(device)
 
             mask_exp = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
             x_1 = mask_exp * x_1
@@ -562,7 +613,8 @@ if __name__ == "__main__":
                                                       jet_mass=(batch_jet_info[:, 2]
                                                                 if args.include_mass_condition else None))
 
-            t = _sample_t(x_0.shape[0]).to(device)
+            with keyed_torch_rng(args.time_seed, epoch, i, rank, device):
+                t = _sample_t(x_0.shape[0]).to(device)
             loss = flow_matching_loss(
                 model=model, raw_model=raw_model, config=args,
                 x0=x_0, x1=x_1, t=t, mask=true_masks,
@@ -645,11 +697,15 @@ if __name__ == "__main__":
                 if optimizer_limit_reached(global_optimizer_step, args.max_optimizer_steps):
                     reached_optimizer_limit = True
 
-                run_stability_probe(global_optimizer_step, epoch)
+                run_stability_probe(global_optimizer_step, epoch, i)
                 
             del x_1, x_0, t, loss
             if reached_optimizer_limit:
                 break
+
+        epoch_completed = (i + 1 == len(train_loader))
+        next_resume_epoch = epoch + 1 if epoch_completed else epoch
+        next_resume_minibatch = 0 if epoch_completed else i + 1
 
         if args.distributed:
             loss_tensor = torch.tensor(epoch_loss / epoch_optimizer_steps, device=device)
@@ -659,6 +715,11 @@ if __name__ == "__main__":
             epoch_mean_loss = epoch_loss / epoch_optimizer_steps
         losses.append(epoch_mean_loss)
         last_completed_epoch = epoch
+
+        # Advance epoch-stepped schedules before serializing so the checkpoint is the exact
+        # state observed at the start of the next epoch.
+        if epoch_completed and args.use_cosine_lr and args.lr_step_unit == "epoch":
+            scheduler.step()
 
         # Overwrite latest checkpoint so training can be resumed at any point.
         if is_rank0:
@@ -670,6 +731,10 @@ if __name__ == "__main__":
                 "global_optimizer_step": global_optimizer_step,
                 "config": run_config,
                 "full_config": full_config,
+                "rng_state": capture_rng_state(),
+                "schedule_definition": schedule_definition,
+                "resume_epoch": next_resume_epoch,
+                "resume_minibatch": next_resume_minibatch,
             }
             if args.use_cosine_lr:
                 ckpt["scheduler_state_dict"] = scheduler.state_dict()
@@ -677,8 +742,6 @@ if __name__ == "__main__":
                 ckpt["ema_state_dict"] = ema.state_dict()
             torch.save(ckpt, f"{model_output_path}/models/latest_checkpoint.pth")
 
-        if args.use_cosine_lr and args.lr_step_unit == "epoch":
-            scheduler.step()
         if reached_optimizer_limit:
             break
 
@@ -707,6 +770,10 @@ if __name__ == "__main__":
             "global_optimizer_step": global_optimizer_step,
             "config": run_config,
             "full_config": full_config,
+            "rng_state": capture_rng_state(),
+            "schedule_definition": schedule_definition,
+            "resume_epoch": next_resume_epoch,
+            "resume_minibatch": next_resume_minibatch,
         }
         if args.use_cosine_lr:
             final_ckpt["scheduler_state_dict"] = scheduler.state_dict()

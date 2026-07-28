@@ -22,6 +22,7 @@ import pickle
 import random
 import subprocess
 import traceback
+import hashlib
 
 import numpy as np
 import torch
@@ -195,6 +196,7 @@ def main():
     run_cfg   = args.vf_mode in ("cfg",   "both")
     run_nocfg = args.vf_mode in ("nocfg", "both")
 
+    stage_status = {}
     if run_cfg:
         try:
             vf_cfg_dir = os.path.join(out_dir, "vf_viz_cfg")
@@ -217,7 +219,9 @@ def main():
                 use_reference_vectors=args.use_reference_vectors,
             )
             print("CFG vector field done.")
+            stage_status["vector_field_cfg"] = {"status": "ok"}
         except Exception as e:
+            stage_status["vector_field_cfg"] = {"status": "warning", "error": str(e)}
             print(f"\n[ERROR] CFG vector field failed: {e}")
             traceback.print_exc()
 
@@ -242,7 +246,9 @@ def main():
                 use_reference_vectors=args.use_reference_vectors,
             )
             print("No-CFG vector field done.")
+            stage_status["vector_field_nocfg"] = {"status": "ok"}
         except Exception as e:
+            stage_status["vector_field_nocfg"] = {"status": "warning", "error": str(e)}
             print(f"\n[ERROR] No-CFG vector field failed: {e}")
             traceback.print_exc()
 
@@ -278,7 +284,9 @@ def main():
             bundle_path = os.path.join(out_dir, "replay_bundle.pt")
             if os.path.exists(bundle_path):
                 print(f"Saved exact replay bundle → {bundle_path}")
+            stage_status["samples"] = {"status": "ok"}
         except Exception as e:
+            stage_status["samples"] = {"status": "failed", "error": str(e)}
             print(f"\n[ERROR] Sample generation failed: {e}")
             traceback.print_exc()
 
@@ -286,6 +294,7 @@ def main():
     eval_info = None
     if not args.skip_metrics:
         if samples is None:
+            stage_status["metrics"] = {"status": "failed", "error": "no samples available"}
             print("\n[WARN] No samples available — skipping metrics.")
         else:
             try:
@@ -301,7 +310,9 @@ def main():
                     prior_samples=prior_samples,
                 )
                 print("Metrics done.")
+                stage_status["metrics"] = {"status": "ok"}
             except Exception as e:
+                stage_status["metrics"] = {"status": "failed", "error": str(e)}
                 print(f"\n[ERROR] Metric calculation failed: {e}")
                 traceback.print_exc()
 
@@ -320,6 +331,18 @@ def main():
         with open(train_summary_path) as f:
             train_summary = json.load(f)
 
+    def _sha256(path):
+        if not path or not os.path.isfile(path):
+            return None
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    stage1_path = get_model_pth_path(args.output_path)
+    resolved_replay = (args.replay_bundle_path or os.path.join(out_dir, "replay_bundle.pt"))
+
     summary = {
         "final_loss": train_summary.get("final_loss"),
         "prior_dist": args.prior_dist,
@@ -336,6 +359,15 @@ def main():
             "replay_bundle_path": args.replay_bundle_path,
         },
         "git_commit": git_commit,
+        "stage_status": stage_status,
+        "provenance": {
+            "checkpoint_path": os.path.abspath(args.checkpoint_path),
+            "checkpoint_sha256": _sha256(args.checkpoint_path),
+            "stage1_path": os.path.abspath(stage1_path),
+            "stage1_sha256": _sha256(stage1_path),
+            "replay_bundle_path": os.path.abspath(resolved_replay),
+            "replay_bundle_sha256": _sha256(resolved_replay),
+        },
         "config": train_summary.get("config"),
         "full_config": train_summary.get("full_config"),
         "metrics": eval_info,
@@ -356,6 +388,11 @@ def main():
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2, default=_json_default)
     print(f"Summary written → {summary_path}")
+
+    failed_required = [name for name in ("samples", "metrics")
+                       if stage_status.get(name, {}).get("status") == "failed"]
+    if failed_required:
+        raise RuntimeError("requested inference stages failed: " + ", ".join(failed_required))
 
     print(f"\nAll stages complete. Outputs in: {out_dir}")
 

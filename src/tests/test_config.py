@@ -153,6 +153,18 @@ def test_unknown_field_rejected():
         TrainRunConfig(training={"typo_field": 1})
 
 
+def test_lr_cadence_and_rng_seeds_reach_training_namespace():
+    from config import train_config_to_namespace
+    cfg = TrainRunConfig(training={
+        "lr_step_unit": "epoch", "model_seed": 1, "data_order_seed": 2,
+        "time_seed": 3, "dropout_seed": 4, "prior_seed": 5,
+    })
+    args = train_config_to_namespace(cfg)
+    assert args.lr_step_unit == "epoch"
+    assert (args.model_seed, args.data_order_seed, args.time_seed,
+            args.dropout_seed, args.prior_seed) == (1, 2, 3, 4, 5)
+
+
 def test_tangent_attention_requires_typed_mass_shell_contract():
     with pytest.raises(ValidationError):
         TrainRunConfig(model={"backbone": "tangent_attention"})

@@ -131,6 +131,11 @@ class TrainingConfig(BaseModel):
     icp_assignment_cost: Literal["euclidean", "geodesic", "squared_geodesic"] = "euclidean"
 
     distributed: bool = False
+    model_seed: int = 42
+    data_order_seed: int = 1042
+    time_seed: int = 2042
+    dropout_seed: int = 3042
+    prior_seed: int = 4042
 
     @model_validator(mode="after")
     def validate_qualification_steps(self):
@@ -354,6 +359,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         stability_probe_integration_steps=cfg.inference.stability_probe_integration_steps,
         skip_metrics=cfg.inference.skip_metrics,
         use_cosine_lr=cfg.training.use_cosine_lr,
+        lr_step_unit=cfg.training.lr_step_unit,
         lr_schedule=cfg.training.lr_schedule,
         lr_t0=cfg.training.lr_t0,
         lr_warmup_epochs=cfg.training.lr_warmup_epochs,
@@ -384,6 +390,11 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         cache_dir=cfg.paths.cache_dir,
         resume_weights=cfg.paths.resume_weights,
         distributed=cfg.training.distributed,
+        model_seed=cfg.training.model_seed,
+        data_order_seed=cfg.training.data_order_seed,
+        time_seed=cfg.training.time_seed,
+        dropout_seed=cfg.training.dropout_seed,
+        prior_seed=cfg.training.prior_seed,
         lr=cfg.training.lr,
         weight_decay=cfg.training.weight_decay,
     )
