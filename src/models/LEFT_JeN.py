@@ -6,6 +6,7 @@ small factory so archived configs and checkpoint-analysis tools keep working.
 
 from models.legacy_leftjen import LegacyLEFTJeN, masked_neighbor_softmax, psi
 from models.mass_shell_flow import MassShellFlow
+from models.mass_shell_gnn import MassShellGNNFlow
 
 
 def LEFTJeN(max_num_jet_types, max_particles=150, embed_dim=128,
@@ -16,13 +17,16 @@ def LEFTJeN(max_num_jet_types, max_particles=150, embed_dim=128,
             use_adaln=False, use_attention=False, backbone="legacy",
             include_mass_condition=False, num_attention_heads=8,
             vector_channels=16, regulator_mass=0.5,
-            velocity_readout_init="small_normal"):
+            velocity_readout_init="small_normal", geometric_state="readout_only",
+            use_global_pooling=False):
+    condition_dim = max_num_jet_types + 1 + int(include_pt) + int(include_mass_condition)
+    if backbone == "mass_shell_gnn":
+        if not use_reference_vectors: raise ValueError("mass_shell_gnn requires typed reference vectors")
+        return MassShellGNNFlow(condition_dim,max_num_jet_types,hidden_dim,num_layers,
+                                vector_channels,regulator_mass,geometric_state,use_global_pooling)
     if backbone == "tangent_attention":
         if not use_reference_vectors:
             raise ValueError("tangent_attention requires typed reference vectors")
-        condition_dim = (
-            max_num_jet_types + 1 + int(include_pt) + int(include_mass_condition)
-        )
         return MassShellFlow(
             condition_dim=condition_dim,
             n_particle_types=max_num_jet_types,

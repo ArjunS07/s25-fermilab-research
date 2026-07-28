@@ -62,7 +62,7 @@ _ARCH_KEYS = ("n_hidden", "n_layers", "use_residual", "use_reference_vectors",
               "use_node_scalars", "node_scalar_seed", "use_adaln", "use_attention",
               "use_hyperbolic", "hyperbolic_model", "regulator_mass", "backbone",
               "include_mass_condition", "num_attention_heads", "vector_channels",
-              "velocity_readout_init")
+              "velocity_readout_init", "geometric_state", "use_global_pooling")
 
 
 def _resolve_architecture(args, ckpt):
@@ -96,7 +96,7 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
                      include_mass_condition=False, num_attention_heads=8,
                      vector_channels=16, regulator_mass=0.5,
                      velocity_readout_init="small_normal", preloaded_ckpt=None,
-                     use_ema_weights=False):
+                     use_ema_weights=False, geometric_state="readout_only", use_global_pooling=False):
     model = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=num_particles,
@@ -115,6 +115,7 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
         vector_channels=vector_channels,
         regulator_mass=regulator_mass,
         velocity_readout_init=velocity_readout_init,
+        geometric_state=geometric_state, use_global_pooling=use_global_pooling,
     ).to(device)
 
     ckpt = preloaded_ckpt if preloaded_ckpt is not None else torch.load(checkpoint_path, map_location=device)
@@ -187,6 +188,7 @@ def main():
         num_attention_heads=args.num_attention_heads,
         vector_channels=args.vector_channels,
         velocity_readout_init=args.velocity_readout_init,
+        geometric_state=args.geometric_state, use_global_pooling=args.use_global_pooling,
         regulator_mass=args.regulator_mass,
         preloaded_ckpt=ckpt,
         use_ema_weights=args.use_ema_weights,

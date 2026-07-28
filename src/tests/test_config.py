@@ -340,6 +340,7 @@ def test_run_config_dict_matches_legacy_keys():
         "use_adaln", "use_attention", "jet_types", "final_scale",
         "backbone", "include_mass_condition", "num_attention_heads",
             "vector_channels", "regulator_mass", "velocity_readout_init",
+            "geometric_state", "use_global_pooling",
     }
     assert d["num_particles"] == 30
     assert d["jet_types"] == ["g"]

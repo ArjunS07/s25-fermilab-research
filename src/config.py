@@ -54,7 +54,9 @@ class ModelConfig(BaseModel):
     regulator_mass: float = 0.5
     # v2 keeps the ODE coordinates fixed inside the network and refines invariant scalar
     # plus tangent-vector channels with typed reference cross-attention.
-    backbone: Literal["legacy", "tangent_attention"] = "legacy"
+    backbone: Literal["legacy", "tangent_attention", "mass_shell_gnn"] = "legacy"
+    geometric_state: Literal["readout_only", "tangent_channels"] = "readout_only"
+    use_global_pooling: bool = False
     include_mass_condition: bool = False
     num_attention_heads: int = Field(default=8, ge=1)
     vector_channels: int = Field(default=16, ge=1)
@@ -62,7 +64,7 @@ class ModelConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_tangent_attention_contract(self):
-        if self.backbone == "tangent_attention":
+        if self.backbone in ("tangent_attention", "mass_shell_gnn"):
             inactive_legacy_flags = [
                 name for name, enabled in (
                     ("use_residual", self.use_residual),
@@ -73,17 +75,19 @@ class ModelConfig(BaseModel):
             ]
             if inactive_legacy_flags:
                 raise ValueError(
-                    "tangent_attention does not use legacy model flags: "
+                    f"{self.backbone} does not use legacy model flags: "
                     + ", ".join(inactive_legacy_flags)
                 )
             if not self.use_reference_vectors:
-                raise ValueError("tangent_attention requires model.use_reference_vectors=true")
+                raise ValueError(f"{self.backbone} requires model.use_reference_vectors=true")
             if not self.include_mass_condition:
-                raise ValueError("tangent_attention requires model.include_mass_condition=true")
+                raise ValueError(f"{self.backbone} requires model.include_mass_condition=true")
             if not self.use_hyperbolic or self.hyperbolic_model != "mass_shell":
-                raise ValueError("tangent_attention currently requires mass-shell geometry")
-            if self.n_hidden % self.num_attention_heads:
+                raise ValueError(f"{self.backbone} currently requires mass-shell geometry")
+            if self.backbone == "tangent_attention" and self.n_hidden % self.num_attention_heads:
                 raise ValueError("model.n_hidden must be divisible by model.num_attention_heads")
+            if self.backbone == "mass_shell_gnn" and self.velocity_readout_init == "zero":
+                raise ValueError("mass_shell_gnn requires small_normal velocity initialization")
         return self
 
 
@@ -371,6 +375,8 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         num_attention_heads=cfg.model.num_attention_heads,
         vector_channels=cfg.model.vector_channels,
         velocity_readout_init=cfg.model.velocity_readout_init,
+        geometric_state=cfg.model.geometric_state,
+        use_global_pooling=cfg.model.use_global_pooling,
         use_curriculum=cfg.training.use_curriculum,
         use_time_sampling=cfg.training.use_time_sampling,
         use_reference_vectors=cfg.model.use_reference_vectors,
@@ -428,6 +434,8 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         num_attention_heads=cfg.model.num_attention_heads,
         vector_channels=cfg.model.vector_channels,
         velocity_readout_init=cfg.model.velocity_readout_init,
+        geometric_state=cfg.model.geometric_state,
+        use_global_pooling=cfg.model.use_global_pooling,
         sampler=cfg.inference.sampler,
         mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
         mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
@@ -505,6 +513,8 @@ def run_config_dict(cfg: TrainRunConfig, final_scale: float) -> dict:
         "num_attention_heads": cfg.model.num_attention_heads,
         "vector_channels": cfg.model.vector_channels,
         "velocity_readout_init": cfg.model.velocity_readout_init,
+        "geometric_state": cfg.model.geometric_state,
+        "use_global_pooling": cfg.model.use_global_pooling,
         "regulator_mass": cfg.model.regulator_mass,
         "jet_types": cfg.data.jet_types,
         "final_scale": float(final_scale),

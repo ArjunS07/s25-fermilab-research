@@ -160,6 +160,7 @@ if __name__ == "__main__":
         vector_channels=args.vector_channels,
         regulator_mass=args.regulator_mass,
         velocity_readout_init=args.velocity_readout_init,
+        geometric_state=args.geometric_state, use_global_pooling=args.use_global_pooling,
     ).to(device)
     
     start_epoch = 0
@@ -212,6 +213,7 @@ if __name__ == "__main__":
         "num_attention_heads": args.num_attention_heads,
         "vector_channels": args.vector_channels,
         "velocity_readout_init": args.velocity_readout_init,
+        "geometric_state": args.geometric_state, "use_global_pooling": args.use_global_pooling,
         "regulator_mass": args.regulator_mass,
         "jet_types": args.jet_types,
         "final_scale": float(final_scale),
@@ -559,7 +561,7 @@ if __name__ == "__main__":
             encoded_jet_types = jet_attributes.one_hot_enc_jet_type(batch_jet_info[:, 4].long()).to(device)
             # Legacy checkpoints consume raw pT. v2 uses model-scaled pT and mass.
             cond_pt = (batch_jet_pt / final_scale
-                       if args.backbone == "tangent_attention" else batch_jet_pt)
+                       if args.backbone in ("tangent_attention", "mass_shell_gnn") else batch_jet_pt)
             condition_parts = [
                 encoded_jet_types,
                 batch_jet_n_particles.unsqueeze(-1),
