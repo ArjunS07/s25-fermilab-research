@@ -108,6 +108,7 @@ class TrainingConfig(BaseModel):
     weight_decay: float = 1e-6
     use_cosine_lr: bool = True
     lr_schedule: Literal["legacy_restarts", "monotonic_cosine"] = "legacy_restarts"
+    lr_step_unit: Literal["optimizer_step", "epoch"] = "optimizer_step"
     lr_t0: int = 0
     lr_warmup_epochs: int = 10
     eta_min_factor: float = 0.3

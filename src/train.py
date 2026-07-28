@@ -32,7 +32,7 @@ from data import get_data_path
 from cache_icp import (resolve_training_cache_path, source_dataset_fingerprint,
                        validate_cache_metadata)
 from util.qualification import loss_improvement_summary, optimizer_limit_reached
-from util.lr_schedule import build_step_scheduler
+from util.lr_schedule import build_epoch_scheduler, build_step_scheduler
 from training import flow_matching_loss
 from config import (TrainRunConfig, build_config, parse_config_cli, train_config_to_namespace,
                     generation_controls_from_namespace)
@@ -310,15 +310,25 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
     if args.use_cosine_lr:
-        scheduler = build_step_scheduler(
-            optimizer,
-            total_steps=args.num_epochs * optimizer_steps_per_epoch,
-            steps_per_epoch=optimizer_steps_per_epoch,
-            warmup_epochs=args.lr_warmup_epochs,
-            eta_min_factor=args.eta_min_factor,
-            schedule=args.lr_schedule,
-            restart_epoch=args.lr_t0,
-        )
+        if args.lr_step_unit == "optimizer_step":
+            scheduler = build_step_scheduler(
+                optimizer,
+                total_steps=args.num_epochs * optimizer_steps_per_epoch,
+                steps_per_epoch=optimizer_steps_per_epoch,
+                warmup_epochs=args.lr_warmup_epochs,
+                eta_min_factor=args.eta_min_factor,
+                schedule=args.lr_schedule,
+                restart_epoch=args.lr_t0,
+            )
+        else:
+            scheduler = build_epoch_scheduler(
+                optimizer,
+                total_epochs=args.num_epochs,
+                warmup_epochs=args.lr_warmup_epochs,
+                eta_min_factor=args.eta_min_factor,
+                schedule=args.lr_schedule,
+                restart_epoch=args.lr_t0,
+            )
 
     if args.resume_weights:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -597,7 +607,7 @@ if __name__ == "__main__":
                 
                 unclipped_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
                 optimizer.step()
-                if args.use_cosine_lr:
+                if args.use_cosine_lr and args.lr_step_unit == "optimizer_step":
                     scheduler.step()
                 optimizer.zero_grad()
                 if ema is not None:
@@ -667,6 +677,8 @@ if __name__ == "__main__":
                 ckpt["ema_state_dict"] = ema.state_dict()
             torch.save(ckpt, f"{model_output_path}/models/latest_checkpoint.pth")
 
+        if args.use_cosine_lr and args.lr_step_unit == "epoch":
+            scheduler.step()
         if reached_optimizer_limit:
             break
 

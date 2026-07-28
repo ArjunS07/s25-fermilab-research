@@ -52,3 +52,35 @@ def build_step_scheduler(optimizer, *, total_steps: int, steps_per_epoch: int,
             restart_steps=restart_steps,
         ),
     )
+
+
+def build_epoch_scheduler(optimizer, *, total_epochs: int, warmup_epochs: int,
+                          eta_min_factor: float, schedule: str,
+                          restart_epoch: int):
+    """Reproduce the historical scheduler, advanced once after every epoch."""
+    base_lr = optimizer.param_groups[0]["lr"]
+    if schedule == "monotonic_cosine":
+        tail = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=max(1, total_epochs - warmup_epochs),
+            eta_min=base_lr * eta_min_factor,
+        )
+    elif schedule == "legacy_restarts":
+        default_restart = total_epochs // 4 if total_epochs >= 20 else max(1, total_epochs // 2)
+        tail = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=restart_epoch if restart_epoch > 0 else default_restart,
+            T_mult=1,
+            eta_min=base_lr * eta_min_factor,
+        )
+    else:
+        raise ValueError(f"unknown learning-rate schedule {schedule!r}")
+    if warmup_epochs <= 0:
+        return tail
+    warmup = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor=1e-6, end_factor=1.0,
+        total_iters=warmup_epochs,
+    )
+    return torch.optim.lr_scheduler.SequentialLR(
+        optimizer, schedulers=[warmup, tail], milestones=[warmup_epochs]
+    )

@@ -1,7 +1,11 @@
 import pytest
 import torch
 
-from util.lr_schedule import build_step_scheduler, learning_rate_multiplier
+from util.lr_schedule import (
+    build_epoch_scheduler,
+    build_step_scheduler,
+    learning_rate_multiplier,
+)
 
 
 def test_warmup_changes_smoothly_per_optimizer_step():
@@ -38,3 +42,19 @@ def test_scheduler_steps_after_each_optimizer_update_and_roundtrips():
     )
     restored.load_state_dict(state)
     assert restored.last_epoch == scheduler.last_epoch
+
+
+def test_epoch_scheduler_reproduces_historical_piecewise_warmup():
+    parameter = torch.nn.Parameter(torch.tensor(1.0))
+    optimizer = torch.optim.AdamW([parameter], lr=6e-4)
+    scheduler = build_epoch_scheduler(
+        optimizer, total_epochs=202, warmup_epochs=10,
+        eta_min_factor=0.03, schedule="monotonic_cosine", restart_epoch=0,
+    )
+    observed = [optimizer.param_groups[0]["lr"]]
+    for _ in range(4):
+        optimizer.step()
+        scheduler.step()
+        observed.append(optimizer.param_groups[0]["lr"])
+    assert observed == pytest.approx([6e-10, 6.000054e-5, 0.00012000048,
+                                      0.00018000042, 0.00024000036])
