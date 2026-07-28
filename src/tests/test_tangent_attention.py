@@ -92,3 +92,17 @@ def test_zero_readout_initialization_produces_zero_initial_velocity():
     ).eval()
     assert torch.equal(zero_model(x, t, cond, mask, refs), torch.zeros_like(x))
     assert torch.count_nonzero(zero_model.tangent_backbone.readout.weight) == 0
+
+
+def test_tangent_sampler_accepts_generation_keyword_contract():
+    x, _, cond, mask, refs, mass = _inputs()
+    model = _model(mass)
+    state = project_to_shell(x * mask.unsqueeze(-1), mass)
+    output, diagnostics = model.step_hyperbolic(
+        y_t=state, jet_conditions=cond, mask=mask,
+        t_start=torch.tensor(0.0), t_end=torch.tensor(0.01),
+        hyperbolic_model="mass_shell", regulator_mass=mass,
+        ref_vectors=refs, return_diagnostics=True,
+    )
+    assert output.shape == state.shape
+    assert diagnostics["substeps"] == 1

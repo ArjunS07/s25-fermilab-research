@@ -80,7 +80,7 @@ class MassShellFlow(nn.Module):
             )
         return pushforward_to_tangent(state, velocity, self.regulator_mass) * mask.unsqueeze(-1)
 
-    def step_hyperbolic(self, state, jet_conditions, mask, t_start, t_end,
+    def step_hyperbolic(self, y_t, jet_conditions, mask, t_start, t_end,
                         c=1.0, use_cfg=False, guidance_weight=2.0,
                         ref_vectors=None, hyperbolic_model="mass_shell",
                         regulator_mass=None, max_step_rapidity=None,
@@ -95,14 +95,14 @@ class MassShellFlow(nn.Module):
         from util.mass_shell import (MassShellIntegrationError, exp_map,
                                      project_to_shell, tangent_norm)
 
-        current = state
+        current = y_t
         current_t = float(t_start.detach().cpu())
         end_t = float(t_end.detach().cpu())
         substeps = 0
         max_norm_seen = 0.0
         max_rapidity_seen = 0.0
         while current_t < end_t - 1e-15:
-            t = torch.as_tensor(current_t, device=state.device, dtype=t_start.dtype)
+            t = torch.as_tensor(current_t, device=y_t.device, dtype=t_start.dtype)
             velocity = self._mass_shell_velocity(
                 current, jet_conditions, mask, t, use_cfg, guidance_weight, ref_vectors
             )
