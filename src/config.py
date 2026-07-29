@@ -173,9 +173,11 @@ class InferenceConfig(BaseModel):
     # Each nominal interval is subdivided until ||v||_g * dt / m is at most this value.
     mass_shell_max_step_rapidity: float | None = Field(default=None, gt=0)
     mass_shell_max_substeps: int = Field(default=64, ge=1)
-    # Optional experiment gate. Training exits non-zero after writing diagnostics
-    # when the generated non-finite/exploding trajectory fraction exceeds this value.
+    # Scientific qualification threshold. Exceeding it marks qualification failed.
     max_invalid_fraction: float | None = Field(default=None, ge=0, le=1)
+    # Dedicated smoke/qualification jobs may opt into a nonzero exit. Ordinary training and
+    # diagnostic jobs retain artifacts/metrics and report qualification in summary.json.
+    fail_on_qualification_error: bool = False
     # Softer reporting threshold. Exceeding it is recorded as a qualification warning
     # but does not suppress physics metrics.
     warn_invalid_fraction: float | None = Field(default=None, ge=0, le=1)
@@ -354,6 +356,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
         mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
         max_invalid_fraction=cfg.inference.max_invalid_fraction,
+        fail_on_qualification_error=cfg.inference.fail_on_qualification_error,
         warn_invalid_fraction=cfg.inference.warn_invalid_fraction,
         stability_probe_samples=cfg.inference.stability_probe_samples,
         stability_probe_integration_steps=cfg.inference.stability_probe_integration_steps,
