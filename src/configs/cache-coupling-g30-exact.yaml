@@ -1,0 +1,15 @@
+data: {jet_types: ["g"], num_particles: 30}
+cache:
+  geometry: mass_shell
+  assignment_cost: squared_geodesic
+  particle_coupling: exact_geodesic_icp
+  coupling_seed: 5042
+  regulator_mass: 0.1
+  prior_dist: axis_aligned_per_jet
+  seed: 42
+  n_workers: 16
+  skip_if_exists: true
+paths:
+  output_path: /mnt/data/output
+  cache_dir: /mnt/data/caches
+  icp_cache_path: /mnt/data/caches/coupling-g30/exact/icp_cache.pkl
