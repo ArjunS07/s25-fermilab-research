@@ -111,6 +111,9 @@ class TrainingConfig(BaseModel):
     lr_step_unit: Literal["optimizer_step", "epoch"] = "optimizer_step"
     lr_t0: int = 0
     lr_warmup_epochs: int = 10
+    # Explicit optimizer-update warmup. Required for matched step-budget experiments;
+    # unlike lr_warmup_epochs it does not change when dataset size/batching changes.
+    lr_warmup_steps: Optional[int] = Field(default=None, ge=0)
     eta_min_factor: float = 0.3
 
     use_curriculum: bool = True
@@ -159,6 +162,15 @@ class TrainingConfig(BaseModel):
         if (self.max_optimizer_steps is not None and self.stability_probe_steps
                 and self.stability_probe_steps[-1] > self.max_optimizer_steps):
             raise ValueError("stability probe step exceeds training.max_optimizer_steps")
+        if self.lr_step_unit == "epoch" and self.lr_warmup_steps is not None:
+            raise ValueError(
+                "training.lr_warmup_steps is only valid with lr_step_unit=optimizer_step"
+            )
+        if (self.lr_warmup_steps is not None and self.max_optimizer_steps is not None
+                and self.lr_warmup_steps >= self.max_optimizer_steps):
+            raise ValueError(
+                "training.lr_warmup_steps must be smaller than max_optimizer_steps"
+            )
         if self.particle_coupling != "legacy" and not self.use_icp:
             raise ValueError(
                 "explicit training.particle_coupling arms require training.use_icp=true "
@@ -393,6 +405,7 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         lr_schedule=cfg.training.lr_schedule,
         lr_t0=cfg.training.lr_t0,
         lr_warmup_epochs=cfg.training.lr_warmup_epochs,
+        lr_warmup_steps=cfg.training.lr_warmup_steps,
         use_hyperbolic=cfg.model.use_hyperbolic,
         hyperbolic_model=cfg.model.hyperbolic_model,
         regulator_mass=cfg.model.regulator_mass,

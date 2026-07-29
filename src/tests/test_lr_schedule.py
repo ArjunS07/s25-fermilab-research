@@ -44,6 +44,21 @@ def test_scheduler_steps_after_each_optimizer_update_and_roundtrips():
     assert restored.last_epoch == scheduler.last_epoch
 
 
+def test_explicit_optimizer_warmup_steps_override_dataset_epoch_size():
+    parameter = torch.nn.Parameter(torch.tensor(1.0))
+    optimizer = torch.optim.AdamW([parameter], lr=3e-4)
+    scheduler = build_step_scheduler(
+        optimizer, total_steps=500, steps_per_epoch=40, warmup_epochs=10,
+        warmup_steps=200, eta_min_factor=0.03,
+        schedule="monotonic_cosine", restart_epoch=0,
+    )
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(3e-10)
+    for _ in range(200):
+        optimizer.step()
+        scheduler.step()
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(3e-4)
+
+
 def test_epoch_scheduler_reproduces_historical_piecewise_warmup():
     parameter = torch.nn.Parameter(torch.tensor(1.0))
     optimizer = torch.optim.AdamW([parameter], lr=6e-4)

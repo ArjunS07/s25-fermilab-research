@@ -166,6 +166,24 @@ def test_lr_cadence_and_rng_seeds_reach_training_namespace():
             args.dropout_seed, args.prior_seed) == (1, 2, 3, 4, 5)
 
 
+def test_optimizer_warmup_steps_are_typed_and_reach_namespace():
+    from config import train_config_to_namespace
+    cfg = TrainRunConfig(training={
+        "lr_step_unit": "optimizer_step", "lr_warmup_steps": 200,
+        "max_optimizer_steps": 500,
+    })
+    assert train_config_to_namespace(cfg).lr_warmup_steps == 200
+    with pytest.raises(ValidationError):
+        TrainRunConfig(training={
+            "lr_step_unit": "epoch", "lr_warmup_steps": 200,
+        })
+    with pytest.raises(ValidationError):
+        TrainRunConfig(training={
+            "lr_step_unit": "optimizer_step", "lr_warmup_steps": 500,
+            "max_optimizer_steps": 500,
+        })
+
+
 def test_tangent_attention_requires_typed_mass_shell_contract():
     with pytest.raises(ValidationError):
         TrainRunConfig(model={"backbone": "tangent_attention"})

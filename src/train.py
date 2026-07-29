@@ -327,11 +327,18 @@ if __name__ == "__main__":
         if args.max_optimizer_steps is not None
         else args.num_epochs * optimizer_steps_per_epoch
     )
+    resolved_warmup_steps = (
+        args.lr_warmup_steps
+        if args.lr_warmup_steps is not None
+        else args.lr_warmup_epochs * optimizer_steps_per_epoch
+    )
     schedule_definition = {
         "lr_step_unit": args.lr_step_unit,
         "planned_optimizer_steps": planned_optimizer_steps,
         "optimizer_steps_per_epoch": optimizer_steps_per_epoch,
         "warmup_epochs": args.lr_warmup_epochs,
+        "warmup_steps": (resolved_warmup_steps
+                         if args.lr_step_unit == "optimizer_step" else None),
         "eta_min_factor": args.eta_min_factor,
         "schedule": args.lr_schedule,
         "restart_epoch": args.lr_t0,
@@ -354,6 +361,7 @@ if __name__ == "__main__":
                 eta_min_factor=args.eta_min_factor,
                 schedule=args.lr_schedule,
                 restart_epoch=args.lr_t0,
+                warmup_steps=resolved_warmup_steps,
             )
         else:
             scheduler = build_epoch_scheduler(

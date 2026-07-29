@@ -6,7 +6,7 @@ items:
   - &coupling_smoke
     apiVersion: batch/v1
     kind: Job
-    metadata: {name: as-jet-coupling-exact-smoke}
+    metadata: {name: as-jet-coupling-exact-smoke-r2}
     spec:
       ttlSecondsAfterFinished: 86400
       backoffLimit: 0
@@ -28,7 +28,7 @@ items:
                 - -c
                 - |
                   set -euo pipefail
-                  GIT_COMMIT="d08cc9946491a77f88780f55276bb7aa672d7eca"
+                  GIT_COMMIT="REPLACE_WITH_PUSHED_COMMIT_SHA"
                   test "$GIT_COMMIT" != "REPLACE_WITH_PUSHED_COMMIT_SHA"
                   case "$ARM" in
                     exact) CONFIG=g30-coupling-exact.yaml; CACHE=cache-coupling-g30-exact.yaml;;
@@ -47,13 +47,13 @@ items:
                   cd /tmp/repo/src
                   "$PYTHON" prepare_stage1.py --output-path "$OUT" --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 --model-version v3
                   "$PYTHON" cache_icp.py --config "configs/$CACHE" --set paths.output_path="$OUT" --set paths.icp_cache_path="$CACHE_PATH" --set cache.n_samples=10000 --set cache.n_workers=8
-                  "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py --config "configs/$CONFIG" --set paths.output_path="$OUT" --set paths.icp_cache_path="$CACHE_PATH" --set training.n_train_samples=10000 --set training.num_epochs=20 --set training.max_optimizer_steps=500 --set training.stability_probe_steps="[0,100,500]" --set training.qualification_min_loss_improvement=null --set inference.n_samples=512 --set inference.skip_metrics=true
+                  "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py --config "configs/$CONFIG" --set paths.output_path="$OUT" --set paths.icp_cache_path="$CACHE_PATH" --set training.n_train_samples=10000 --set training.num_epochs=20 --set training.max_optimizer_steps=500 --set training.lr_warmup_steps=200 --set training.stability_probe_steps="[0,100,500]" --set training.qualification_min_loss_improvement=null --set inference.n_samples=512 --set inference.skip_metrics=true
               volumeMounts: &mounts [{name: data, mountPath: /mnt/data}]
               resources: &resources
                 requests: {nvidia.com/a40: 1, cpu: "8", memory: 24Gi}
                 limits: {nvidia.com/a40: 1, cpu: "8", memory: 24Gi}
   - <<: *coupling_smoke
-    metadata: {name: as-jet-coupling-canonical-smoke}
+    metadata: {name: as-jet-coupling-canonical-smoke-r2}
     spec:
       ttlSecondsAfterFinished: 86400
       backoffLimit: 0
@@ -63,7 +63,7 @@ items:
           volumes: *volumes
           containers: [{name: train, image: "python:3.10-slim", env: [{name: ARM, value: canonical}, {name: POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}], command: *command, volumeMounts: *mounts, resources: *resources}]
   - <<: *coupling_smoke
-    metadata: {name: as-jet-coupling-random-smoke}
+    metadata: {name: as-jet-coupling-random-smoke-r2}
     spec:
       ttlSecondsAfterFinished: 86400
       backoffLimit: 0

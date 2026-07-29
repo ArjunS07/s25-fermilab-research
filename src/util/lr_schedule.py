@@ -34,8 +34,10 @@ def learning_rate_multiplier(step: int, *, total_steps: int, warmup_steps: int,
 
 def build_step_scheduler(optimizer, *, total_steps: int, steps_per_epoch: int,
                          warmup_epochs: int, eta_min_factor: float,
-                         schedule: str, restart_epoch: int):
-    warmup_steps = warmup_epochs * steps_per_epoch
+                         schedule: str, restart_epoch: int,
+                         warmup_steps: int | None = None):
+    if warmup_steps is None:
+        warmup_steps = warmup_epochs * steps_per_epoch
     default_restart_epochs = max(1, total_steps // steps_per_epoch // 4)
     restart_steps = (
         (restart_epoch if restart_epoch > 0 else default_restart_epochs)

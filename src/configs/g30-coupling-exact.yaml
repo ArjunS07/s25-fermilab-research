@@ -37,6 +37,7 @@ training:
   lr_schedule: monotonic_cosine
   lr_step_unit: optimizer_step
   lr_warmup_epochs: 10
+  lr_warmup_steps: 40000
   eta_min_factor: 0.03
 inference:
   n_samples: 50000
