@@ -204,12 +204,17 @@ def _icp_permute_worker(task):
         perm_full  – (max_particles,) int32: net permutation (identity for padding)
         rot        – (3, 3) float32: cumulative rotation matrix for 3-momenta
     """
+    coupling_mode = "legacy"
+    coupling_seed = 0
     if len(task) == 7:
         idx, x_0_full, x_1_full, n_real, max_iter, geometry, regulator_mass = task
         assignment_cost = "geodesic" if geometry == "mass_shell" else "euclidean"
-    else:
+    elif len(task) == 8:
         (idx, x_0_full, x_1_full, n_real, max_iter, geometry,
          regulator_mass, assignment_cost) = task
+    else:
+        (idx, x_0_full, x_1_full, n_real, max_iter, geometry,
+         regulator_mass, assignment_cost, coupling_mode, coupling_seed) = task
 
     max_particles = x_0_full.shape[0]
     perm_full = np.arange(max_particles, dtype=np.int32)
@@ -226,7 +231,17 @@ def _icp_permute_worker(task):
     x_0_t = torch.from_numpy(x_0_real.astype(np.float64))
     x_1_t = torch.from_numpy(x_1_real.astype(np.float64))
 
-    if geometry == "mass_shell":
+    if coupling_mode != "legacy":
+        from util.particle_coupling import coupling_permutation
+        best_perm = coupling_permutation(
+            coupling_mode, x_0_t, x_1_t,
+            regulator_mass=regulator_mass,
+            assignment_cost=assignment_cost,
+            coupling_seed=coupling_seed,
+            dataset_index=idx,
+        )
+        best_rot = np.eye(3, dtype=np.float32)
+    elif geometry == "mass_shell":
         best_perm, best_rot = _permute_geodesic(
             x_0_t, x_1_t, regulator_mass, assignment_cost
         )
@@ -331,11 +346,13 @@ if __name__ == "__main__":
         )
     x_0_np = np.concatenate(x_0_parts, axis=0)   # (N, P, 4)
 
-    logging.info(f"ICP geometry: {args.geometry}, assignment cost: {args.assignment_cost}"
+    logging.info(f"Particle coupling: {args.particle_coupling}; geometry: {args.geometry}, "
+                 f"assignment cost: {args.assignment_cost}"
                  + (f" (regulator mass m={args.regulator_mass})" if args.geometry == "mass_shell" else ""))
     tasks = [
         (i, x_0_np[i], x_1_np[i], int(n_real_np[i]), args.icp_max_iter,
-         args.geometry, args.regulator_mass, args.assignment_cost)
+         args.geometry, args.regulator_mass, args.assignment_cost,
+         args.particle_coupling, args.coupling_seed)
         for i in range(n_total)
     ]
 
@@ -367,6 +384,8 @@ if __name__ == "__main__":
         "n_samples": n_total,
         "geometry": args.geometry,
         "assignment_cost": args.assignment_cost,
+        "particle_coupling": args.particle_coupling,
+        "coupling_seed": args.coupling_seed,
         "regulator_mass": args.regulator_mass,
         "metadata": {
             # Retain this derived-state hash for diagnostics only.  It is not a
@@ -384,6 +403,12 @@ if __name__ == "__main__":
             "num_particles": args.num_particles,
             "geometry": args.geometry,
             "assignment_cost": args.assignment_cost,
+            "particle_coupling": args.particle_coupling,
+            "coupling_seed": args.coupling_seed,
+            "random_coupling_algorithm": (
+                "numpy-pcg64-seedsequence-v1"
+                if args.particle_coupling == "random_frozen" else None
+            ),
             "regulator_mass": args.regulator_mass,
             "final_scale": final_scale,
         },

@@ -288,6 +288,9 @@ if __name__ == "__main__":
         if expected["geometry"] == "mass_shell":
             expected["regulator_mass"] = args.regulator_mass
             expected["assignment_cost"] = args.icp_assignment_cost
+        if args.particle_coupling != "legacy":
+            expected["particle_coupling"] = args.particle_coupling
+            expected["coupling_seed"] = args.coupling_seed
         validate_cache_metadata(icp_payload, expected)
         paired_x0_cache = torch.from_numpy(icp_payload["paired_x0"]).float()
         paired_x0_cache = paired_x0_cache[:n_train, :args.num_particles]
@@ -1003,6 +1006,8 @@ if __name__ == "__main__":
                 "effective_icp": {
                     "enabled": bool(args.use_icp),
                     "cache_path": icp_cache_path,
+                    "particle_coupling": args.particle_coupling,
+                    "coupling_seed": args.coupling_seed,
                 },
                 "generation": {
                     "seed": args.inference_seed,
