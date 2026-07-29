@@ -24,11 +24,9 @@ items:
                 - -c
                 - |
                   set -euo pipefail
-                  GIT_COMMIT="4387f9993fc3a1481ae78836dca652c9b851e4e6"
-                  LR="REPLACE_AFTER_LR_CAUSALITY_GATE"
-                  LR_STEP_UNIT="REPLACE_AFTER_LR_CAUSALITY_GATE"
-                  test "$LR" != "REPLACE_AFTER_LR_CAUSALITY_GATE"
-                  test "$LR_STEP_UNIT" != "REPLACE_AFTER_LR_CAUSALITY_GATE"
+                  GIT_COMMIT="f6a10d3ade7895bcf9561e478d4e01cb5c088758"
+                  LR="0.0003"
+                  LR_STEP_UNIT="optimizer_step"
                   case "$ARM" in
                     a) GEOM=readout_only; POOL=false;; b) GEOM=tangent_channels; POOL=false;;
                     c) GEOM=readout_only; POOL=true;; d) GEOM=tangent_channels; POOL=true;;

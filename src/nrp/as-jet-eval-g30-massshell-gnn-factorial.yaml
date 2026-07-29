@@ -16,7 +16,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="4387f9993fc3a1481ae78836dca652c9b851e4e6"
+              GIT_COMMIT="f6a10d3ade7895bcf9561e478d4e01cb5c088758"
               mkdir -p /tmp/runtime
               tar -xf /mnt/data/caches/runtime/python-env-py310-torch271.tar -C /tmp/runtime
               PYTHON=/tmp/runtime/python-env/bin/python

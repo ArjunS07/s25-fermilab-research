@@ -24,7 +24,7 @@ items:
                 - -c
                 - |
                   set -euo pipefail
-                  GIT_COMMIT="4387f9993fc3a1481ae78836dca652c9b851e4e6"
+                  GIT_COMMIT="f6a10d3ade7895bcf9561e478d4e01cb5c088758"
                   case "$ARM" in
                     a) GEOM=readout_only; POOL=false;; b) GEOM=tangent_channels; POOL=false;;
                     c) GEOM=readout_only; POOL=true;; d) GEOM=tangent_channels; POOL=true;;
@@ -47,7 +47,9 @@ items:
                     --set training.use_cosine_lr=false --set training.lr=0.0001 \
                     --set inference.n_samples=64 --set inference.integration_steps=8 \
                     --set inference.stability_probe_samples=32 \
-                    --set inference.max_invalid_fraction=0 --set inference.skip_metrics=true
+                    --set inference.max_invalid_fraction=0 \
+                    --set inference.fail_on_qualification_error=true \
+                    --set inference.skip_metrics=true
               volumeMounts: &mounts [{name: data, mountPath: /mnt/data}]
               resources: &resources
                 requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
