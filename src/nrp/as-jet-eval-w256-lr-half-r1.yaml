@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-eval-w256-lr-half-r1
+  name: as-jet-eval-w256-lr-half-r2
 spec:
   ttlSecondsAfterFinished: 86400
   backoffLimit: 0
@@ -25,7 +25,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="fad1a43be1524309356dc2864023abb492be386c"
+              GIT_COMMIT="f1766e69d2b19482d0ff046af06aa5f8ec2beb42"
               SOURCE_RUN="/mnt/data/output/2026-07-28_22-45-25--fc4a1ff4-7352-4ec5-9627-1b09e879d6a8-g30-width256-lr-half-keyed-smoke"
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               ENV_ARCHIVE=/mnt/data/caches/runtime/python-env-py310-torch271.tar
