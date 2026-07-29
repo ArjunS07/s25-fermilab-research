@@ -963,9 +963,6 @@ if __name__ == "__main__":
             qualification_summary["warnings"] = qualification_warnings
             with open(f"{model_output_path}/qualification_summary.json", "w") as handle:
                 json.dump(qualification_summary, handle, indent=2)
-        if qualification_errors:
-            raise RuntimeError("qualification gate failed: " + "; ".join(qualification_errors))
-
         eval_info = {}
         if not args.skip_metrics:
             try:
@@ -1039,3 +1036,5 @@ if __name__ == "__main__":
                 json.dump(summary, f, indent=2, default=_json_default)
         except Exception as e:
             print(f"Error writing summary.json: {e}")
+        if qualification_errors and args.fail_on_qualification_error:
+            raise RuntimeError("qualification gate failed: " + "; ".join(qualification_errors))

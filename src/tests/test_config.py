@@ -95,6 +95,7 @@ def test_infer_defaults_match_legacy_argparse():
     assert cfg.inference.mass_shell_max_substeps == 64
     assert cfg.inference.warn_invalid_fraction is None
     assert cfg.inference.max_invalid_fraction is None
+    assert cfg.inference.fail_on_qualification_error is False
     assert cfg.model.use_reference_vectors is False
     assert cfg.model.use_node_scalars is False
     assert cfg.model.use_adaln is False
