@@ -170,7 +170,7 @@ def main():
     print(f"Outputs → {out_dir}")
 
     # Load generated samples: (N, P, 4), physical units, zero-padded
-    gen_samples = torch.load(args.gen_samples_path, map_location="cpu")
+    gen_samples = torch.load(args.gen_samples_path, map_location="cpu", weights_only=True)
     print(f"Generated samples: {gen_samples.shape}")
     # Reconstruct mask from zero-padding (padded slots are all-zero after infer.py)
     gen_mask = (gen_samples.abs().sum(dim=-1) > 1e-6).float()

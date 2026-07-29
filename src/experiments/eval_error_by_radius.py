@@ -70,7 +70,7 @@ def _load_model(checkpoint_path, n_hidden, n_layers, use_residual, num_particles
         use_residual_update=use_residual,
         include_pt=True,
     ).to(device)
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
         model.load_state_dict(ckpt["model_state_dict"])
         print(f"Loaded checkpoint (epoch {ckpt.get('epoch', '?')}) from {checkpoint_path}")

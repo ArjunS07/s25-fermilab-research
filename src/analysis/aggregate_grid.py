@@ -88,7 +88,7 @@ def recompute_isotropy_ks(samples_path: str):
     if not os.path.exists(samples_path):
         return float("nan"), float("nan")
     import torch  # lazy: only needed for the recompute path
-    samples = torch.load(samples_path, map_location="cpu")  # (N, P, 4)
+    samples = torch.load(samples_path, map_location="cpu", weights_only=True)  # (N, P, 4)
     total = samples[..., 1:4].sum(dim=1)                    # (N, 3), padding already zero
     norm = total.norm(dim=-1).clamp(min=1e-12)
     cos_theta = (total[:, 2] / norm).numpy()

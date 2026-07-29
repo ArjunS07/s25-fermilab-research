@@ -167,7 +167,9 @@ if __name__ == "__main__":
     losses = []
     global_optimizer_step = 0
     if args.resume_weights:
-        checkpoint = torch.load(args.resume_weights, map_location=device)
+        # Resume checkpoints are trusted first-party artifacts and include full
+        # optimizer, scheduler, config, and Python/NumPy/Torch RNG state.
+        checkpoint = torch.load(args.resume_weights, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
         start_epoch = int(checkpoint.get("resume_epoch", checkpoint["epoch"] + 1))
         resume_minibatch = int(checkpoint.get("resume_minibatch", 0))

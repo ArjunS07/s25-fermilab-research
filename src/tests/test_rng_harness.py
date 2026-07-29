@@ -33,6 +33,16 @@ def test_rng_checkpoint_roundtrip_covers_python_numpy_and_torch():
     assert torch.equal(expected[2], actual[2])
 
 
+def test_full_rng_checkpoint_loads_under_pytorch_weights_only_default(tmp_path):
+    """Full checkpoints require trusted pickle loading because NumPy RNG state
+    contains ndarray reconstruction objects rejected by weights_only=True.
+    """
+    path = tmp_path / "checkpoint.pth"
+    torch.save({"rng_state": capture_rng_state()}, path)
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    restore_rng_state(checkpoint["rng_state"])
+
+
 def test_keyed_partial_epoch_resume_matches_uninterrupted_updates():
     def run(model, optimizer, start_batch, stop_batch):
         for batch in range(start_batch, stop_batch):

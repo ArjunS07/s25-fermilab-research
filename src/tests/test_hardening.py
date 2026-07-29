@@ -21,7 +21,7 @@ _NEW_MODULE_FRAGMENTS = ("phi_attn", "phi_h", "adaln_mod", "node_seed")
 
 def test_run_a_matches_reference():
     """All-off model on the fixed sample matches the committed reference (baseline unchanged)."""
-    ref = torch.load(_FIXTURE)["output"]
+    ref = torch.load(_FIXTURE, weights_only=True)["output"]
     model = build_model(seed=0)
     x, t, cond, mask, _ = sample_inputs(seed=1)
     with torch.no_grad():

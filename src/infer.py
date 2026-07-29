@@ -117,7 +117,8 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
         velocity_readout_init=velocity_readout_init,
     ).to(device)
 
-    ckpt = preloaded_ckpt if preloaded_ckpt is not None else torch.load(checkpoint_path, map_location=device)
+    ckpt = (preloaded_ckpt if preloaded_ckpt is not None else
+            torch.load(checkpoint_path, map_location=device, weights_only=False))
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
         state_key = "ema_state_dict" if use_ema_weights else "model_state_dict"
         if state_key not in ckpt:
@@ -167,7 +168,10 @@ def main():
     jet_attr_model.eval()
     print("Loaded jet attribute model")
 
-    ckpt = torch.load(args.checkpoint_path, map_location=device)
+    # Full training checkpoints contain optimizer/config/RNG state (including
+    # NumPy objects), so PyTorch 2.6+'s weights-only default cannot load them.
+    # Checkpoints are provenance-pinned, first-party artifacts in this workflow.
+    ckpt = torch.load(args.checkpoint_path, map_location=device, weights_only=False)
     args = _resolve_architecture(args, ckpt)
 
     model = _load_main_model(

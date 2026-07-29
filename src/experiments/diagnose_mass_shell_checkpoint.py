@@ -107,7 +107,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     checkpoint_path = os.path.join(args.run_dir, "train", "models", "final_checkpoint.pth")
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     full_cfg = checkpoint["full_config"]
     model_cfg = full_cfg["model"]
     num_particles = full_cfg["data"]["num_particles"]
