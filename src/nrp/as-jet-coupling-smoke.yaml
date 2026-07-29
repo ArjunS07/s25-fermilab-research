@@ -28,7 +28,7 @@ items:
                 - -c
                 - |
                   set -euo pipefail
-                  GIT_COMMIT="REPLACE_WITH_PUSHED_COMMIT_SHA"
+                  GIT_COMMIT="d08cc9946491a77f88780f55276bb7aa672d7eca"
                   test "$GIT_COMMIT" != "REPLACE_WITH_PUSHED_COMMIT_SHA"
                   case "$ARM" in
                     exact) CONFIG=g30-coupling-exact.yaml; CACHE=cache-coupling-g30-exact.yaml;;
