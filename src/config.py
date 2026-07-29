@@ -129,6 +129,12 @@ class TrainingConfig(BaseModel):
     # ICP is opt-in. A cache present on a shared PVC must never silently change a baseline.
     use_icp: bool = False
     icp_assignment_cost: Literal["euclidean", "geodesic", "squared_geodesic"] = "euclidean"
+    # Explicit coupling treatment. "legacy" preserves the historical use_icp/cache
+    # behavior exactly. The three named modes are the causal mass-shell ablation arms.
+    particle_coupling: Literal[
+        "legacy", "exact_geodesic_icp", "canonical_pt", "random_frozen"
+    ] = "legacy"
+    coupling_seed: int = 5042
 
     distributed: bool = False
     model_seed: int = 42
@@ -153,6 +159,16 @@ class TrainingConfig(BaseModel):
         if (self.max_optimizer_steps is not None and self.stability_probe_steps
                 and self.stability_probe_steps[-1] > self.max_optimizer_steps):
             raise ValueError("stability probe step exceeds training.max_optimizer_steps")
+        if self.particle_coupling != "legacy" and not self.use_icp:
+            raise ValueError(
+                "explicit training.particle_coupling arms require training.use_icp=true "
+                "because all arms reuse a frozen matched prior cache"
+            )
+        if (self.particle_coupling == "exact_geodesic_icp"
+                and self.icp_assignment_cost != "squared_geodesic"):
+            raise ValueError(
+                "exact_geodesic_icp requires training.icp_assignment_cost=squared_geodesic"
+            )
         return self
 
 
@@ -229,6 +245,10 @@ class CacheConfig(BaseModel):
     regulator_mass: float = 0.5
     prior_dist: Literal["isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned", "axis_aligned_per_jet"] = "isotropic_com"
     seed: int = 42
+    particle_coupling: Literal[
+        "legacy", "exact_geodesic_icp", "canonical_pt", "random_frozen"
+    ] = "legacy"
+    coupling_seed: int = 5042
 
     @model_validator(mode="after")
     def validate_assignment_cost(self):
@@ -241,6 +261,13 @@ class CacheConfig(BaseModel):
             raise ValueError(
                 f"cache.assignment_cost={self.assignment_cost!r} is incompatible with "
                 f"cache.geometry={self.geometry!r}"
+            )
+        if self.particle_coupling != "legacy" and self.geometry != "mass_shell":
+            raise ValueError("explicit particle-coupling arms require cache.geometry=mass_shell")
+        if (self.particle_coupling == "exact_geodesic_icp"
+                and self.assignment_cost != "squared_geodesic"):
+            raise ValueError(
+                "exact_geodesic_icp requires cache.assignment_cost=squared_geodesic"
             )
         return self
 
@@ -383,6 +410,8 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         prior_dist=cfg.training.prior_dist,
         use_icp=cfg.training.use_icp,
         icp_assignment_cost=cfg.training.icp_assignment_cost,
+        particle_coupling=cfg.training.particle_coupling,
+        coupling_seed=cfg.training.coupling_seed,
         eta_min_factor=cfg.training.eta_min_factor,
         use_ema=cfg.training.use_ema,
         ema_decay=cfg.training.ema_decay,
@@ -459,6 +488,8 @@ def cache_config_to_namespace(cfg: CacheRunConfig) -> argparse.Namespace:
         skip_if_exists=cfg.cache.skip_if_exists,
         geometry=cfg.cache.geometry,
         assignment_cost=cfg.cache.assignment_cost,
+        particle_coupling=cfg.cache.particle_coupling,
+        coupling_seed=cfg.cache.coupling_seed,
         regulator_mass=cfg.cache.regulator_mass,
         prior_dist=cfg.cache.prior_dist,
         seed=cfg.cache.seed,
