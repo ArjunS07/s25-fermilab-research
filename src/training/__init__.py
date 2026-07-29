@@ -10,6 +10,7 @@ def flow_matching_loss(*, model, raw_model, config, x0, x1, t, mask,
             mask=mask, conditions=conditions, references=references,
             regulator_mass=config.regulator_mass,
             tangent_backbone=config.backbone == "tangent_attention",
+            return_diagnostics=getattr(config, "particle_coupling", "legacy") != "legacy",
         )
     if config.use_hyperbolic:
         from training.legacy import poincare_flow_loss

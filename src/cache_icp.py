@@ -263,6 +263,26 @@ def _compute_scale(X_transformed):
     return float(np.mean(scales))
 
 
+def _mass_shell_transport_costs(paired_x0, x_1, n_real, regulator_mass):
+    """Per-jet sum/mean of squared geodesic costs for an already paired cache."""
+    from util.mass_shell import geodesic_distance, project_to_shell
+
+    x0 = torch.as_tensor(paired_x0, dtype=torch.float64)
+    x1 = torch.as_tensor(x_1, dtype=torch.float64)
+    mask = (torch.arange(x0.shape[1])[None, :]
+            < torch.as_tensor(n_real, dtype=torch.long)[:, None])
+    # Zero excluded rows before any nonlinear geometry, so even adversarial NaN/huge
+    # padding cannot contaminate the real-row cost through 0 * nonfinite arithmetic.
+    p0 = project_to_shell(torch.where(mask[..., None], x0, torch.zeros_like(x0)),
+                          regulator_mass)
+    p1 = project_to_shell(torch.where(mask[..., None], x1, torch.zeros_like(x1)),
+                          regulator_mass)
+    squared = geodesic_distance(p0, p1, regulator_mass).square()
+    sums = (squared * mask).sum(dim=1)
+    means = sums / torch.as_tensor(n_real, dtype=torch.float64).clamp(min=1)
+    return sums.cpu().numpy(), means.cpu().numpy()
+
+
 
 if __name__ == "__main__":
     # Heavy, jetnet-pulling deps imported here so the module (and its worker functions) stay
@@ -373,6 +393,21 @@ if __name__ == "__main__":
     paired_x0[..., 1:4] = np.einsum("npj,nkj->npk", paired_x0[..., 1:4], rot_cache)
     paired_x0 *= (np.arange(args.num_particles)[None, :] < n_real_np[:, None])[..., None]
 
+    transport_cost_sum = transport_cost_mean = None
+    if args.geometry == "mass_shell":
+        logging.info("Computing per-jet squared-geodesic transport-cost diagnostics …")
+        sum_parts, mean_parts = [], []
+        for start in range(0, n_total, chunk):
+            end = min(start + chunk, n_total)
+            sums, means = _mass_shell_transport_costs(
+                paired_x0[start:end], x_1_np[start:end], n_real_np[start:end],
+                args.regulator_mass,
+            )
+            sum_parts.append(sums)
+            mean_parts.append(means)
+        transport_cost_sum = np.concatenate(sum_parts).astype(np.float64)
+        transport_cost_mean = np.concatenate(mean_parts).astype(np.float64)
+
     # ── Save ──────────────────────────────────────────────────────────────────
     payload = {
         "format_version": CACHE_FORMAT_VERSION,
@@ -386,6 +421,11 @@ if __name__ == "__main__":
         "assignment_cost": args.assignment_cost,
         "particle_coupling": args.particle_coupling,
         "coupling_seed": args.coupling_seed,
+        "transport_cost": {
+            "definition": "sum_and_mean_per_real_particle_of_squared_geodesic_distance",
+            "sum_per_jet": transport_cost_sum,
+            "mean_per_jet": transport_cost_mean,
+        },
         "regulator_mass": args.regulator_mass,
         "metadata": {
             # Retain this derived-state hash for diagnostics only.  It is not a

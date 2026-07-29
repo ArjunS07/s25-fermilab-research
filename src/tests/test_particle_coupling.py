@@ -2,14 +2,17 @@ import random
 
 import numpy as np
 import torch
+from pydantic import ValidationError
 
-from cache_icp import _icp_permute_worker, _permute_geodesic
+from cache_icp import (_icp_permute_worker, _mass_shell_transport_costs,
+                       _permute_geodesic)
 from util.particle_coupling import (
     canonical_pt_permutation,
     coupling_permutation,
     random_frozen_permutation,
     stable_descending_pt_order,
 )
+from config import CacheRunConfig, TrainRunConfig, train_config_to_namespace
 
 
 def _cloud(pt_values, *, offset=0.0, max_particles=None):
@@ -95,3 +98,45 @@ def test_explicit_exact_arm_matches_legacy_squared_geodesic_result():
     )
     assert np.array_equal(explicit, legacy)
     assert np.array_equal(legacy_rot, np.eye(3, dtype=np.float32))
+
+
+def test_transport_cost_diagnostic_uses_real_rows_only():
+    p = 6
+    x0 = _cloud([1.0, 4.0, 2.0], offset=1, max_particles=p)[None]
+    x1 = _cloud([3.5, 1.5, 4.5], offset=2, max_particles=p)[None]
+    sums, means = _mass_shell_transport_costs(x0, x1, np.array([3]), 0.1)
+    x0[:, 3:] = 1e20
+    x1[:, 3:] = -1e20
+    changed_sums, changed_means = _mass_shell_transport_costs(x0, x1, np.array([3]), 0.1)
+    assert np.array_equal(sums, changed_sums)
+    assert np.array_equal(means, changed_means)
+    assert np.allclose(sums, means * 3)
+
+
+def test_every_coupling_reconstructs_from_checkpoint_full_config():
+    for mode in ("exact_geodesic_icp", "canonical_pt", "random_frozen"):
+        assignment = "squared_geodesic"
+        cfg = TrainRunConfig.model_validate({
+            "training": {
+                "use_icp": True,
+                "icp_assignment_cost": assignment,
+                "particle_coupling": mode,
+                "coupling_seed": 8765,
+            }
+        })
+        checkpoint = {"full_config": cfg.model_dump()}
+        restored = TrainRunConfig.model_validate(checkpoint["full_config"])
+        args = train_config_to_namespace(restored)
+        assert args.particle_coupling == mode
+        assert args.coupling_seed == 8765
+
+
+def test_explicit_coupling_config_rejects_stale_or_incompatible_fields():
+    with np.testing.assert_raises(ValidationError):
+        TrainRunConfig.model_validate({"training": {"particle_couplng": "canonical_pt"}})
+    with np.testing.assert_raises(ValidationError):
+        TrainRunConfig.model_validate({"training": {"particle_coupling": "canonical_pt"}})
+    with np.testing.assert_raises(ValidationError):
+        CacheRunConfig.model_validate({
+            "cache": {"geometry": "euclidean", "particle_coupling": "random_frozen"}
+        })

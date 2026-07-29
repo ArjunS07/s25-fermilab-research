@@ -550,6 +550,10 @@ if __name__ == "__main__":
         accumulation_steps = args.target_batch_size // args.batch_size
         accumulated_loss = 0
         accumulated_batches = 0
+        accumulated_field = {
+            "n_real": 0, "target_norm_sum": 0.0, "target_norm_sq_sum": 0.0,
+            "prediction_norm_sum": 0.0, "prediction_norm_sq_sum": 0.0,
+        }
 
         for i, (batch_jet_info, batch_particle_info, batch_jet_phi, batch_x0_cached) in enumerate(train_loader):
             if epoch == start_epoch and i < resume_minibatch:
@@ -620,11 +624,17 @@ if __name__ == "__main__":
 
             with keyed_torch_rng(args.time_seed, epoch, i, rank, device):
                 t = _sample_t(x_0.shape[0]).to(device)
-            loss = flow_matching_loss(
+            loss_result = flow_matching_loss(
                 model=model, raw_model=raw_model, config=args,
                 x0=x_0, x1=x_1, t=t, mask=true_masks,
                 conditions=batch_jet_info_cropped, references=ref_vectors,
             )
+            if isinstance(loss_result, tuple):
+                loss, field_stats = loss_result
+                for key in accumulated_field:
+                    accumulated_field[key] += field_stats[key]
+            else:
+                loss = loss_result
 
             accumulated_batches += 1
             is_last_accum_step = (((i + 1) % accumulation_steps == 0)
@@ -689,8 +699,36 @@ if __name__ == "__main__":
                             f"{float(unclipped_grad_norm)},{int(gradients_finite)},"
                             f"{optimizer.param_groups[0]['lr']}\n"
                         )
+                    if accumulated_field["n_real"]:
+                        n_field = accumulated_field["n_real"]
+                        target_mean = accumulated_field["target_norm_sum"] / n_field
+                        prediction_mean = accumulated_field["prediction_norm_sum"] / n_field
+                        target_var = max(
+                            accumulated_field["target_norm_sq_sum"] / n_field
+                            - target_mean * target_mean, 0.0
+                        )
+                        prediction_var = max(
+                            accumulated_field["prediction_norm_sq_sum"] / n_field
+                            - prediction_mean * prediction_mean, 0.0
+                        )
+                        field_log = f"{model_output_path}/conditional_field_stats.csv"
+                        write_field_header = not os.path.exists(field_log)
+                        with open(field_log, "a") as f:
+                            if write_field_header:
+                                f.write(
+                                    "optimizer_step,epoch,minibatch,n_real,"
+                                    "target_norm_mean,target_norm_variance,"
+                                    "prediction_norm_mean,prediction_norm_variance\n"
+                                )
+                            f.write(
+                                f"{global_optimizer_step},{epoch},{i},{n_field},"
+                                f"{target_mean},{target_var},{prediction_mean},"
+                                f"{prediction_var}\n"
+                            )
                 accumulated_loss = 0
                 accumulated_batches = 0
+                for key in accumulated_field:
+                    accumulated_field[key] = 0
             
                 if is_rank0 and global_optimizer_step % 10 == 0:
                     print(
