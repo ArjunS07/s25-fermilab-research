@@ -12,6 +12,14 @@ import pickle
 from multiprocessing import Pool
 from pathlib import Path
 
+# When run as a script (``python experiments/audit_off_path.py``) Python puts this
+# file's own directory on sys.path[0], not ``src``. The project uses imports rooted
+# at ``src`` (e.g. ``from cache_icp import ...``), so add ``src`` here to mirror
+# tests/conftest.py and make those imports resolve under any invocation.
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch

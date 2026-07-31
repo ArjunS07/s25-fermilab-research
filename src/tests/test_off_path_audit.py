@@ -101,3 +101,29 @@ def test_transported_draw_dispersion_zero_for_identical_draws():
     mask = torch.ones(points.shape[:-1], dtype=torch.float64)
     dispersion = transported_draw_dispersion(states, predictions, points, mask, 0.3)
     assert torch.allclose(dispersion, torch.zeros_like(dispersion), atol=1e-14)
+
+
+def test_audit_off_path_script_imports_standalone():
+    """Running the audit as a script must resolve the src-rooted imports.
+
+    The NRP job invokes ``python experiments/audit_off_path.py`` directly, which
+    puts the script's own directory on ``sys.path[0]`` rather than ``src``. This is
+    a regression guard for the ``ModuleNotFoundError: No module named 'cache_icp'``
+    that killed the H1 off-path audit job twice; it is caught only when the script
+    is exercised as a standalone process, not via the conftest-bootstrapped imports.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[1] / "experiments" / "audit_off_path.py"
+    # Run from a directory that is not ``src`` so only the in-script bootstrap can
+    # make the src-rooted module-level imports resolve.
+    result = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=str(Path(__file__).resolve().parent),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ModuleNotFoundError" not in result.stderr
