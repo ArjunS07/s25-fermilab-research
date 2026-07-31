@@ -25,7 +25,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="3a315c83baff4e33a033eebbd211ea4618cd3c54"
+              GIT_COMMIT="16fa88c4b422c834f28657202115075af6885899"
               test "$GIT_COMMIT" != "REPLACE_WITH_PUSHED_COMMIT_SHA"
               SOURCE="/mnt/data/output/2026-07-23_04-40-41--36429f69-a6a5-49a0-81fd-8f351f5a9c11-g30-massshell-v2"
               CACHE="/mnt/data/caches/g_p30_v2_massshell_m01_phi-v1-d2/icp_cache.pkl"
