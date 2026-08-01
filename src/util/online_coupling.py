@@ -61,12 +61,17 @@ def online_geodesic_coupling(x0: torch.Tensor, x1: torch.Tensor, mask: torch.Ten
     if x0.shape != x1.shape:
         raise ValueError(f"x0 and x1 must have the same shape, got {tuple(x0.shape)} vs {tuple(x1.shape)}")
     paired = x0.clone()
-    n_real = mask.to(torch.long).sum(dim=1)
+    # Compute the (CPU, scipy) assignment on host copies moved once per batch, then apply the
+    # permutation on-device. Slicing device tensors per jet would force one GPU→CPU sync per
+    # jet inside geodesic_permutation — costly over a long run; two transfers per batch instead.
+    x0_cpu = x0.detach().to("cpu")
+    x1_cpu = x1.detach().to("cpu")
+    n_real = mask.to(torch.long).sum(dim=1).tolist()
     for b in range(x0.shape[0]):
         n = int(n_real[b])
         if n <= 1:
             # 0 or 1 real particle: the assignment is trivially the identity.
             continue
-        perm = geodesic_permutation(x0[b, :n], x1[b, :n], regulator_mass, assignment_cost)
+        perm = geodesic_permutation(x0_cpu[b, :n], x1_cpu[b, :n], regulator_mass, assignment_cost)
         paired[b, :n] = x0[b, :n][torch.as_tensor(perm, device=x0.device, dtype=torch.long)]
     return paired
