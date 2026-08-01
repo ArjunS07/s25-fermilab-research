@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: as-jet-train-g30-massshell-simple64
+  name: as-jet-train-g30-massshell-freshicp
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -25,7 +25,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              GIT_COMMIT="869053fef7f760f575a1c4ca97256d6d7427757a"
               test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
               ENV_ARCHIVE=/mnt/data/caches/runtime/python-env-py310-torch271.tar
               mkdir -p /tmp/runtime
@@ -34,7 +34,7 @@ spec:
               "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
               mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
               cd /tmp/repo/src
-              RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID-g30-massshell-simple64"
+              RUN_ID="$(date +%F_%H-%M-%S)--$POD_UID-g30-massshell-freshicp"
               OUT="/mnt/data/output/$RUN_ID"
               mkdir -p "$OUT"
               printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
