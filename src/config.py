@@ -1,5 +1,5 @@
 """
-config.py — Typed run configuration for train.py / infer.py / cache_icp.py.
+config.py — Typed run configuration for train.py / infer.py.
 
 Configs are pydantic models loaded from YAML (`--config path/to/run.yaml`) with
 optional dotlist overrides (`--set training.num_epochs=300`). Every field default
@@ -129,15 +129,11 @@ class TrainingConfig(BaseModel):
         "axis_aligned_per_jet"
     ] = "isotropic_com"
 
-    # ICP is opt-in. A cache present on a shared PVC must never silently change a baseline.
-    use_icp: bool = False
-    icp_assignment_cost: Literal["euclidean", "geodesic", "squared_geodesic"] = "euclidean"
-    # Explicit coupling treatment. "legacy" preserves the historical use_icp/cache
-    # behavior exactly. The three named modes are the causal mass-shell ablation arms.
-    particle_coupling: Literal[
-        "legacy", "exact_geodesic_icp", "canonical_pt", "random_frozen"
-    ] = "legacy"
-    coupling_seed: int = 5042
+    # Fresh-noise coupling applied online each step (no frozen cache → no path
+    # memorization; see discussions/22). "online_geodesic_icp" recomputes the squared-
+    # geodesic Hungarian assignment per batch on freshly drawn prior noise (minibatch
+    # OT-CFM); "none" pairs fresh noise in identity order (for future ICP-vs-none ablation).
+    coupling: Literal["online_geodesic_icp", "none"] = "online_geodesic_icp"
 
     distributed: bool = False
     model_seed: int = 42
@@ -170,16 +166,6 @@ class TrainingConfig(BaseModel):
                 and self.lr_warmup_steps >= self.max_optimizer_steps):
             raise ValueError(
                 "training.lr_warmup_steps must be smaller than max_optimizer_steps"
-            )
-        if self.particle_coupling != "legacy" and not self.use_icp:
-            raise ValueError(
-                "explicit training.particle_coupling arms require training.use_icp=true "
-                "because all arms reuse a frozen matched prior cache"
-            )
-        if (self.particle_coupling == "exact_geodesic_icp"
-                and self.icp_assignment_cost != "squared_geodesic"):
-            raise ValueError(
-                "exact_geodesic_icp requires training.icp_assignment_cost=squared_geodesic"
             )
         return self
 
@@ -238,50 +224,7 @@ class PathConfig(BaseModel):
     checkpoint_path: Optional[str] = None
     out_dir: Optional[str] = None
     replay_bundle_path: Optional[str] = None
-    icp_cache_path: Optional[str] = None
     cache_dir: str = "/mnt/data/caches"
-
-
-class CacheConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    n_workers: int = Field(default_factory=lambda: max(1, (os.cpu_count() or 2) // 2))
-    icp_max_iter: int = 1000
-    skip_if_exists: bool = True
-    n_samples: Optional[int] = None
-    # Geometry of the ICP assignment cost. "euclidean" = alternating permutation+Kabsch ICP
-    # (the default). "mass_shell" = permutation-only Hungarian on geodesic distance over the
-    # mass shell (Phase 4); no rotation, since Euclidean Kabsch is not valid on the shell.
-    geometry: Literal["euclidean", "mass_shell"] = "euclidean"
-    assignment_cost: Literal["euclidean", "geodesic", "squared_geodesic"] | None = None
-    regulator_mass: float = 0.5
-    prior_dist: Literal["isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned", "axis_aligned_per_jet"] = "isotropic_com"
-    seed: int = 42
-    particle_coupling: Literal[
-        "legacy", "exact_geodesic_icp", "canonical_pt", "random_frozen"
-    ] = "legacy"
-    coupling_seed: int = 5042
-
-    @model_validator(mode="after")
-    def validate_assignment_cost(self):
-        if self.assignment_cost is None:
-            self.assignment_cost = ("euclidean" if self.geometry == "euclidean"
-                                    else "geodesic")
-        allowed = ({"euclidean"} if self.geometry == "euclidean"
-                   else {"geodesic", "squared_geodesic"})
-        if self.assignment_cost not in allowed:
-            raise ValueError(
-                f"cache.assignment_cost={self.assignment_cost!r} is incompatible with "
-                f"cache.geometry={self.geometry!r}"
-            )
-        if self.particle_coupling != "legacy" and self.geometry != "mass_shell":
-            raise ValueError("explicit particle-coupling arms require cache.geometry=mass_shell")
-        if (self.particle_coupling == "exact_geodesic_icp"
-                and self.assignment_cost != "squared_geodesic"):
-            raise ValueError(
-                "exact_geodesic_icp requires cache.assignment_cost=squared_geodesic"
-            )
-        return self
 
 
 class TrainRunConfig(BaseModel):
@@ -300,14 +243,6 @@ class InferRunConfig(BaseModel):
     model: ModelConfig = Field(default_factory=ModelConfig)
     inference: InferenceConfig = Field(default_factory=InferenceConfig)
     paths: PathConfig = Field(default_factory=PathConfig)
-
-
-class CacheRunConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    data: DataConfig = Field(default_factory=DataConfig)
-    paths: PathConfig = Field(default_factory=PathConfig)
-    cache: CacheConfig = Field(default_factory=CacheConfig)
 
 
 # ── YAML loading + dotlist overrides ────────────────────────────────────────
@@ -358,7 +293,7 @@ def parse_config_cli(argv: Optional[list[str]] = None) -> tuple[Optional[str], l
     return ns.config, ns.overrides
 
 
-# ── Namespace bridges (temporary — removed once train/infer/cache_icp read
+# ── Namespace bridges (temporary — removed once train/infer read
 #    cfg.section.field directly instead of args.field) ──────────────────────
 
 def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
@@ -421,17 +356,13 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         node_scalar_seed=cfg.model.node_scalar_seed,
         use_attention=cfg.model.use_attention,
         prior_dist=cfg.training.prior_dist,
-        use_icp=cfg.training.use_icp,
-        icp_assignment_cost=cfg.training.icp_assignment_cost,
-        particle_coupling=cfg.training.particle_coupling,
-        coupling_seed=cfg.training.coupling_seed,
+        coupling=cfg.training.coupling,
         eta_min_factor=cfg.training.eta_min_factor,
         use_ema=cfg.training.use_ema,
         ema_decay=cfg.training.ema_decay,
         use_adaln=cfg.model.use_adaln,
         curriculum_alpha_start=cfg.training.curriculum_alpha_start,
         n_curriculum_buckets=cfg.training.n_curriculum_buckets,
-        icp_cache_path=cfg.paths.icp_cache_path,
         cache_dir=cfg.paths.cache_dir,
         resume_weights=cfg.paths.resume_weights,
         distributed=cfg.training.distributed,
@@ -485,27 +416,6 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         skip_samples=cfg.inference.skip_samples,
         skip_metrics=cfg.inference.skip_metrics,
         prior_dist=cfg.inference.prior_dist,
-    )
-
-
-def cache_config_to_namespace(cfg: CacheRunConfig) -> argparse.Namespace:
-    return argparse.Namespace(
-        output_path=cfg.paths.output_path,
-        jet_types=cfg.data.jet_types,
-        num_particles=cfg.data.num_particles,
-        cache_dir=cfg.paths.cache_dir,
-        icp_cache_path=cfg.paths.icp_cache_path,
-        n_samples=cfg.cache.n_samples,
-        n_workers=cfg.cache.n_workers,
-        icp_max_iter=cfg.cache.icp_max_iter,
-        skip_if_exists=cfg.cache.skip_if_exists,
-        geometry=cfg.cache.geometry,
-        assignment_cost=cfg.cache.assignment_cost,
-        particle_coupling=cfg.cache.particle_coupling,
-        coupling_seed=cfg.cache.coupling_seed,
-        regulator_mass=cfg.cache.regulator_mass,
-        prior_dist=cfg.cache.prior_dist,
-        seed=cfg.cache.seed,
     )
 
 

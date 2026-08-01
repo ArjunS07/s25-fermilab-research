@@ -34,8 +34,9 @@ training:
   use_time_sampling: false
   use_curriculum: false
   prior_dist: axis_aligned_per_jet
-  use_icp: true
-  icp_assignment_cost: squared_geodesic
+  # Fresh prior noise every step + online squared-geodesic ICP coupling (no frozen cache;
+  # prevents path memorization — see discussions/22).
+  coupling: online_geodesic_icp
   use_ema: true
   ema_decay: 0.999
   use_cosine_lr: true
@@ -59,4 +60,3 @@ inference:
 
 paths:
   cache_dir: /mnt/data/caches
-  icp_cache_path: /mnt/data/caches/g_p30_v2_massshell_m01_phi-v1-d2/icp_cache.pkl

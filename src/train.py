@@ -29,8 +29,7 @@ from util.metrics import run_save_metrics
 # from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import get_data_path
-from cache_icp import (resolve_training_cache_path, source_dataset_fingerprint,
-                       validate_cache_metadata)
+from util.online_coupling import online_geodesic_coupling
 from util.qualification import loss_improvement_summary, optimizer_limit_reached
 from util.rng import capture_rng_state, keyed_seed, keyed_torch_rng, restore_rng_state
 from util.lr_schedule import build_epoch_scheduler, build_step_scheduler
@@ -265,37 +264,21 @@ if __name__ == "__main__":
         print(f"Curriculum: {N_CURRICULUM_BUCKETS} buckets, {int(n_nonempty)} non-empty, "
               f"alpha_start={args.curriculum_alpha_start:.2f}")
 
-    # ── ICP cache ─────────────────────────────────────────────────────────────
-    paired_x0_cache: torch.Tensor | None = None
-    icp_cache_path = resolve_training_cache_path(
-        args.use_icp, args.icp_cache_path, args.cache_dir, args.jet_types, args.num_particles
-    )
-    if args.use_icp and icp_cache_path is not None:
-        if is_rank0:
-            print(f"Loading ICP cache from {icp_cache_path} …")
-        with open(icp_cache_path, "rb") as f:
-            icp_payload = pickle.load(f)
-        n_train = len(X_train_particle_transformed)
-        expected = {"source_dataset_fingerprint": source_dataset_fingerprint(
-                        X_train, n_train, args.num_particles),
-                    "dataset_indices": list(range(n_train)), "jet_types": list(args.jet_types),
-                    "prior_dist": args.prior_dist, "seed": RANDOM_SEED,
-                    "jet_phi_convention": "index_seeded_v1",
-                    "jet_phi_seed": RANDOM_SEED,
-                    "num_particles": args.num_particles, "final_scale": float(final_scale),
-                    "geometry": ("mass_shell" if args.use_hyperbolic and
-                                 args.hyperbolic_model == "mass_shell" else "euclidean")}
-        if expected["geometry"] == "mass_shell":
-            expected["regulator_mass"] = args.regulator_mass
-            expected["assignment_cost"] = args.icp_assignment_cost
-        if args.particle_coupling != "legacy":
-            expected["particle_coupling"] = args.particle_coupling
-            expected["coupling_seed"] = args.coupling_seed
-        validate_cache_metadata(icp_payload, expected)
-        paired_x0_cache = torch.from_numpy(icp_payload["paired_x0"]).float()
-        paired_x0_cache = paired_x0_cache[:n_train, :args.num_particles]
-        if is_rank0:
-            print(f"ICP paired x_0 cache loaded: {tuple(paired_x0_cache.shape)}")
+    # ── Coupling ────────────────────────────────────────────────────────────────
+    # The frozen ICP cache has been removed. A fixed per-jet prior/pairing reused every
+    # epoch let the field specialise to a finite bundle of paths (see discussions/22).
+    # Training now always draws fresh prior noise per step (below) and applies the geodesic
+    # ICP coupling *online* (util.online_coupling), so the supervision measure is the true
+    # fresh-noise marginal field. There is no cached path; `paired_x0_cache` stays None.
+    paired_x0_cache = None
+    if args.coupling == "online_geodesic_icp" and not (
+            args.use_hyperbolic and args.hyperbolic_model == "mass_shell"):
+        raise ValueError(
+            "training.coupling=online_geodesic_icp requires mass-shell geometry "
+            "(model.use_hyperbolic=true, model.hyperbolic_model=mass_shell)"
+        )
+    if is_rank0:
+        print(f"Coupling: {args.coupling} (fresh noise every step; no frozen cache)")
 
    
     def _sample_t(batch_size: int) -> torch.Tensor:
@@ -605,15 +588,16 @@ if __name__ == "__main__":
             # TODO: Boost before, can't boost scaled data
             # x_1 = boost_to_com_frame(x_1, mask=true_masks)
             # x_1 = (1/SCALE) * x_1
-            if paired_x0_cache is not None:
-                x_0 = batch_x0_cached.to(device)
-            else:
-                with keyed_torch_rng(args.prior_seed, epoch, i, rank, device):
-                    x_0 = gen_initial_distribution(
-                        x_1=x_1, prior_dist=args.prior_dist,
-                        jet_features=batch_jet_info, jet_phi=batch_jet_phi.to(device),
-                        device=device, model_scale=final_scale,
-                    ).to(device)
+            # Fresh prior noise every step (no frozen cache → no path memorization).
+            with keyed_torch_rng(args.prior_seed, epoch, i, rank, device):
+                x_0 = gen_initial_distribution(
+                    x_1=x_1, prior_dist=args.prior_dist,
+                    jet_features=batch_jet_info, jet_phi=batch_jet_phi.to(device),
+                    device=device, model_scale=final_scale,
+                ).to(device)
+            # Online geodesic ICP coupling on the freshly drawn noise (minibatch OT-CFM).
+            if args.coupling == "online_geodesic_icp":
+                x_0 = online_geodesic_coupling(x_0, x_1, true_masks, args.regulator_mass)
 
             mask_exp = true_masks.unsqueeze(-1).expand(-1, -1, NUM_PARTICLE_FEATURES)
             x_1 = mask_exp * x_1
@@ -1049,11 +1033,11 @@ if __name__ == "__main__":
                 "hyperbolic_model": args.hyperbolic_model if args.use_hyperbolic else None,
                 "regulator_mass": args.regulator_mass if (args.use_hyperbolic and args.hyperbolic_model == "mass_shell") else None,
                 "effective_prior_dist": args.prior_dist,
-                "effective_icp": {
-                    "enabled": bool(args.use_icp),
-                    "cache_path": icp_cache_path,
-                    "particle_coupling": args.particle_coupling,
-                    "coupling_seed": args.coupling_seed,
+                "effective_coupling": {
+                    "coupling": args.coupling,
+                    "fresh_noise_per_step": True,
+                    "regulator_mass": args.regulator_mass if (
+                        args.use_hyperbolic and args.hyperbolic_model == "mass_shell") else None,
                 },
                 "generation": {
                     "seed": args.inference_seed,

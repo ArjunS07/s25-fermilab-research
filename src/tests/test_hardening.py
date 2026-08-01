@@ -71,9 +71,9 @@ def test_mass_shell_ops_promote_geometry_to_float64():
 # ── Config round-trip ───────────────────────────────────────────────────────
 
 def test_new_config_fields_round_trip():
-    from config import (TrainRunConfig, InferRunConfig, CacheRunConfig, build_config,
+    from config import (TrainRunConfig, InferRunConfig, build_config,
                         train_config_to_namespace, infer_config_to_namespace,
-                        cache_config_to_namespace, run_config_dict)
+                        run_config_dict)
 
     cfg = TrainRunConfig.model_validate({
         "model": {"use_attention": True, "use_hyperbolic": True,
@@ -96,18 +96,11 @@ def test_new_config_fields_round_trip():
     ins = infer_config_to_namespace(icfg)
     assert ins.use_attention is True and ins.hyperbolic_model == "mass_shell" and ins.regulator_mass == 0.25
 
-    ccfg = CacheRunConfig.model_validate({"cache": {"geometry": "mass_shell", "regulator_mass": 0.3}})
-    cns = cache_config_to_namespace(ccfg)
-    assert cns.geometry == "mass_shell" and cns.regulator_mass == 0.3
-    assert cns.prior_dist == "isotropic_com" and cns.seed == 42
-
     assert run_config_dict(cfg, final_scale=1.0)["use_attention"] is True
 
 
 def test_invalid_enum_values_rejected():
-    from config import ModelConfig, CacheConfig
+    from config import ModelConfig
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
         ModelConfig(hyperbolic_model="ball")
-    with pytest.raises(ValidationError):
-        CacheConfig(geometry="riemann")

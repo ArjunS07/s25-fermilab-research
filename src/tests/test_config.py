@@ -8,14 +8,12 @@ from pydantic import ValidationError
 from config import (
     TrainRunConfig,
     InferRunConfig,
-    CacheRunConfig,
     apply_dotlist_overrides,
     build_config,
     load_yaml_config,
     parse_config_cli,
     train_config_to_namespace,
     infer_config_to_namespace,
-    cache_config_to_namespace,
     run_config_dict,
 )
 
@@ -56,14 +54,13 @@ def test_train_defaults_match_legacy_argparse():
     assert cfg.model.use_reference_vectors is False
     assert cfg.model.use_node_scalars is False
     assert cfg.training.prior_dist == "isotropic_com"
-    assert cfg.training.use_icp is False
+    assert cfg.training.coupling == "online_geodesic_icp"
     assert cfg.training.eta_min_factor == 0.3
     assert cfg.training.use_ema is False
     assert cfg.training.ema_decay == 0.999
     assert cfg.model.use_adaln is False
     assert cfg.training.curriculum_alpha_start == 2.0
     assert cfg.training.n_curriculum_buckets == 10
-    assert cfg.paths.icp_cache_path is None
     assert cfg.paths.cache_dir == "/mnt/data/caches"
     assert cfg.paths.resume_weights is None
     assert cfg.training.distributed is False
@@ -106,18 +103,6 @@ def test_infer_defaults_match_legacy_argparse():
     assert cfg.inference.stability_probe_integration_steps == 8
     assert cfg.model.velocity_readout_init == "small_normal"
     assert infer_config_to_namespace(cfg).use_ema_weights is False
-
-
-def test_cache_defaults_match_legacy_argparse():
-    cfg = CacheRunConfig()
-    assert cfg.paths.output_path == "/mnt/data/output"
-    assert cfg.data.jet_types == ["g", "q", "t"]
-    assert cfg.data.num_particles == 150
-    assert cfg.paths.cache_dir == "/mnt/data/caches"
-    assert cfg.cache.n_samples is None
-    assert cfg.cache.n_workers == max(1, (os.cpu_count() or 2) // 2)
-    assert cfg.cache.icp_max_iter == 1000
-    assert cfg.cache.skip_if_exists is True
 
 
 # ── Literal validation ───────────────────────────────────────────────────────
@@ -338,14 +323,6 @@ def test_infer_config_to_namespace_attribute_names():
     assert ns.batch_size == 256
     assert ns.sampler == "euler"
     assert ns.vf_mode == "none"
-
-
-def test_cache_config_to_namespace_attribute_names():
-    cfg = CacheRunConfig()
-    ns = cache_config_to_namespace(cfg)
-    assert ns.num_particles == 150
-    assert ns.n_workers == max(1, (os.cpu_count() or 2) // 2)
-    assert ns.skip_if_exists is True
 
 
 # ── Checkpoint config dict (backward-compat format) ─────────────────────────
