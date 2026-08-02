@@ -38,6 +38,7 @@ from generate_samples import generate_samples
 from data import get_data_path
 from config import (InferRunConfig, build_config, parse_config_cli, infer_config_to_namespace,
                     generation_controls_from_namespace)
+from util.checkpoint_config import resolve_architecture
 
 MAX_N_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4
@@ -58,34 +59,17 @@ def parse_args():
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-_ARCH_KEYS = ("n_hidden", "n_layers", "use_residual", "use_reference_vectors",
-              "use_node_scalars", "node_scalar_seed", "use_adaln", "use_attention",
-              "use_hyperbolic", "hyperbolic_model", "regulator_mass", "backbone",
-              "include_mass_condition", "num_attention_heads", "vector_channels",
-              "velocity_readout_init")
-
-
 def _resolve_architecture(args, ckpt):
     """If the checkpoint carries a self-describing `full_config` (written by
     train.py's config path), use its model architecture and warn if it
     disagrees with any values the user explicitly passed. Falls back to
     `args` unchanged for older checkpoints without `full_config`."""
-    if not isinstance(ckpt, dict):
-        return args
-    full_config = ckpt.get("full_config")
-    if not full_config:
-        return args
-
-    ckpt_model = full_config.get("model", {})
-    mism = {k: (getattr(args, k, None), ckpt_model[k])
-            for k in _ARCH_KEYS if k in ckpt_model and getattr(args, k, None) != ckpt_model[k]}
+    args, mism = resolve_architecture(args, ckpt)
     if mism:
         print(f"WARNING: CLI/config architecture flags differ from checkpoint: {mism}. "
               f"Using checkpoint's architecture (loaded weights would otherwise not match).")
-    for k in _ARCH_KEYS:
-        if k in ckpt_model:
-            setattr(args, k, ckpt_model[k])
-    print("Loaded model architecture from checkpoint config.")
+    if isinstance(ckpt, dict) and ckpt.get("full_config"):
+        print("Loaded model architecture from checkpoint config.")
     return args
 
 
@@ -96,7 +80,7 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
                      include_mass_condition=False, num_attention_heads=8,
                      vector_channels=16, regulator_mass=0.5,
                      velocity_readout_init="small_normal", preloaded_ckpt=None,
-                     use_ema_weights=False):
+                     use_ema_weights=False, geometric_state="readout_only", use_global_pooling=False):
     model = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
         max_particles=num_particles,
@@ -115,6 +99,7 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
         vector_channels=vector_channels,
         regulator_mass=regulator_mass,
         velocity_readout_init=velocity_readout_init,
+        geometric_state=geometric_state, use_global_pooling=use_global_pooling,
     ).to(device)
 
     ckpt = (preloaded_ckpt if preloaded_ckpt is not None else
@@ -191,6 +176,7 @@ def main():
         num_attention_heads=args.num_attention_heads,
         vector_channels=args.vector_channels,
         velocity_readout_init=args.velocity_readout_init,
+        geometric_state=args.geometric_state, use_global_pooling=args.use_global_pooling,
         regulator_mass=args.regulator_mass,
         preloaded_ckpt=ckpt,
         use_ema_weights=args.use_ema_weights,

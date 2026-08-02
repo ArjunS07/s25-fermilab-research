@@ -9,7 +9,7 @@ def flow_matching_loss(*, model, raw_model, config, x0, x1, t, mask,
             model=model, raw_model=raw_model, x0=x0, x1=x1, t=t,
             mask=mask, conditions=conditions, references=references,
             regulator_mass=config.regulator_mass,
-            tangent_backbone=config.backbone == "tangent_attention",
+            tangent_backbone=config.backbone in ("tangent_attention", "mass_shell_gnn"),
             return_diagnostics=False,
         )
     if config.use_hyperbolic:

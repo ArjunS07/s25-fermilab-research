@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-eval-g30-msgnn-factorial}
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes: [{name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}]
+      containers:
+        - name: evaluate
+          image: python:3.10-slim
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              GIT_COMMIT="f6a10d3ade7895bcf9561e478d4e01cb5c088758"
+              mkdir -p /tmp/runtime
+              tar -xf /mnt/data/caches/runtime/python-env-py310-torch271.tar -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              EVAL_ROOT="/mnt/data/output/$(date +%F_%H-%M-%S)-g30-msgnn-shared-eval"
+              mkdir -p "$EVAL_ROOT"
+              REPLAY=""
+              for ARM in a b c d; do
+                TRAIN_DIR="$(find /mnt/data/output -maxdepth 1 -type d -name "*-g30-msgnn-$ARM" | sort | tail -n 1)"
+                test -n "$TRAIN_DIR"
+                for STEP in 080000 100000; do
+                  OUT="$EVAL_ROOT/$ARM-$STEP"
+                  EXTRA=()
+                  if [ -n "$REPLAY" ]; then EXTRA+=(--set paths.replay_bundle_path="$REPLAY"); fi
+                  "$PYTHON" infer.py --config configs/infer-g30-mass-shell.yaml \
+                    --set paths.output_path="$TRAIN_DIR" \
+                    --set paths.checkpoint_path="$TRAIN_DIR/train/stability_probes/step_$STEP/checkpoint.pth" \
+                    --set paths.out_dir="$OUT" "${EXTRA[@]}"
+                  if [ -z "$REPLAY" ]; then REPLAY="$OUT/replay_bundle.pt"; test -s "$REPLAY"; fi
+                done
+              done
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 24Gi}

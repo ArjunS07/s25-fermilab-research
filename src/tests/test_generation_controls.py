@@ -1,6 +1,8 @@
 from argparse import Namespace
+import torch
 
 from config import generation_controls_from_namespace
+from util.conditioning import scale_condition_pt
 
 
 def test_generation_controls_preserve_prior_geometry_and_guidance():
@@ -31,3 +33,11 @@ def test_generation_controls_preserve_prior_geometry_and_guidance():
         "mass_shell_max_substeps": 64,
         "integration_end_time": 0.99,
     }
+
+
+def test_geometric_backbones_share_scaled_pt_condition_contract():
+    pt = torch.tensor([100.0, 250.0])
+    expected = torch.tensor([0.5, 1.25])
+    for backbone in ("tangent_attention", "mass_shell_gnn"):
+        assert torch.equal(scale_condition_pt(pt, 200.0, backbone), expected)
+    assert torch.equal(scale_condition_pt(pt, 200.0, "legacy"), pt)

@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: List
+items:
+  - &job
+    apiVersion: batch/v1
+    kind: Job
+    metadata: {name: as-jet-train-g30-msgnn-a}
+    spec:
+      ttlSecondsAfterFinished: 3600
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          volumes: &volumes [{name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}]
+          containers:
+            - name: train
+              image: python:3.10-slim
+              env:
+                - {name: ARM, value: a}
+                - name: POD_UID
+                  valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+              command: &command
+                - /bin/bash
+                - -c
+                - |
+                  set -euo pipefail
+                  GIT_COMMIT="f6a10d3ade7895bcf9561e478d4e01cb5c088758"
+                  LR="0.0003"
+                  LR_STEP_UNIT="optimizer_step"
+                  case "$ARM" in
+                    a) GEOM=readout_only; POOL=false;; b) GEOM=tangent_channels; POOL=false;;
+                    c) GEOM=readout_only; POOL=true;; d) GEOM=tangent_channels; POOL=true;;
+                  esac
+                  OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-msgnn-$ARM"
+                  mkdir -p "$OUT" /tmp/runtime
+                  exec > >(tee "$OUT/run.log") 2>&1
+                  printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+                  tar -xf /mnt/data/caches/runtime/python-env-py310-torch271.tar -C /tmp/runtime
+                  PYTHON=/tmp/runtime/python-env/bin/python
+                  "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+                  mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+                  cd /tmp/repo/src
+                  "$PYTHON" prepare_stage1.py --output-path "$OUT" --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 --model-version v3
+                  "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+                    --config configs/g30-mass-shell-gnn.yaml --set paths.output_path="$OUT" \
+                    --set model.geometric_state="$GEOM" --set model.use_global_pooling="$POOL" \
+                    --set training.lr="$LR" --set training.lr_step_unit="$LR_STEP_UNIT"
+              volumeMounts: &mounts [{name: data, mountPath: /mnt/data}]
+              resources: &resources
+                requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
+                limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 24Gi}
+  - <<: *job
+    metadata: {name: as-jet-train-g30-msgnn-b}
+    spec: {ttlSecondsAfterFinished: 3600, backoffLimit: 0, template: {spec: {restartPolicy: Never, volumes: *volumes, containers: [{name: train, image: "python:3.10-slim", env: [{name: ARM, value: b}, {name: POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}], command: *command, volumeMounts: *mounts, resources: *resources}]}}}
+  - <<: *job
+    metadata: {name: as-jet-train-g30-msgnn-c}
+    spec: {ttlSecondsAfterFinished: 3600, backoffLimit: 0, template: {spec: {restartPolicy: Never, volumes: *volumes, containers: [{name: train, image: "python:3.10-slim", env: [{name: ARM, value: c}, {name: POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}], command: *command, volumeMounts: *mounts, resources: *resources}]}}}
+  - <<: *job
+    metadata: {name: as-jet-train-g30-msgnn-d}
+    spec: {ttlSecondsAfterFinished: 3600, backoffLimit: 0, template: {spec: {restartPolicy: Never, volumes: *volumes, containers: [{name: train, image: "python:3.10-slim", env: [{name: ARM, value: d}, {name: POD_UID, valueFrom: {fieldRef: {fieldPath: metadata.uid}}}], command: *command, volumeMounts: *mounts, resources: *resources}]}}}
