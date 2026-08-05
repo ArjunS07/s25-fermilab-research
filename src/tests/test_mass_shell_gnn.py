@@ -1,7 +1,7 @@
 import pytest
 import torch
 from models.LEFT_JeN import LEFTJeN
-from models.mass_shell_gnn import MassShellGNNBlock
+from models.mass_shell_gnn import MassShellGNNBlock, Geometry
 from tests.lorentz_test_utils import apply_transform, random_proper_transform
 from util.mass_shell import project_to_shell
 from util.minkowski_utils import dotsq4
@@ -49,11 +49,14 @@ def test_signed_sum_is_not_softmax_or_convex_average():
     def hook(_,args): captured["x"]=args[0]
     handle=block.node_mlp.register_forward_pre_hook(hook)
     support=~torch.eye(3,dtype=torch.bool).unsqueeze(0)
-    block(torch.ones(1,3,4,dtype=torch.float64),torch.zeros(1,3,4),
-          torch.zeros(1,3,2,4,dtype=torch.float64),torch.zeros(1,4),torch.zeros(1,4),
-          torch.ones(1,3),torch.zeros(1,3,3,3),torch.zeros(1,3,3,4,dtype=torch.float64),
-          torch.zeros(1,3,2,4,dtype=torch.float64),torch.zeros(1,2,4),
-          support,.1); handle.remove()
+    count=support.sum(-1).clamp_min(1).to(torch.float64).sqrt()
+    g=Geometry(x=torch.ones(1,3,4,dtype=torch.float64),cond=torch.zeros(1,4),
+               mask=torch.ones(1,3),edge=torch.zeros(1,3,3,3),
+               direction=torch.zeros(1,3,3,4,dtype=torch.float64),
+               projected_refs=torch.zeros(1,3,2,4,dtype=torch.float64),
+               typed_refs=torch.zeros(1,2,4),support=support,count=count,mass=.1)
+    block(torch.zeros(1,3,4),torch.zeros(1,3,2,4,dtype=torch.float64),torch.zeros(1,4),g)
+    handle.remove()
     assert torch.allclose(captured["x"][...,4:8],torch.full((1,3,4),-2*2**.5))
 
 def test_padding_exactly_excluded_and_tangent_each_block():
