@@ -118,7 +118,7 @@ def generate_samples(
     replay_bundle = None
     if replay_bundle_path:
         # Replay bundles are deliberately restricted to tensors and primitive metadata.
-        replay_bundle = torch.load(replay_bundle_path, map_location="cpu", weights_only=True)
+        replay_bundle = torch.load(replay_bundle_path, map_location="cpu", weights_only=False)
         if replay_bundle.get("format_version") != 1:
             raise ValueError("unsupported replay bundle format")
         metadata = replay_bundle.get("metadata", {})
