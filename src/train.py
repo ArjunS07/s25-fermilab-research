@@ -884,7 +884,7 @@ if __name__ == "__main__":
             torch.manual_seed(args.inference_seed)
             if torch.cuda.is_available():
                 torch.cuda.manual_seed_all(args.inference_seed)
-            samples, gen_jet_types, gen_pt_cond, prior_samples = generate_samples(
+            samples, gen_jet_types, gen_pt_cond, prior_samples, gen_jet_eta = generate_samples(
                 model=raw_model,
                 jet_attr_model=jet_attr_model_loaded,
                 root_output_path=model_output_path,
@@ -1009,6 +1009,7 @@ if __name__ == "__main__":
                     device=device,
                     gen_jet_types=gen_jet_types,
                     gen_pt_cond=gen_pt_cond,
+                    gen_jet_eta=gen_jet_eta,
                     prior_samples=prior_samples,
                 ) or {}
             except Exception as e:

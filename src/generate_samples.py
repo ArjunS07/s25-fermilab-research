@@ -103,7 +103,8 @@ def generate_samples(
 
     all_samples = []
     all_prior_samples = []
-    all_pt_cond = []      # conditioning pT for each jet (normalized)
+    all_pt_cond = []      # conditioning pT for each jet (physical GeV)
+    all_gen_eta = []      # conditioning jet eta for each jet (for the canonical FPND axis)
     all_jet_types = []    # per-jet class index (argmax of one-hot)
     all_failure_steps = []
     all_explosion_steps = []
@@ -314,6 +315,7 @@ def generate_samples(
             all_samples.append(scaled_x.cpu())
             all_prior_samples.append((final_scale * prior_x).cpu())
             all_pt_cond.append(gen_pt.cpu())
+            all_gen_eta.append(generated_jet_attrs[:, 5].cpu())
             all_jet_types.append(jet_one_hot_enc.argmax(dim=-1).cpu())
             all_generated_jet_attrs.append(generated_jet_attrs.cpu())
             all_jet_phi.append(jet_phi.cpu())
@@ -328,6 +330,7 @@ def generate_samples(
     all_samples_cat   = torch.cat(all_samples, dim=0)
     all_prior_samples_cat = torch.cat(all_prior_samples, dim=0)
     all_pt_cond_cat   = torch.cat(all_pt_cond, dim=0)
+    all_gen_eta_cat   = torch.cat(all_gen_eta, dim=0)
     all_jet_types_cat = torch.cat(all_jet_types, dim=0)
 
     if replay_bundle is None:
@@ -429,4 +432,5 @@ def generate_samples(
         with open(f"{root_output_path}/generation_diagnostics.json", "w") as handle:
             json.dump(generation_report, handle, indent=2)
 
-    return all_samples_cat.to(device), all_jet_types_cat, all_pt_cond_cat, all_prior_samples_cat
+    return (all_samples_cat.to(device), all_jet_types_cat, all_pt_cond_cat,
+            all_prior_samples_cat, all_gen_eta_cat)

@@ -250,7 +250,7 @@ def main():
     if not args.skip_samples:
         try:
             print("\n=== Sample generation ===")
-            samples, gen_jet_types, gen_pt_cond, prior_samples = generate_samples(
+            samples, gen_jet_types, gen_pt_cond, prior_samples, gen_jet_eta = generate_samples(
                 model=model,
                 jet_attr_model=jet_attr_model,
                 root_output_path=out_dir,
@@ -297,6 +297,7 @@ def main():
                     device=device,
                     gen_jet_types=gen_jet_types,
                     gen_pt_cond=gen_pt_cond,
+                    gen_jet_eta=gen_jet_eta,
                     prior_samples=prior_samples,
                 )
                 print("Metrics done.")

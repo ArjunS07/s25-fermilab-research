@@ -8,6 +8,7 @@ import jetnet.evaluation as jetnet_eval
 
 from util.eval_report import eval_report, physicality_isotropy_scalars
 from util.tail_diagnostics import endpoint_tail_diagnostics
+from util.fpnd_input import build_fpnd_input
 
 # Fixed seed so the random jet-phi assignment (and hence the isotropy reference) is
 # reproducible across runs — the harness is a fixed yardstick (experiment plan 0.4).
@@ -50,6 +51,7 @@ def run_save_metrics(
     device='cpu',
     gen_jet_types=None,
     gen_pt_cond=None,
+    gen_jet_eta=None,
     prior_samples=None,
 ):
     """Compute scalar metrics + call eval_report to write the 14 eval figures.
@@ -59,8 +61,12 @@ def run_save_metrics(
             for FPND per class and passed to eval_report for panel labels.
         gen_jet_types: (N_gen,) long class-index tensor; if None, defaults to
             zeros (per-class figures degenerate to a single-class overlay).
-        gen_pt_cond: (N_gen,) normalized conditioning pT; if None the slope
-            annotation on jet_pt_total is skipped.
+        gen_pt_cond: (N_gen,) conditioning jet pT in physical GeV; if None the slope
+            annotation on jet_pt_total is skipped. Also used, with gen_jet_eta, to
+            build the canonical FPND input (see build_fpnd_input).
+        gen_jet_eta: (N_gen,) conditioning jet eta. Together with gen_pt_cond this
+            supplies the true clustered jet axis for FPND; when either is None, FPND
+            falls back to the (inflated) vector-sum convention and a warning is logged.
         prior_samples: exact pre-transport Cartesian state paired with gen_samples.
     """
     torch.manual_seed(EVAL_SEED)  # fixed yardstick across runs
@@ -88,6 +94,8 @@ def run_save_metrics(
             gen_jet_types = gen_jet_types[finite_jet.to(gen_jet_types.device)]
         if gen_pt_cond is not None:
             gen_pt_cond = gen_pt_cond[finite_jet.to(gen_pt_cond.device)]
+        if gen_jet_eta is not None:
+            gen_jet_eta = gen_jet_eta[finite_jet.to(gen_jet_eta.device)]
         if prior_samples is not None:
             prior_samples = prior_samples[finite_jet.to(prior_samples.device)]
 
@@ -216,13 +224,33 @@ def run_save_metrics(
     except Exception as e:
         print(f"Error computing EFP-based FPD: {e}")
 
+    # FPND is the ONLY metric compared against jetnet's external canonical ParticleNet
+    # reference, so its input must use JetNet's convention: pt_rel = pt_i / true jet pT
+    # and eta_rel about the true jet eta. gen_polar_rel (built by EtaPhiPtE_to_relEtaPhiPt)
+    # normalizes by the vector sum of the 30 retained constituents, inflating pt_rel ~10%
+    # and blowing FPND up to ~20 even for real jets. Rebuild from the conditioning jet
+    # pT/eta here. The W1/FPD/Cov paths above are gen-vs-test in the vector-sum convention
+    # (the shared bias cancels) and must keep using gen_polar_rel — do not change them.
+    if gen_jet_eta is not None and gen_pt_cond is not None:
+        gen_fpnd_input = build_fpnd_input(
+            gen_polar_abs,
+            gen_jet_eta.to(gen_polar_abs.device, gen_polar_abs.dtype),
+            gen_pt_cond.to(gen_polar_abs.device, gen_polar_abs.dtype),
+            gen_mask.to(gen_polar_abs.device),
+        )
+    else:
+        print("WARNING: gen_jet_eta/gen_pt_cond not supplied — FPND uses the uncorrected "
+              "vector-sum pt_rel convention (inflated ~10%, FPND not comparable to "
+              "JetNet's published values).")
+        gen_fpnd_input = gen_polar_rel
+
     for jet_type in jet_types:
         try:
             eval_info[f"fpnd_{jet_type}"] = jetnet_eval.fpnd(
                 # JetNet's pretrained ParticleNet weights are float32.  The
                 # mass-shell pipeline deliberately retains float64 through
                 # generation, so cast only at this external model boundary.
-                jets=gen_polar_rel.float(),
+                jets=gen_fpnd_input.float(),
                 jet_type=jet_type,
                 use_tqdm=False
             )
