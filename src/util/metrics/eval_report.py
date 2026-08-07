@@ -226,14 +226,6 @@ def _annotate_display_tail(ax, generated: torch.Tensor, hi: float) -> None:
                 transform=ax.transAxes, ha="right", va="top", fontsize=8, color="tab:red")
 
 
-def _class_series(polar: torch.Tensor, types: torch.Tensor, n_classes: int):
-    """Yield (class_idx, polar_slice) for jets of each class."""
-    for c in range(n_classes):
-        sel = (types == c)
-        if bool(sel.any()):
-            yield c, polar[sel]
-
-
 # ---- Pooled figures ------------------------------------------------------
 
 def _plot_jet_image(

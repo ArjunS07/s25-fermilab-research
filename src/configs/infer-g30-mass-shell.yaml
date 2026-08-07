@@ -1,21 +1,14 @@
 data:
   jet_types: ["g"]
   num_particles: 30
-  stage1_model_version: v3
 
 # Architecture is normally reconstructed from the checkpoint. These values make
 # the standalone config self-consistent and provide an explicit fallback.
 model:
-  backbone: tangent_attention
   n_hidden: 64
   n_layers: 6
   use_reference_vectors: true
   include_mass_condition: true
-  num_attention_heads: 8
-  vector_channels: 16
-  velocity_readout_init: zero
-  use_hyperbolic: true
-  hyperbolic_model: mass_shell
   regulator_mass: 0.1
 
 inference:

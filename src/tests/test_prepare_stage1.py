@@ -40,19 +40,21 @@ def test_cache_key_is_order_independent_for_same_type_set():
     assert cache_key(stage1_spec(["q", "g"], 30)) == cache_key(stage1_spec(["g", "q"], 30))
 
 
-def test_v3_cache_spec_is_distinct_and_records_hybrid_flow():
-    v2 = stage1_spec(["g"], 30, "v2")
-    v3 = stage1_spec(["g"], 30, "v3")
-    assert cache_key(v2) != cache_key(v3)
-    assert v3["model"]["version"] == "categorical-spline-flow-v3"
+def test_v3_cache_spec_records_hybrid_flow():
+    spec = stage1_spec(["g"], 30)
+    assert spec["model"]["version"] == "categorical-spline-flow-v3"
+    # Different data contract → distinct cache key.
+    assert cache_key(stage1_spec(["g"], 30)) != cache_key(stage1_spec(["g"], 150))
 
 
-def test_imports_validated_legacy_bundle_then_reuses_cache(tmp_path):
-    legacy = tmp_path / "legacy"
-    _legacy_bundle(legacy)
+def test_imports_validated_bundle_then_reuses_cache(tmp_path):
+    source = tmp_path / "source"
+    _legacy_bundle(source)
+    # v3 import requires a self-describing metadata file.
+    (source / "stage1_metadata.json").write_text(json.dumps({"spec": stage1_spec(["g"], 30)}))
     cache = tmp_path / "cache"
     first = tmp_path / "first"
-    bundle, reused = resolve_stage1(first, cache, ["g"], 30, legacy)
+    bundle, reused = resolve_stage1(first, cache, ["g"], 30, source)
     assert reused
     assert first.joinpath("data").is_symlink()
     assert first.joinpath("jet_attr_model.pth").is_symlink()

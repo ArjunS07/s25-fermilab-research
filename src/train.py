@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 from models.mass_shell_gnn import LEFTJeN
 from util.data import jet_attributes
 from util.data.jet_attributes import NUM_CLASSES
-from models.stage1.jet_attr_model import get_model_pth_path
+from models.stage1 import get_model_pth_path
 from util.data.distributions import gen_initial_distribution, time_dist
 from util.geometry.coordinates import (deterministic_jet_phi,
                               transform_rel_particle_coordinates_to_cartesian)

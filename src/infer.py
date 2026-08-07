@@ -30,7 +30,7 @@ import torch
 from models.mass_shell_gnn import LEFTJeN
 from util.data import jet_attributes
 from util.data.jet_attributes import NUM_CLASSES
-from models.stage1.jet_attr_model import get_model_pth_path
+from models.stage1 import get_model_pth_path
 from util.infra.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
 from util.metrics.metrics import run_save_metrics
