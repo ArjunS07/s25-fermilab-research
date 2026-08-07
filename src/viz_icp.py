@@ -34,8 +34,8 @@ from scipy.spatial.transform import Rotation as R
 import torch
 
 from data import data_args, get_data_path
-from util.coordinates import transform_rel_particle_coordinates_to_cartesian
-from util.distributions import gen_initial_distribution
+from util.geometry.coordinates import transform_rel_particle_coordinates_to_cartesian
+from util.data.distributions import gen_initial_distribution
 
 plt.rc("mathtext", fontset="cm")
 sns.set_style("whitegrid")

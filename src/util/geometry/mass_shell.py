@@ -30,7 +30,7 @@ silently rounded back to the model dtype (especially for small regulator masses)
 
 import torch
 
-from util.minkowski_utils import normsq4, dotsq4
+from util.geometry.minkowski_utils import normsq4, dotsq4
 
 # Numerical stability floor (in float64 space).
 _EPS = 1e-12

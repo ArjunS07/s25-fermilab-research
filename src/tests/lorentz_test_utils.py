@@ -9,7 +9,7 @@ import math
 import torch
 
 from models.LEFT_JeN import LEFTJeN
-from util.mass_shell import project_to_shell
+from util.geometry.mass_shell import project_to_shell
 
 
 def rotation_4x4(axis: str, angle: float, dtype=torch.float64) -> torch.Tensor:

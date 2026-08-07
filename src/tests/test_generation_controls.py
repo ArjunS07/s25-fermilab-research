@@ -2,7 +2,7 @@ from argparse import Namespace
 import torch
 
 from config import generation_controls_from_namespace
-from util.conditioning import scale_condition_pt
+from util.geometry.conditioning import scale_condition_pt
 
 
 def test_generation_controls_preserve_prior_geometry_and_guidance():

@@ -1,6 +1,6 @@
 import torch
 
-from util.coordinates import deterministic_jet_phi
+from util.geometry.coordinates import deterministic_jet_phi
 
 
 def test_deterministic_jet_phi_is_independent_of_global_rng():

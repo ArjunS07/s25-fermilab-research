@@ -18,7 +18,7 @@ frame-dependent lift of massless data — so it is not tested here.)
 import pytest
 import torch
 
-from util.mass_shell import (
+from util.geometry.mass_shell import (
     project_to_shell,
     geodesic_distance,
     exp_map,

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from util.qualification import loss_improvement_summary, optimizer_limit_reached
+from util.metrics.qualification import loss_improvement_summary, optimizer_limit_reached
 
 
 def test_optimizer_limit_is_exact_and_optional():

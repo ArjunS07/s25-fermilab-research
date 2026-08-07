@@ -9,8 +9,8 @@ mask (padding parked at the apex), and work with references + CFG on.
 import pytest
 import torch
 
-from util.mass_shell import MassShellIntegrationError, project_to_shell
-from util.minkowski_utils import normsq4
+from util.geometry.mass_shell import MassShellIntegrationError, project_to_shell
+from util.geometry.minkowski_utils import normsq4
 from tests.lorentz_test_utils import build_model, sample_inputs
 
 # Well-conditioned shell (mass ~ momentum scale) so an *untrained* random model is stable over

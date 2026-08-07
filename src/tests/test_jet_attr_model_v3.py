@@ -6,8 +6,8 @@ import torch
 
 pytest.importorskip("normflows")
 
-from jet_attr_model_v3 import JetAttributeFlowV3
-from util.jet_attributes import load_model
+from models.stage1.jet_attr_model_v3 import JetAttributeFlowV3
+from util.data.jet_attributes import load_model
 
 
 def tiny_model():

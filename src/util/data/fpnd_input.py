@@ -17,7 +17,7 @@ for real jets. This helper rebuilds the input from the *conditioning* jet pT and
 η (physical GeV, identity-normalized), which are the true clustered quantities.
 
 Kept jetnet-free on purpose so it can be unit-tested without importing
-`util.metrics` (which imports jetnet at module load). The W1/FPD/Cov paths are
+`util.metrics.metrics` (which imports jetnet at module load). The W1/FPD/Cov paths are
 gen-vs-test in the vector-sum convention and must keep using it — do NOT route
 them through this helper.
 """

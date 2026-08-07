@@ -12,8 +12,8 @@ import math
 import pytest
 import torch
 
-from util.minkowski_utils import dotsq4
-from util.mass_shell import (
+from util.geometry.minkowski_utils import dotsq4
+from util.geometry.mass_shell import (
     project_to_shell,
     geodesic_distance,
     exp_map,
@@ -26,7 +26,7 @@ from util.mass_shell import (
     massless_energy_view,
     tangent_error_diagnostics,
 )
-from util.minkowski_utils import normsq4
+from util.geometry.minkowski_utils import normsq4
 from tests.lorentz_test_utils import build_model, sample_inputs
 
 

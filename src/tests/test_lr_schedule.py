@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from util.lr_schedule import (
+from util.infra.lr_schedule import (
     build_epoch_scheduler,
     build_step_scheduler,
     learning_rate_multiplier,

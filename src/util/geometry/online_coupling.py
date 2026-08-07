@@ -19,7 +19,7 @@ import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment
 
-from util.mass_shell import geodesic_cost_matrix
+from util.geometry.mass_shell import geodesic_cost_matrix
 
 
 def geodesic_permutation(x0_real: torch.Tensor, x1_real: torch.Tensor,

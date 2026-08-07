@@ -18,7 +18,7 @@ def test_build_reference_vectors_shape_and_e_t():
 
 def test_training_and_inference_reference_contract_is_identical():
     pytest.importorskip("jetnet")
-    from util.coordinates import build_reference_vectors
+    from util.geometry.coordinates import build_reference_vectors
     eta = torch.tensor([0.2, -0.4])
     pt = torch.tensor([3.0, 1.5])
     phi = torch.tensor([0.7, -1.2])

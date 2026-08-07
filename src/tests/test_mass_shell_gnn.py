@@ -3,10 +3,10 @@ import torch
 from models.LEFT_JeN import LEFTJeN
 from models.mass_shell_gnn import MassShellGNNBlock, Geometry
 from tests.lorentz_test_utils import apply_transform, random_proper_transform
-from util.mass_shell import project_to_shell
-from util.minkowski_utils import dotsq4
+from util.geometry.mass_shell import project_to_shell
+from util.geometry.minkowski_utils import dotsq4
 from config import InferRunConfig, infer_config_to_namespace
-from util.checkpoint_config import resolve_architecture
+from util.infra.checkpoint_config import resolve_architecture
 
 
 def inputs(mass=.1):

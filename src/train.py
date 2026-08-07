@@ -16,24 +16,24 @@ import random
 from torch.utils.data import DataLoader
 
 from models.LEFT_JeN import LEFTJeN
-from util import jet_attributes
-from util.jet_attributes import NUM_CLASSES
-from jet_attr_model import get_model_pth_path
-from util.distributions import gen_initial_distribution, time_dist
-from util.coordinates import (deterministic_jet_phi,
+from util.data import jet_attributes
+from util.data.jet_attributes import NUM_CLASSES
+from models.stage1.jet_attr_model import get_model_pth_path
+from util.data.distributions import gen_initial_distribution, time_dist
+from util.geometry.coordinates import (deterministic_jet_phi,
                               transform_rel_particle_coordinates_to_cartesian)
-from util.conditioning import scale_condition_pt
-from util.ema import ModelEMA
-from util.file_management import make_clear_folder
+from util.geometry.conditioning import scale_condition_pt
+from util.infra.ema import ModelEMA
+from util.infra.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
-from util.metrics import run_save_metrics
+from util.metrics.metrics import run_save_metrics
 # from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import get_data_path
-from util.online_coupling import online_geodesic_coupling
-from util.qualification import loss_improvement_summary, optimizer_limit_reached
-from util.rng import capture_rng_state, keyed_seed, keyed_torch_rng, restore_rng_state
-from util.lr_schedule import build_epoch_scheduler, build_step_scheduler
+from util.geometry.online_coupling import online_geodesic_coupling
+from util.metrics.qualification import loss_improvement_summary, optimizer_limit_reached
+from util.infra.rng import capture_rng_state, keyed_seed, keyed_torch_rng, restore_rng_state
+from util.infra.lr_schedule import build_epoch_scheduler, build_step_scheduler
 from training import flow_matching_loss
 from config import (TrainRunConfig, build_config, parse_config_cli, train_config_to_namespace,
                     generation_controls_from_namespace)
@@ -251,7 +251,7 @@ if __name__ == "__main__":
     # The frozen ICP cache has been removed. A fixed per-jet prior/pairing reused every
     # epoch let the field specialise to a finite bundle of paths (see discussions/22).
     # Training now always draws fresh prior noise per step (below) and applies the geodesic
-    # ICP coupling *online* (util.online_coupling), so the supervision measure is the true
+    # ICP coupling *online* (util.geometry.online_coupling), so the supervision measure is the true
     # fresh-noise marginal field. There is no cached path; `paired_x0_cache` stays None.
     paired_x0_cache = None
     if args.coupling == "online_geodesic_icp" and not (
@@ -589,7 +589,7 @@ if __name__ == "__main__":
             # same attributes at inference and never leaks the target constituent sum.
             ref_vectors = None
             if args.use_reference_vectors:
-                from util.coordinates import build_reference_vectors
+                from util.geometry.coordinates import build_reference_vectors
                 ref_vectors = build_reference_vectors(batch_jet_info[:, 0], batch_jet_info[:, 1],
                                                       final_scale, device,
                                                       jet_phi=batch_jet_phi.to(device),

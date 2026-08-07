@@ -24,8 +24,8 @@ import seaborn as sns
 import torch
 from scipy import stats
 
-from util.minkowski_utils import normsq4, relative_mass_shell_residual, spacelike_mask
-from util.ks import ks_statistic_vs_uniform, ks_two_sample
+from util.geometry.minkowski_utils import normsq4, relative_mass_shell_residual, spacelike_mask
+from util.metrics.ks import ks_statistic_vs_uniform, ks_two_sample
 
 
 # ---- Style ----------------------------------------------------------------

@@ -1,6 +1,6 @@
 import torch
 
-from util.eval_report import _plot_jet_girth, _plot_jet_mass, _plot_jet_pt_total
+from util.metrics.eval_report import _plot_jet_girth, _plot_jet_mass, _plot_jet_pt_total
 
 
 def test_bulk_plots_survive_finite_explosive_jet(tmp_path):

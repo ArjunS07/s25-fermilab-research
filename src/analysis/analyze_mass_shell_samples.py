@@ -6,8 +6,8 @@ import os
 
 import torch
 
-from util.mass_shell import massless_energy_view
-from util.minkowski_utils import normsq4
+from util.geometry.mass_shell import massless_energy_view
+from util.geometry.minkowski_utils import normsq4
 
 
 def _quantiles(values):

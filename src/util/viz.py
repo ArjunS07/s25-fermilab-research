@@ -4,19 +4,19 @@ import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from util.coordinates import transform_rel_particle_coordinates_to_cartesian, build_reference_vectors
-from util import jet_attributes
-from util.file_management import make_clear_folder
-from util.distributions import gen_initial_distribution
+from util.geometry.coordinates import transform_rel_particle_coordinates_to_cartesian, build_reference_vectors
+from util.data import jet_attributes
+from util.infra.file_management import make_clear_folder
+from util.data.distributions import gen_initial_distribution
 
 
 colors = sns.color_palette("deep")
 import os
-from util import jet_attributes
-from util.distributions import gen_initial_distribution
+from util.data import jet_attributes
+from util.data.distributions import gen_initial_distribution
 # from util.boost_equiv import enforce_com_frame, boost_to_com_frame
 
-from util.file_management import make_clear_folder
+from util.infra.file_management import make_clear_folder
 def plot_hist(X_test_samples, x_model, output_path, filename):
     _, axs = plt.subplots(4, figsize=(10, 10))
     feature_names = [r"$E/c$", r"$p_x$", r"$p_y$", r"$p_z$"]

@@ -6,9 +6,9 @@ import torch
 from jetnet.utils import EtaPhiPtE_to_relEtaPhiPt, cartesian_to_EtaPhiPtE
 import jetnet.evaluation as jetnet_eval
 
-from util.eval_report import eval_report, physicality_isotropy_scalars
-from util.tail_diagnostics import endpoint_tail_diagnostics
-from util.fpnd_input import build_fpnd_input
+from util.metrics.eval_report import eval_report, physicality_isotropy_scalars
+from util.metrics.tail_diagnostics import endpoint_tail_diagnostics
+from util.data.fpnd_input import build_fpnd_input
 
 # Fixed seed so the random jet-phi assignment (and hence the isotropy reference) is
 # reproducible across runs — the harness is a fixed yardstick (experiment plan 0.4).

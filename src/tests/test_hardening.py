@@ -3,7 +3,7 @@ import torch
 
 
 def test_mass_shell_ops_promote_geometry_to_float64():
-    from util.mass_shell import (project_to_shell, exp_map, log_map, pushforward_to_tangent,
+    from util.geometry.mass_shell import (project_to_shell, exp_map, log_map, pushforward_to_tangent,
                                  geodesic_interpolant, conditional_vector_field, mass_shell_loss)
     m = 0.5
     p = project_to_shell(torch.randn(2, 4, 4), m)

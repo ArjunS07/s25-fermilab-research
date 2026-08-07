@@ -12,8 +12,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from util.mass_shell import log_map, pushforward_to_tangent
-from util.minkowski_utils import dotsq4, normsq4
+from util.geometry.mass_shell import log_map, pushforward_to_tangent
+from util.geometry.minkowski_utils import dotsq4, normsq4
 
 
 def _small_normal(layer):
@@ -148,7 +148,7 @@ class MassShellGNNFlow(nn.Module):
 
     def _mass_shell_velocity(self, state, conditions, mask, t, use_cfg,
                              guidance_weight, references):
-        from util.mass_shell import MassShellIntegrationError, pushforward_to_tangent
+        from util.geometry.mass_shell import MassShellIntegrationError, pushforward_to_tangent
 
         batch_t = t.unsqueeze(0).expand(state.shape[0])
         model_dtype = next(self.parameters()).dtype
@@ -186,7 +186,7 @@ class MassShellGNNFlow(nn.Module):
         if regulator_mass is not None and regulator_mass != self.regulator_mass:
             raise ValueError("sampler regulator mass differs from model regulator mass")
 
-        from util.mass_shell import (MassShellIntegrationError, exp_map,
+        from util.geometry.mass_shell import (MassShellIntegrationError, exp_map,
                                      project_to_shell, tangent_norm)
 
         current = y_t

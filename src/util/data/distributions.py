@@ -1,5 +1,5 @@
 import torch
-from util.coordinates import eta_phi_pt_e_to_cartesian
+from util.geometry.coordinates import eta_phi_pt_e_to_cartesian
 
 
 def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, prior_dist='isotropic_com', jet_features=None, jet_phi=None, device='cpu', model_scale=None):

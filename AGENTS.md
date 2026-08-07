@@ -45,25 +45,33 @@ is no GPU locally.
 - `src/` — all code.
 - `report/`, `week-*/`, `weekly-presentation/` — reporting artifacts.
 
-**`src/` (code):**
+**Single architecture:** the codebase was deslopped to one model — the **mass-shell
+Lorentz-equivariant GNN, variant a** (`geometric_state=readout_only`, no global pooling).
+The legacy/tangent-attention backbones, poincaré/euclidean geometries, and GNN variant
+branches were removed. `ModelConfig` is just `{n_hidden, n_layers, regulator_mass,
+use_reference_vectors, include_mass_condition}`.
+
+**`src/` (code):** entrypoints stay at the root (so `torchrun train.py` is unchanged);
+library code is grouped by concern.
 - `train.py` — DDP training entry.
 - `infer.py` — inference + metrics entry.
-- `cache_icp.py` — pre-computes ICP-aligned targets (Euclidean or mass-shell
-  geometry).
 - `generate_samples.py` — shared sampling helper (`sns.set_style("whitegrid")`).
 - `data.py` — JetNet download / preprocessing.
-- `jet_attr_model.py` — Stage-1 jet-attribute NF.
 - `config.py` — pydantic run configs + YAML loader + `--set` dotlist merge.
-- `models/LEFT_JeN.py` — Lorentz-equivariant flow model (the only file in
-  `models/`).
-- `util/` — `minkowski_utils`, `mass_shell`, `hyperbolic`, `distributions`,
-  `coordinates`, `jet_attributes`, `mask_helpers`, `metrics`, `ks`, `ema`,
-  `boost_equiv`, `file_management`, `viz`.
-- `configs/*.yaml` — one file per experiment (baselines, ICP, mass-shell,
-  `g30-phase1-{a..f}`, infer configs).
+- `prepare_stage1.py` — resolves/builds the Stage-1 jet-attribute artifacts.
+- `models/` — `mass_shell_gnn.py` (the model), `LEFT_JeN.py` (thin checkpoint-compat
+  factory), `stage1/` (jet-attribute NF: `jet_attr_model{,_v2,_v3}.py`).
+- `util/geometry/` — `minkowski_utils`, `mass_shell`, `coordinates`, `online_coupling`,
+  `conditioning`.
+- `util/data/` — `distributions`, `fpnd_input`, `jet_attributes`.
+- `util/metrics/` — `metrics`, `ks`, `eval_report`, `tail_diagnostics`, `qualification`.
+- `util/infra/` — `ema`, `lr_schedule`, `rng`, `checkpoint_config`, `file_management`.
+- `util/viz.py` — vector-field / training viz.
+- `training/mass_shell.py` — the one flow-matching loss (`training/__init__.flow_matching_loss`).
+- `configs/*.yaml` — one file per experiment (mass-shell-gnn, width-96 grid, infer configs).
 - `tests/` — pytest suite (`conftest.py` puts `src/` on the path).
 - `nrp/*.yaml` — Kubernetes Jobs.
-- `analysis/aggregate_grid.py` — Phase-1 A–F ablation table builder.
+- `analysis/aggregate_grid.py` — ablation-grid table builder.
 - `downloaded_output/` — populated with training-run artifacts pulled off the
   PVC. Note: also a `downloaded_outputs/` (plural) directory exists and is
   empty — the gitignore only covers the singular. **Prefer `downloaded_output/`

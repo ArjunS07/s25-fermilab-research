@@ -3,7 +3,7 @@ import math
 
 import torch
 
-from util.minkowski_utils import normsq4, dotsq4
+from util.geometry.minkowski_utils import normsq4, dotsq4
 from tests.lorentz_test_utils import random_proper_transform, apply_transform
 
 

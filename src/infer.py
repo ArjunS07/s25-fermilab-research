@@ -28,17 +28,17 @@ import numpy as np
 import torch
 
 from models.LEFT_JeN import LEFTJeN
-from util import jet_attributes
-from util.jet_attributes import NUM_CLASSES
-from jet_attr_model import get_model_pth_path
-from util.file_management import make_clear_folder
+from util.data import jet_attributes
+from util.data.jet_attributes import NUM_CLASSES
+from models.stage1.jet_attr_model import get_model_pth_path
+from util.infra.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
-from util.metrics import run_save_metrics
+from util.metrics.metrics import run_save_metrics
 from generate_samples import generate_samples
 from data import get_data_path
 from config import (InferRunConfig, build_config, parse_config_cli, infer_config_to_namespace,
                     generation_controls_from_namespace)
-from util.checkpoint_config import resolve_architecture
+from util.infra.checkpoint_config import resolve_architecture
 
 MAX_N_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4

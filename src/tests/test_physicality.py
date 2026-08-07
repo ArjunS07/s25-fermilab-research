@@ -1,13 +1,13 @@
 """Physics underlying the physicality/isotropy diagnostics (no jetnet import needed).
 
-util.metrics imports jetnet at module load, so its helper cannot be imported on a machine
+util.metrics.metrics imports jetnet at module load, so its helper cannot be imported on a machine
 without jetnet. These tests cover the numeric building blocks the helper relies on.
 """
 import math
 
 import torch
 
-from util.minkowski_utils import normsq4, relative_mass_shell_residual, spacelike_mask
+from util.geometry.minkowski_utils import normsq4, relative_mass_shell_residual, spacelike_mask
 
 
 def test_msq_sign_classifies_particles():

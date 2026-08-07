@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from data import get_data_path
-from util.jet_attributes import one_hot_enc_jet_type, NUM_CLASSES
-from util.file_management import make_clear_folder
+from util.data.jet_attributes import one_hot_enc_jet_type, NUM_CLASSES
+from util.infra.file_management import make_clear_folder
 from jetnet.evaluation import fpd, kpd
 
 RANDOM_SEED = 42
