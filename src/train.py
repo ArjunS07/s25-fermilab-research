@@ -27,37 +27,34 @@ from util.infra.ema import ModelEMA
 from util.infra.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
 from util.metrics.metrics import run_save_metrics
-# from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import get_data_path
+from util.geometry.coordinates import build_reference_vectors
 from util.geometry.online_coupling import online_geodesic_coupling
 from util.metrics.qualification import loss_improvement_summary, optimizer_limit_reached
 from util.infra.rng import capture_rng_state, keyed_seed, keyed_torch_rng, restore_rng_state
+from util.infra.checkpoint_config import build_run_config, build_checkpoint
 from util.infra.lr_schedule import build_epoch_scheduler, build_step_scheduler
 from training import flow_matching_loss
+from training.curriculum import CurriculumSampler
 from config import (TrainRunConfig, build_config, parse_config_cli,
                     generation_controls_from_config)
 
 RANDOM_SEED = 42
 MAX_N_PARTICLES = 150
 NUM_PARTICLE_FEATURES = 4 # E/c, px, py, pz
-TRAIN_SPLIT = 0.7
-
-# SCALE = 2000
 
 class PairedDataset(torch.utils.data.Dataset):
-    def __init__(self, jet_info, particle_data, jet_phi, paired_x0=None):
+    def __init__(self, jet_info, particle_data, jet_phi):
         self.jet_info = jet_info
         self.particle_data = particle_data
         self.jet_phi = jet_phi
-        self.paired_x0 = paired_x0
 
     def __len__(self):
         return len(self.particle_data)
 
     def __getitem__(self, idx):
-        x0 = self.paired_x0[idx] if self.paired_x0 is not None else torch.zeros(1)
-        return self.jet_info[idx], self.particle_data[idx], self.jet_phi[idx], x0
+        return self.jet_info[idx], self.particle_data[idx], self.jet_phi[idx]
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)    
@@ -186,18 +183,7 @@ if __name__ == "__main__":
 
     # Self-describing model config, embedded in every checkpoint so a run can be resumed or
     # loaded for inference without re-specifying the architecture flags on the CLI.
-    run_config = {
-        "num_particles": cfg.data.num_particles,
-        "n_layers": cfg.model.n_layers,
-        "n_hidden": cfg.model.n_hidden,
-        "include_pt": True,
-        "use_reference_vectors": cfg.model.use_reference_vectors,
-        "backbone": "mass_shell_gnn",
-        "include_mass_condition": cfg.model.include_mass_condition,
-        "regulator_mass": cfg.model.regulator_mass,
-        "jet_types": cfg.data.jet_types,
-        "final_scale": float(final_scale),
-    }
+    run_config = build_run_config(cfg, final_scale)
     # Full config (all sections), embedded alongside the architecture-only `config` dict
     # so infer.py can auto-load every knob a run was trained with.
     full_config = cfg.model_dump()
@@ -231,32 +217,17 @@ if __name__ == "__main__":
     # Bucket k ∈ {0, …, N-1}, k=0 sparsest, k=N-1 densest.
     # P(bucket k) ∝ (k+1)^α; high α oversamples dense jets.
     # α decays linearly from curriculum_alpha_start to 0 over num_epochs.
-    N_CURRICULUM_BUCKETS = cfg.training.n_curriculum_buckets
-    n_particles_per_jet = train_jet_info[:, 3].cpu().float()     # (n_train,)
-    p_min = n_particles_per_jet.min().item()
-    p_max = n_particles_per_jet.max().item()
-    bucket_width = (p_max - p_min + 1e-6) / N_CURRICULUM_BUCKETS
-    bucket_assignments = ((n_particles_per_jet - p_min) / bucket_width).long()
-    bucket_assignments = bucket_assignments.clamp(0, N_CURRICULUM_BUCKETS - 1)
-    bucket_counts = torch.bincount(bucket_assignments, minlength=N_CURRICULUM_BUCKETS).float()
-    n_nonempty = (bucket_counts > 0).sum().item()
+    curriculum = CurriculumSampler(train_jet_info[:, 3], cfg.training.n_curriculum_buckets,
+                                   cfg.training.curriculum_alpha_start)
     if is_rank0:
-        print(f"Curriculum: {N_CURRICULUM_BUCKETS} buckets, {int(n_nonempty)} non-empty, "
+        print(f"Curriculum: {curriculum.n_buckets} buckets, {curriculum.n_nonempty} non-empty, "
               f"alpha_start={cfg.training.curriculum_alpha_start:.2f}")
 
     # ── Coupling ────────────────────────────────────────────────────────────────
-    # The frozen ICP cache has been removed. A fixed per-jet prior/pairing reused every
-    # epoch let the field specialise to a finite bundle of paths (see discussions/22).
-    # Training now always draws fresh prior noise per step (below) and applies the geodesic
-    # ICP coupling *online* (util.geometry.online_coupling), so the supervision measure is the true
-    # fresh-noise marginal field. There is no cached path; `paired_x0_cache` stays None.
-    paired_x0_cache = None
-    if cfg.training.coupling == "online_geodesic_icp" and not (
-            True):
-        raise ValueError(
-            "training.coupling=online_geodesic_icp requires mass-shell geometry "
-            "(model.use_hyperbolic=true, model.hyperbolic_model=mass_shell)"
-        )
+    # The frozen ICP cache has been removed (a fixed per-jet prior/pairing reused every epoch
+    # let the field specialise to a finite bundle of paths; see discussions/22). Training draws
+    # fresh prior noise per step and applies the geodesic ICP coupling *online*
+    # (util.geometry.online_coupling), so the supervision measure is the fresh-noise marginal field.
     if is_rank0:
         print(f"Coupling: {cfg.training.coupling} (fresh noise every step; no frozen cache)")
 
@@ -468,26 +439,8 @@ if __name__ == "__main__":
         selection_generator.manual_seed(keyed_seed(cfg.training.data_order_seed, epoch, 0, 0))
 
         if cfg.training.use_curriculum:
-            # alpha decays linearly from alpha_start (epoch 0) to 0 (final epoch),
-            # using total_epochs so the schedule is continuous across resume boundaries.
-            alpha = cfg.training.curriculum_alpha_start * (
-                1.0 - epoch / max(total_epochs - 1, 1)
-            )
-            # P(bucket k) \propto (k+1)^α; weight 0 for empty buckets automatically
-            # because no samples belong to them.
-            bucket_probs = torch.pow(
-                torch.arange(1, N_CURRICULUM_BUCKETS + 1, dtype=torch.float), alpha
-            )
-            bucket_probs = bucket_probs / bucket_probs.sum()
-            bucket_counts_safe = bucket_counts.clamp(min=1)
-            sample_weights = (
-                bucket_probs[bucket_assignments] / bucket_counts_safe[bucket_assignments]
-            )
-            # Draw with replacement so the curriculum distribution is exact
-            epoch_indices = torch.multinomial(
-                sample_weights, samples_per_epoch, replacement=True,
-                generator=selection_generator,
-            )
+            epoch_indices = curriculum.sample(epoch, total_epochs, samples_per_epoch,
+                                              selection_generator)
         else:
             epoch_indices = torch.randperm(
                 len(X_train_particle_transformed), generator=selection_generator,
@@ -501,10 +454,9 @@ if __name__ == "__main__":
         X_train_epoch = torch.utils.data.Subset(X_train_particle_transformed, epoch_indices)
         train_jet_info_epoch = train_jet_info[epoch_indices]
         train_jet_phi_epoch = train_jet_phi[epoch_indices]
-        paired_x0_epoch = paired_x0_cache[epoch_indices] if paired_x0_cache is not None else None
 
         paired_dataset = PairedDataset(
-            train_jet_info_epoch, X_train_epoch, train_jet_phi_epoch, paired_x0=paired_x0_epoch
+            train_jet_info_epoch, X_train_epoch, train_jet_phi_epoch
         )
         train_loader = DataLoader(
             paired_dataset,
@@ -525,7 +477,7 @@ if __name__ == "__main__":
             "prediction_norm_sum": 0.0, "prediction_norm_sq_sum": 0.0,
         }
 
-        for i, (batch_jet_info, batch_particle_info, batch_jet_phi, batch_x0_cached) in enumerate(train_loader):
+        for i, (batch_jet_info, batch_particle_info, batch_jet_phi) in enumerate(train_loader):
             if epoch == start_epoch and i < resume_minibatch:
                 continue
 
@@ -562,10 +514,6 @@ if __name__ == "__main__":
 
             x_1 = batch_particle_info[:, :, :4].to(device)
             true_masks = batch_particle_info[:, :, 4].to(device)   # always use mask
-
-            # TODO: Boost before, can't boost scaled data
-            # x_1 = boost_to_com_frame(x_1, mask=true_masks)
-            # x_1 = (1/SCALE) * x_1
             # Fresh prior noise every step (no frozen cache → no path memorization).
             with keyed_torch_rng(cfg.training.prior_seed, epoch, i, rank, device):
                 x_0 = gen_initial_distribution(
@@ -585,7 +533,6 @@ if __name__ == "__main__":
             # same attributes at inference and never leaks the target constituent sum.
             ref_vectors = None
             if cfg.model.use_reference_vectors:
-                from util.geometry.coordinates import build_reference_vectors
                 ref_vectors = build_reference_vectors(batch_jet_info[:, 0], batch_jet_info[:, 1],
                                                       final_scale, device,
                                                       jet_phi=batch_jet_phi.to(device),
@@ -736,23 +683,17 @@ if __name__ == "__main__":
 
         # Overwrite latest checkpoint so training can be resumed at any point.
         if is_rank0:
-            ckpt = {
-                "epoch": epoch,
-                "model_state_dict": raw_model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "losses": losses,
-                "global_optimizer_step": global_optimizer_step,
-                "config": run_config,
-                "full_config": full_config,
-                "rng_state": capture_rng_state(),
-                "schedule_definition": schedule_definition,
-                "resume_epoch": next_resume_epoch,
-                "resume_minibatch": next_resume_minibatch,
-            }
-            if cfg.training.use_cosine_lr:
-                ckpt["scheduler_state_dict"] = scheduler.state_dict()
-            if ema is not None:
-                ckpt["ema_state_dict"] = ema.state_dict()
+            ckpt = build_checkpoint(
+                model_state=raw_model.state_dict(), epoch=epoch,
+                global_optimizer_step=global_optimizer_step, losses=losses,
+                run_config=run_config, full_config=full_config,
+                optimizer_state=optimizer.state_dict(), rng_state=capture_rng_state(),
+                scheduler_state=scheduler.state_dict() if cfg.training.use_cosine_lr else None,
+                ema_state=ema.state_dict() if ema is not None else None,
+                extra={"schedule_definition": schedule_definition,
+                       "resume_epoch": next_resume_epoch,
+                       "resume_minibatch": next_resume_minibatch},
+            )
             torch.save(ckpt, f"{model_output_path}/models/latest_checkpoint.pth")
 
         if reached_optimizer_limit:
@@ -775,23 +716,17 @@ if __name__ == "__main__":
 
         # Complete resume point: everything needed to continue training from the final model
         # (raw weights, optimizer, scheduler, EMA shadow, epoch, losses, self-describing config).
-        final_ckpt = {
-            "epoch": last_completed_epoch,
-            "model_state_dict": raw_model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "losses": losses,
-            "global_optimizer_step": global_optimizer_step,
-            "config": run_config,
-            "full_config": full_config,
-            "rng_state": capture_rng_state(),
-            "schedule_definition": schedule_definition,
-            "resume_epoch": next_resume_epoch,
-            "resume_minibatch": next_resume_minibatch,
-        }
-        if cfg.training.use_cosine_lr:
-            final_ckpt["scheduler_state_dict"] = scheduler.state_dict()
-        if ema is not None:
-            final_ckpt["ema_state_dict"] = ema.state_dict()
+        final_ckpt = build_checkpoint(
+            model_state=raw_model.state_dict(), epoch=last_completed_epoch,
+            global_optimizer_step=global_optimizer_step, losses=losses,
+            run_config=run_config, full_config=full_config,
+            optimizer_state=optimizer.state_dict(), rng_state=capture_rng_state(),
+            scheduler_state=scheduler.state_dict() if cfg.training.use_cosine_lr else None,
+            ema_state=ema.state_dict() if ema is not None else None,
+            extra={"schedule_definition": schedule_definition,
+                   "resume_epoch": next_resume_epoch,
+                   "resume_minibatch": next_resume_minibatch},
+        )
         torch.save(final_ckpt, f"{model_output_path}/models/final_checkpoint.pth")
 
         # If EMA is active, save the shadow and use it for all downstream sampling/metrics.
