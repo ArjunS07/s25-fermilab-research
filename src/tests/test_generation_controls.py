@@ -1,37 +1,29 @@
-from argparse import Namespace
 import torch
 
-from config import generation_controls_from_namespace
+from config import InferRunConfig, generation_controls_from_config
 from util.geometry.conditioning import scale_condition_pt
 
 
-def test_generation_controls_preserve_prior_geometry_and_guidance():
-    args = Namespace(
-        use_cfg=True,
-        cfg_guidance_weight=0.5,
-        use_hyperbolic=True,
-        hyperbolic_model="mass_shell",
-        regulator_mass=0.3,
-        use_reference_vectors=False,
-        sampler="euler",
-        prior_dist="axis_aligned",
-        mass_shell_max_step_rapidity=0.5,
-        mass_shell_max_substeps=64,
-        integration_end_time=0.99,
+def test_generation_controls_from_config():
+    cfg = InferRunConfig(
+        inference={
+            "use_cfg": True, "cfg_guidance_weight": 0.5, "sampler": "euler",
+            "mass_shell_max_step_rapidity": 0.5, "mass_shell_max_substeps": 64,
+            "integration_end_time": 0.99,
+        },
+        model={"regulator_mass": 0.3},
     )
-
-    assert generation_controls_from_namespace(args) == {
+    assert generation_controls_from_config(cfg, "axis_aligned") == {
         "use_cfg": True,
         "cfg_guidance_weight": 0.5,
-        "use_hyperbolic": True,
-        "hyperbolic_model": "mass_shell",
         "regulator_mass": 0.3,
-        "use_reference_vectors": False,
+        "use_reference_vectors": True,
+        "include_mass_condition": True,
         "sampler": "euler",
-        "prior_dist": "axis_aligned",
         "mass_shell_max_step_rapidity": 0.5,
         "mass_shell_max_substeps": 64,
         "integration_end_time": 0.99,
+        "prior_dist": "axis_aligned",
     }
 
 

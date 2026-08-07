@@ -12,8 +12,6 @@ from config import (
     build_config,
     load_yaml_config,
     parse_config_cli,
-    train_config_to_namespace,
-    infer_config_to_namespace,
 )
 
 
@@ -62,7 +60,7 @@ def test_infer_defaults():
     assert cfg.model.use_reference_vectors is True
     assert cfg.model.include_mass_condition is True
     assert cfg.inference.vf_mode == "none"
-    assert infer_config_to_namespace(cfg).use_ema_weights is False
+    assert cfg.inference.use_ema_weights is False
 
 
 # ── Literal / contract validation ───────────────────────────────────────────
@@ -114,23 +112,22 @@ def test_model_dimensions_must_be_positive(field):
         TrainRunConfig(model={field: 0})
 
 
-def test_lr_cadence_and_rng_seeds_reach_training_namespace():
+def test_lr_cadence_and_rng_seeds_validate():
     cfg = TrainRunConfig(training={
         "lr_step_unit": "epoch", "model_seed": 1, "data_order_seed": 2,
         "time_seed": 3, "dropout_seed": 4, "prior_seed": 5,
     })
-    args = train_config_to_namespace(cfg)
-    assert args.lr_step_unit == "epoch"
-    assert (args.model_seed, args.data_order_seed, args.time_seed,
-            args.dropout_seed, args.prior_seed) == (1, 2, 3, 4, 5)
+    assert cfg.training.lr_step_unit == "epoch"
+    assert (cfg.training.model_seed, cfg.training.data_order_seed, cfg.training.time_seed,
+            cfg.training.dropout_seed, cfg.training.prior_seed) == (1, 2, 3, 4, 5)
 
 
-def test_optimizer_warmup_steps_are_typed_and_reach_namespace():
+def test_optimizer_warmup_steps_are_typed_and_validated():
     cfg = TrainRunConfig(training={
         "lr_step_unit": "optimizer_step", "lr_warmup_steps": 200,
         "max_optimizer_steps": 500,
     })
-    assert train_config_to_namespace(cfg).lr_warmup_steps == 200
+    assert cfg.training.lr_warmup_steps == 200
     with pytest.raises(ValidationError):
         TrainRunConfig(training={"lr_step_unit": "epoch", "lr_warmup_steps": 200})
     with pytest.raises(ValidationError):
@@ -248,28 +245,3 @@ def test_parse_config_cli_no_args():
     assert overrides == []
 
 
-# ── Namespace bridges ────────────────────────────────────────────────────────
-
-def test_train_config_to_namespace_attribute_names():
-    cfg = TrainRunConfig()
-    ns = train_config_to_namespace(cfg)
-    assert ns.num_particles == 150
-    assert ns.n_hidden == 128
-    assert ns.batch_size == 16
-    assert ns.use_cosine_lr is True
-    assert ns.prior_dist == "isotropic_com"
-    assert ns.distributed is False
-    assert ns.lr == 6e-4
-    # Geometry constants the internal readers rely on.
-    assert ns.backbone == "mass_shell_gnn"
-    assert ns.use_hyperbolic is True and ns.hyperbolic_model == "mass_shell"
-
-
-def test_infer_config_to_namespace_attribute_names():
-    cfg = InferRunConfig()
-    ns = infer_config_to_namespace(cfg)
-    assert ns.num_particles == 30
-    assert ns.batch_size == 256
-    assert ns.sampler == "euler"
-    assert ns.vf_mode == "none"
-    assert ns.backbone == "mass_shell_gnn"

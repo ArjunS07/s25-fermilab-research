@@ -252,3 +252,22 @@ class MassShellGNNFlow(nn.Module):
                 "max_step_rapidity": max_rapidity_seen,
             }
         return current
+
+
+def LEFTJeN(max_num_jet_types, num_layers=6, hidden_dim=128, include_pt=False,
+            include_mass_condition=False, regulator_mass=0.5,
+            use_reference_vectors=True, **_ignored_legacy):
+    """Build the mass-shell GNN from high-level jet-attribute knobs.
+
+    Kept as a thin factory (and named LEFTJeN) so call sites and checkpoint-analysis tools keep
+    working; it accepts (and ignores) the historical architecture kwargs that older checkpoints
+    embed in ``full_config``.
+    """
+    if not use_reference_vectors:
+        raise ValueError("mass_shell_gnn requires typed reference vectors")
+    condition_dim = max_num_jet_types + 1 + int(include_pt) + int(include_mass_condition)
+    return MassShellGNNFlow(condition_dim, max_num_jet_types, hidden_dim, num_layers,
+                            regulator_mass)
+
+
+__all__ = ["LEFTJeN", "MassShellGNNFlow"]
