@@ -8,7 +8,6 @@ from util.coordinates import transform_rel_particle_coordinates_to_cartesian, bu
 from util import jet_attributes
 from util.file_management import make_clear_folder
 from util.distributions import gen_initial_distribution
-from util.hyperbolic import to_poincare_ball, from_poincare_ball, pushforward, exp_map, clamp_to_ball
 
 
 colors = sns.color_palette("deep")
@@ -105,9 +104,6 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
 
         x_0 = x.clone()
         x_model_final = x.clone()
-        # When using hyperbolic integration, maintain ball-space state alongside Cartesian for plotting
-        if use_hyperbolic:
-            y_model_final = to_poincare_ball(x_model_final, c=hyperbolic_c)
 
         times = torch.linspace(0, 1, integration_steps + 1).to(device)
         sns.set_palette("deep")
@@ -173,15 +169,7 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
             dt = times[i+1] - times[i]
             dt = dt.to(device)
             final_field = final_field.to(device)
-            if use_hyperbolic:
-                vel_ball = pushforward(x_model_final, final_field, c=hyperbolic_c)
-                vel_ball = vel_ball * masks.unsqueeze(-1)
-                y_model_final = exp_map(y_model_final, vel_ball * dt, c=hyperbolic_c)
-                y_model_final = clamp_to_ball(y_model_final, c=hyperbolic_c)
-                y_model_final = y_model_final * masks.unsqueeze(-1)
-                x_model_final = from_poincare_ball(y_model_final, c=hyperbolic_c)
-            else:
-                x_model_final = x_model_final + (final_field * dt)
+            x_model_final = x_model_final + (final_field * dt)
             # x_model_final = enforce_com_frame(x_model_final, masks).to(device)
 
             plt.clf()

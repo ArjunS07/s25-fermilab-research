@@ -1,9 +1,5 @@
 import torch
 from util.coordinates import eta_phi_pt_e_to_cartesian
-from util.hyperbolic import (
-    to_poincare_ball, from_poincare_ball,
-    geodesic_interpolant, conditional_vector_field, pushforward,
-)
 
 
 def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, prior_dist='isotropic_com', jet_features=None, jet_phi=None, device='cpu', model_scale=None):
@@ -124,36 +120,6 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
     else:
         raise ValueError(f"Unknown prior_dist: {prior_dist}")
 
-
-
-def hyperbolic_interpolant(x_0, x_1, t, c=1.0):
-    """
-    Compute (x_t, y_t, u_t_ball) for Riemannian flow matching in the Poincaré ball.
-
-    Maps Cartesian 4-momenta to the ball, computes the geodesic interpolant
-    and conditional vector field entirely in the ball.
-
-    x_0, x_1 : (batch, max_particles, 4)  normalized Cartesian 4-momenta
-    t         : (batch,) in [0, 1)
-    c         : Poincaré ball curvature (default 1.0)
-
-    Returns
-    -------
-    x_t      : (batch, max_particles, 4)  interpolated point in Cartesian space
-                                          (feed this to the model)
-    y_t      : (batch, max_particles, 4)  interpolated point in the Poincaré ball
-                                          (used with hyperbolic_loss)
-    u_t_ball : (batch, max_particles, 4)  conditional vector field as a tangent
-                                          vector at y_t in the ball (loss target)
-    """
-    y_0 = to_poincare_ball(x_0, c=c)
-    y_1 = to_poincare_ball(x_1, c=c)
-
-    y_t = geodesic_interpolant(y_0, y_1, t, c=c)
-    u_t_ball = conditional_vector_field(y_t, y_1, t, c=c)
-
-    x_t = from_poincare_ball(y_t, c=c)
-    return x_t, y_t, u_t_ball
 
 
 def time_dist(batch_size, device='cpu', mode='power_law', **kwargs):

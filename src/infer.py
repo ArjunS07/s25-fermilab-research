@@ -73,33 +73,17 @@ def _resolve_architecture(args, ckpt):
     return args
 
 
-def _load_main_model(checkpoint_path, n_hidden, n_layers, use_residual,
-                     num_particles, device, use_reference_vectors=False, use_node_scalars=False,
-                     node_scalar_seed="physics",
-                     use_adaln=False, use_attention=False, backbone="legacy",
-                     include_mass_condition=False, num_attention_heads=8,
-                     vector_channels=16, regulator_mass=0.5,
-                     velocity_readout_init="small_normal", preloaded_ckpt=None,
-                     use_ema_weights=False, geometric_state="readout_only", use_global_pooling=False):
+def _load_main_model(checkpoint_path, n_hidden, n_layers, num_particles, device,
+                     use_reference_vectors=True, include_mass_condition=True,
+                     regulator_mass=0.5, preloaded_ckpt=None, use_ema_weights=False):
     model = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
-        max_particles=num_particles,
         num_layers=n_layers,
         hidden_dim=n_hidden,
-        use_residual_update=use_residual,
         include_pt=True,
         use_reference_vectors=use_reference_vectors,
-        use_node_scalars=use_node_scalars,
-        node_scalar_seed=node_scalar_seed,
-        use_adaln=use_adaln,
-        use_attention=use_attention,
-        backbone=backbone,
         include_mass_condition=include_mass_condition,
-        num_attention_heads=num_attention_heads,
-        vector_channels=vector_channels,
         regulator_mass=regulator_mass,
-        velocity_readout_init=velocity_readout_init,
-        geometric_state=geometric_state, use_global_pooling=use_global_pooling,
     ).to(device)
 
     ckpt = (preloaded_ckpt if preloaded_ckpt is not None else
@@ -163,20 +147,10 @@ def main():
         checkpoint_path=args.checkpoint_path,
         n_hidden=args.n_hidden,
         n_layers=args.n_layers,
-        use_residual=args.use_residual,
         num_particles=args.num_particles,
         device=device,
         use_reference_vectors=args.use_reference_vectors,
-        use_node_scalars=args.use_node_scalars,
-        node_scalar_seed=getattr(args, "node_scalar_seed", "physics"),
-        use_adaln=args.use_adaln,
-        use_attention=args.use_attention,
-        backbone=args.backbone,
         include_mass_condition=args.include_mass_condition,
-        num_attention_heads=args.num_attention_heads,
-        vector_channels=args.vector_channels,
-        velocity_readout_init=args.velocity_readout_init,
-        geometric_state=args.geometric_state, use_global_pooling=args.use_global_pooling,
         regulator_mass=args.regulator_mass,
         preloaded_ckpt=ckpt,
         use_ema_weights=args.use_ema_weights,

@@ -1,11 +1,10 @@
 """Lightweight checkpoint architecture reconstruction shared by inference and tests."""
 
+# Architecture keys reconstructed from a checkpoint's embedded full_config. Only the
+# fields the mass-shell GNN actually consumes; extra keys in older checkpoints are ignored.
 ARCH_KEYS = (
-    "n_hidden", "n_layers", "use_residual", "use_reference_vectors",
-    "use_node_scalars", "node_scalar_seed", "use_adaln", "use_attention",
-    "use_hyperbolic", "hyperbolic_model", "regulator_mass", "backbone",
-    "include_mass_condition", "num_attention_heads", "vector_channels",
-    "velocity_readout_init", "geometric_state", "use_global_pooling",
+    "n_hidden", "n_layers", "regulator_mass",
+    "use_reference_vectors", "include_mass_condition",
 )
 
 def resolve_architecture(namespace, checkpoint):

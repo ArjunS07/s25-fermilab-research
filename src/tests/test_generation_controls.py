@@ -35,9 +35,7 @@ def test_generation_controls_preserve_prior_geometry_and_guidance():
     }
 
 
-def test_geometric_backbones_share_scaled_pt_condition_contract():
+def test_scaled_pt_condition_contract():
     pt = torch.tensor([100.0, 250.0])
     expected = torch.tensor([0.5, 1.25])
-    for backbone in ("tangent_attention", "mass_shell_gnn"):
-        assert torch.equal(scale_condition_pt(pt, 200.0, backbone), expected)
-    assert torch.equal(scale_condition_pt(pt, 200.0, "legacy"), pt)
+    assert torch.equal(scale_condition_pt(pt, 200.0), expected)

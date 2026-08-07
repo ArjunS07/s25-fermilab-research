@@ -144,23 +144,12 @@ if __name__ == "__main__":
         torch.cuda.manual_seed_all(args.model_seed)
     model: LEFTJeN = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
-        max_particles=args.num_particles,
         num_layers=args.n_layers,
         hidden_dim=args.n_hidden,
-        use_residual_update=args.use_residual,
         include_pt=True,
         use_reference_vectors=args.use_reference_vectors,
-        use_node_scalars=args.use_node_scalars,
-        node_scalar_seed=args.node_scalar_seed,
-        use_adaln=args.use_adaln,
-        use_attention=args.use_attention,
-        backbone=args.backbone,
         include_mass_condition=args.include_mass_condition,
-        num_attention_heads=args.num_attention_heads,
-        vector_channels=args.vector_channels,
         regulator_mass=args.regulator_mass,
-        velocity_readout_init=args.velocity_readout_init,
-        geometric_state=args.geometric_state, use_global_pooling=args.use_global_pooling,
     ).to(device)
     
     start_epoch = 0
@@ -204,33 +193,24 @@ if __name__ == "__main__":
         "num_particles": args.num_particles,
         "n_layers": args.n_layers,
         "n_hidden": args.n_hidden,
-        "use_residual": args.use_residual,
         "include_pt": True,
         "use_reference_vectors": args.use_reference_vectors,
-        "use_node_scalars": args.use_node_scalars,
-        "use_adaln": args.use_adaln,
-        "use_attention": args.use_attention,
         "backbone": args.backbone,
         "include_mass_condition": args.include_mass_condition,
-        "num_attention_heads": args.num_attention_heads,
-        "vector_channels": args.vector_channels,
-        "velocity_readout_init": args.velocity_readout_init,
-        "geometric_state": args.geometric_state, "use_global_pooling": args.use_global_pooling,
         "regulator_mass": args.regulator_mass,
         "jet_types": args.jet_types,
         "final_scale": float(final_scale),
     }
-    # Full config (all sections), embedded alongside the legacy architecture-only
-    # `config` dict so infer.py can auto-load every knob a run was trained with.
+    # Full config (all sections), embedded alongside the architecture-only `config` dict
+    # so infer.py can auto-load every knob a run was trained with.
     full_config = cfg.model_dump()
     if args.resume_weights and is_rank0:
         prev = checkpoint.get("config")
         if prev is not None:
             mism = {k: (prev.get(k), run_config.get(k))
-                    for k in ("n_layers", "n_hidden", "num_particles", "use_reference_vectors",
-                              "use_node_scalars", "use_adaln", "use_attention", "backbone",
-                              "include_mass_condition", "num_attention_heads", "vector_channels",
-                              "velocity_readout_init")
+                    for k in ("n_layers", "n_hidden", "num_particles",
+                              "use_reference_vectors", "include_mass_condition",
+                              "regulator_mass")
                     if prev.get(k) != run_config.get(k)}
             if mism:
                 print(f"WARNING: resume architecture flags differ from checkpoint: {mism}. "
@@ -561,7 +541,7 @@ if __name__ == "__main__":
             batch_jet_mass = batch_jet_info[:, 2]
             encoded_jet_types = jet_attributes.one_hot_enc_jet_type(batch_jet_info[:, 4].long()).to(device)
             # Legacy checkpoints consume raw pT. v2 uses model-scaled pT and mass.
-            cond_pt = scale_condition_pt(batch_jet_pt, final_scale, args.backbone)
+            cond_pt = scale_condition_pt(batch_jet_pt, final_scale)
             condition_parts = [
                 encoded_jet_types,
                 batch_jet_n_particles.unsqueeze(-1),

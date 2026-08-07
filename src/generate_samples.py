@@ -9,7 +9,6 @@ from models.LEFT_JeN import LEFTJeN
 from util import jet_attributes
 from util.file_management import make_clear_folder
 from util.distributions import gen_initial_distribution
-from util.hyperbolic import to_poincare_ball, from_poincare_ball
 from util.coordinates import build_reference_vectors
 from util.conditioning import scale_condition_pt
 
@@ -210,7 +209,7 @@ def generate_samples(
                     prior_x = project_to_shell(prior_x, regulator_mass) * masks.unsqueeze(-1)
                 else:
                     prior_x = x * masks.unsqueeze(-1)
-            cond_pt = scale_condition_pt(gen_pt, final_scale, backbone)
+            cond_pt = scale_condition_pt(gen_pt, final_scale)
             condition_parts = [
                 jet_one_hot_enc,
                 gen_n_particles.unsqueeze(-1).float(),
@@ -279,26 +278,6 @@ def generate_samples(
                     if (new_explosive & unset).any():
                         explosion_step[active_indices[new_explosive & unset]] = i
                 x = y
-            elif use_hyperbolic:
-                y = to_poincare_ball(x, c=hyperbolic_c)
-                for i in range(integration_steps):
-                    y = model.step_hyperbolic(
-                        y_t=y,
-                        jet_conditions=cond,
-                        mask=masks,
-                        t_start=times[i],
-                        t_end=times[i + 1],
-                        c=hyperbolic_c,
-                        use_cfg=use_cfg,
-                        guidance_weight=cfg_guidance_weight,
-                        ref_vectors=ref_vectors,
-                    )
-                x = from_poincare_ball(y, c=hyperbolic_c)
-            else:
-                for i in range(integration_steps):
-                    x = model.step(x, cond, masks, times[i], times[i + 1], method=sampler,
-                                   use_cfg=use_cfg, guidance_weight=cfg_guidance_weight,
-                                   ref_vectors=ref_vectors)
 
             if use_hyperbolic and hyperbolic_model == 'mass_shell':
                 from util.mass_shell import massless_energy_view

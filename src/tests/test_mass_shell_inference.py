@@ -43,18 +43,18 @@ def test_full_integration_stays_on_shell():
     """Over a full 64-step integration, real particles stay on H_m to tight tolerance
     (re-projection keeps numerical drift from accumulating)."""
     model = build_model(seed=0)
-    x, _, cond, mask, _ = sample_inputs(seed=3)
+    x, _, cond, mask, refs = sample_inputs(seed=3)
     y0 = project_to_shell(x * mask.unsqueeze(-1), M)
-    y, max_err = _integrate(model, y0, cond, mask, steps=64)
+    y, max_err = _integrate(model, y0, cond, mask, steps=64, ref_vectors=refs)
     assert max_err < 1e-6, f"drifted off shell: max |<y,y> - m^2| = {max_err:.2e}"
 
 
 def test_padding_parks_at_apex():
     """Masked (padding) rows sit at the apex (m, 0, 0, 0): zero spatial momentum, energy m."""
     model = build_model(seed=0)
-    x, _, cond, mask, _ = sample_inputs(seed=3)
+    x, _, cond, mask, refs = sample_inputs(seed=3)
     y0 = project_to_shell(x * mask.unsqueeze(-1), M)
-    y, _ = _integrate(model, y0, cond, mask, steps=8)
+    y, _ = _integrate(model, y0, cond, mask, steps=8, ref_vectors=refs)
     pad = mask == 0
     if pad.any():
         assert torch.allclose(y[..., 1:4][pad], torch.zeros_like(y[..., 1:4][pad]), atol=1e-8)
@@ -64,15 +64,15 @@ def test_padding_parks_at_apex():
 def test_masking_real_output_independent_of_padding():
     """Real-particle trajectories are unaffected by how many padding rows trail them."""
     model = build_model(seed=0)
-    x, _, cond, mask, _ = sample_inputs(batch=1, n_real=5, max_particles=8, seed=4)
+    x, _, cond, mask, refs = sample_inputs(batch=1, n_real=5, max_particles=8, seed=4)
     n_real = int(mask[0].sum().item())
 
     y_full = project_to_shell(x * mask.unsqueeze(-1), M)
-    y_full, _ = _integrate(model, y_full, cond, mask, steps=16)
+    y_full, _ = _integrate(model, y_full, cond, mask, steps=16, ref_vectors=refs)
 
     xt, maskt = x[:, :n_real], mask[:, :n_real]
     y_trim = project_to_shell(xt * maskt.unsqueeze(-1), M)
-    y_trim, _ = _integrate(model, y_trim, cond.clone(), maskt, steps=16)
+    y_trim, _ = _integrate(model, y_trim, cond.clone(), maskt, steps=16, ref_vectors=refs)
 
     assert torch.allclose(y_full[:, :n_real], y_trim, atol=1e-8)
 
@@ -89,32 +89,32 @@ def test_references_and_cfg_paths_stay_on_shell():
 
 def test_step_is_deterministic():
     model = build_model(seed=0)
-    x, _, cond, mask, _ = sample_inputs(seed=3)
+    x, _, cond, mask, refs = sample_inputs(seed=3)
     y0 = project_to_shell(x * mask.unsqueeze(-1), M)
     t0 = torch.tensor(0.0, dtype=torch.float64)
     t1 = torch.tensor(0.1, dtype=torch.float64)
-    a = model.step_hyperbolic(y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M)
-    b = model.step_hyperbolic(y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M)
+    a = model.step_hyperbolic(y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M, ref_vectors=refs)
+    b = model.step_hyperbolic(y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M, ref_vectors=refs)
     assert torch.equal(a, b)
 
 
 def test_adaptive_step_matches_euler_when_no_subdivision_needed():
     model = build_model(seed=0)
-    x, _, cond, mask, _ = sample_inputs(seed=3)
+    x, _, cond, mask, refs = sample_inputs(seed=3)
     y0 = project_to_shell(x * mask.unsqueeze(-1), M)
     t0 = torch.tensor(0.0, dtype=torch.float64)
     t1 = torch.tensor(0.01, dtype=torch.float64)
     ordinary = model.step_hyperbolic(
-        y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M)
+        y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M, ref_vectors=refs)
     adaptive = model.step_hyperbolic(
-        y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M,
+        y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M, ref_vectors=refs,
         max_step_rapidity=1e6, max_substeps=4)
     assert torch.equal(ordinary, adaptive)
 
 
 def test_adaptive_step_subdivides_large_field_and_stays_finite(monkeypatch):
     model = build_model(seed=0)
-    x, _, cond, mask, _ = sample_inputs(seed=3)
+    x, _, cond, mask, refs = sample_inputs(seed=3)
     y0 = project_to_shell(x * mask.unsqueeze(-1), M)
 
     original = model._mass_shell_velocity
@@ -129,7 +129,7 @@ def test_adaptive_step_subdivides_large_field_and_stays_finite(monkeypatch):
     out = model.step_hyperbolic(
         y0, cond, mask, torch.tensor(0.0, dtype=torch.float64),
         torch.tensor(0.01, dtype=torch.float64), hyperbolic_model="mass_shell",
-        regulator_mass=M, max_step_rapidity=0.05, max_substeps=64)
+        regulator_mass=M, ref_vectors=refs, max_step_rapidity=0.005, max_substeps=64)
     assert calls > 1
     assert torch.isfinite(out).all()
     real = mask > 0
@@ -138,7 +138,7 @@ def test_adaptive_step_subdivides_large_field_and_stays_finite(monkeypatch):
 
 def test_adaptive_step_fails_instead_of_publishing_unbounded_substeps(monkeypatch):
     model = build_model(seed=0)
-    x, _, cond, mask, _ = sample_inputs(seed=3)
+    x, _, cond, mask, refs = sample_inputs(seed=3)
     y0 = project_to_shell(x * mask.unsqueeze(-1), M)
     original = model._mass_shell_velocity
     monkeypatch.setattr(model, "_mass_shell_velocity",
@@ -147,7 +147,7 @@ def test_adaptive_step_fails_instead_of_publishing_unbounded_substeps(monkeypatc
         model.step_hyperbolic(
             y0, cond, mask, torch.tensor(0.0, dtype=torch.float64),
             torch.tensor(0.1, dtype=torch.float64), hyperbolic_model="mass_shell",
-            regulator_mass=M, max_step_rapidity=0.01, max_substeps=1)
+            regulator_mass=M, ref_vectors=refs, max_step_rapidity=0.01, max_substeps=1)
     record = caught.value.as_dict()
     assert record["reason"] == "substep_limit"
     assert record["completed_substeps"] == 1
@@ -156,12 +156,12 @@ def test_adaptive_step_fails_instead_of_publishing_unbounded_substeps(monkeypatc
 
 def test_adaptive_step_returns_structured_success_telemetry():
     model = build_model(seed=0)
-    x, _, cond, mask, _ = sample_inputs(seed=3)
+    x, _, cond, mask, refs = sample_inputs(seed=3)
     y0 = project_to_shell(x * mask.unsqueeze(-1), M)
     out, telemetry = model.step_hyperbolic(
         y0, cond, mask, torch.tensor(0.0, dtype=torch.float64),
         torch.tensor(0.01, dtype=torch.float64), hyperbolic_model="mass_shell",
-        regulator_mass=M, max_step_rapidity=1e6, max_substeps=4,
+        regulator_mass=M, ref_vectors=refs, max_step_rapidity=1e6, max_substeps=4,
         return_diagnostics=True,
     )
     assert torch.isfinite(out).all()
