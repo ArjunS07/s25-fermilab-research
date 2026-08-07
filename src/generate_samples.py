@@ -5,7 +5,7 @@ import os
 
 from jetnet.utils import EtaPhiPtE_to_cartesian
 
-from models.LEFT_JeN import LEFTJeN
+from models.mass_shell_gnn import LEFTJeN
 from util.data import jet_attributes
 from util.infra.file_management import make_clear_folder
 from util.data.distributions import gen_initial_distribution
@@ -76,12 +76,10 @@ def generate_samples(
         n_jet_types=3,
         use_cfg=False,
         cfg_guidance_weight=2.0,
-        use_hyperbolic=False,
-        hyperbolic_c=1.0,
-        hyperbolic_model='poincare',
+        use_hyperbolic=True,
+        hyperbolic_model='mass_shell',
         regulator_mass=0.5,
         use_reference_vectors=False,
-        backbone='legacy',
         include_mass_condition=False,
         sampler='euler',
         prior_dist='isotropic_com',

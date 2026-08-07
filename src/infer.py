@@ -27,17 +27,17 @@ import hashlib
 import numpy as np
 import torch
 
-from models.LEFT_JeN import LEFTJeN
+from models.mass_shell_gnn import LEFTJeN
 from util.data import jet_attributes
 from util.data.jet_attributes import NUM_CLASSES
-from models.stage1.jet_attr_model import get_model_pth_path
+from models.stage1 import get_model_pth_path
 from util.infra.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
 from util.metrics.metrics import run_save_metrics
 from generate_samples import generate_samples
 from data import get_data_path
-from config import (InferRunConfig, build_config, parse_config_cli, infer_config_to_namespace,
-                    generation_controls_from_namespace)
+from config import (InferRunConfig, build_config, parse_config_cli,
+                    generation_controls_from_config)
 from util.infra.checkpoint_config import resolve_architecture
 
 MAX_N_PARTICLES = 150
@@ -49,56 +49,52 @@ NUM_PARTICLE_FEATURES = 4
 def parse_args():
     config_path, overrides = parse_config_cli()
     cfg = build_config(InferRunConfig, config_path, overrides)
-    args = infer_config_to_namespace(cfg)
-    if not args.checkpoint_path:
+    if not cfg.paths.checkpoint_path:
         raise ValueError("paths.checkpoint_path must be set in the config")
-    if not args.output_path:
+    if not cfg.paths.output_path:
         raise ValueError("paths.output_path must be set in the config")
-    return args
+    return cfg
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _resolve_architecture(args, ckpt):
-    """If the checkpoint carries a self-describing `full_config` (written by
-    train.py's config path), use its model architecture and warn if it
-    disagrees with any values the user explicitly passed. Falls back to
-    `args` unchanged for older checkpoints without `full_config`."""
-    args, mism = resolve_architecture(args, ckpt)
+def _resolve_architecture(cfg, ckpt):
+    """If the checkpoint carries a self-describing `full_config` (written by train.py), use
+    its model architecture (returning an updated cfg) and warn on any disagreement. Returns
+    cfg unchanged for older raw checkpoints without `full_config`."""
+    model_cfg, mism = resolve_architecture(cfg.model, ckpt)
     if mism:
-        print(f"WARNING: CLI/config architecture flags differ from checkpoint: {mism}. "
+        print(f"WARNING: config architecture differs from checkpoint: {mism}. "
               f"Using checkpoint's architecture (loaded weights would otherwise not match).")
     if isinstance(ckpt, dict) and ckpt.get("full_config"):
         print("Loaded model architecture from checkpoint config.")
-    return args
+    return cfg.model_copy(update={"model": model_cfg})
 
 
-def _load_main_model(checkpoint_path, n_hidden, n_layers, num_particles, device,
-                     use_reference_vectors=True, include_mass_condition=True,
-                     regulator_mass=0.5, preloaded_ckpt=None, use_ema_weights=False):
+def _load_main_model(cfg, device, preloaded_ckpt=None):
     model = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
-        num_layers=n_layers,
-        hidden_dim=n_hidden,
+        num_layers=cfg.model.n_layers,
+        hidden_dim=cfg.model.n_hidden,
         include_pt=True,
-        use_reference_vectors=use_reference_vectors,
-        include_mass_condition=include_mass_condition,
-        regulator_mass=regulator_mass,
+        use_reference_vectors=cfg.model.use_reference_vectors,
+        include_mass_condition=cfg.model.include_mass_condition,
+        regulator_mass=cfg.model.regulator_mass,
     ).to(device)
 
     ckpt = (preloaded_ckpt if preloaded_ckpt is not None else
-            torch.load(checkpoint_path, map_location=device, weights_only=False))
+            torch.load(cfg.paths.checkpoint_path, map_location=device, weights_only=False))
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
-        state_key = "ema_state_dict" if use_ema_weights else "model_state_dict"
+        state_key = "ema_state_dict" if cfg.inference.use_ema_weights else "model_state_dict"
         if state_key not in ckpt:
             raise ValueError(f"checkpoint does not contain requested {state_key}")
         model.load_state_dict(ckpt[state_key])
-        print(f"Loaded checkpoint (epoch {ckpt.get('epoch', '?')}) from {checkpoint_path}")
-        print(f"Weight view: {'EMA' if use_ema_weights else 'raw'}")
+        print(f"Loaded checkpoint (epoch {ckpt.get('epoch', '?')}) from {cfg.paths.checkpoint_path}")
+        print(f"Weight view: {'EMA' if cfg.inference.use_ema_weights else 'raw'}")
     else:
         # Raw state dict saved with torch.save(model.state_dict(), ...)
         model.load_state_dict(ckpt)
-        print(f"Loaded raw state dict from {checkpoint_path}")
+        print(f"Loaded raw state dict from {cfg.paths.checkpoint_path}")
 
     model.eval()
     return model
@@ -107,32 +103,32 @@ def _load_main_model(checkpoint_path, n_hidden, n_layers, num_particles, device,
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    args = parse_args()
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    cfg = parse_args()
+    random.seed(cfg.inference.seed)
+    np.random.seed(cfg.inference.seed)
+    torch.manual_seed(cfg.inference.seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
+        torch.cuda.manual_seed_all(cfg.inference.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
-    out_dir = args.out_dir or os.path.join(args.output_path, "inference")
+    out_dir = cfg.paths.out_dir or os.path.join(cfg.paths.output_path, "inference")
     os.makedirs(out_dir, exist_ok=True)
     print(f"Inference outputs → {out_dir}")
 
     # ── Load shared inputs ─────────────────────────────────────────────────────
-    data_path = get_data_path(args.output_path)
+    data_path = get_data_path(cfg.paths.output_path)
     with open(os.path.join(data_path, "x_test.pkl"), "rb") as f:
         X_test = pickle.load(f)
     print(f"Test set: {len(X_test)} jets")
 
-    scale_path = os.path.join(args.output_path, "train", "scale.txt")
+    scale_path = os.path.join(cfg.paths.output_path, "train", "scale.txt")
     with open(scale_path) as f:
         final_scale = float(f.read().strip())
     print(f"Scale: {final_scale:.6f}")
 
     jet_attr_model = jet_attributes.load_model(
-        model_path=get_model_pth_path(args.output_path)
+        model_path=get_model_pth_path(cfg.paths.output_path)
     ).to(device)
     jet_attr_model.eval()
     print("Loaded jet attribute model")
@@ -140,25 +136,14 @@ def main():
     # Full training checkpoints contain optimizer/config/RNG state (including
     # NumPy objects), so PyTorch 2.6+'s weights-only default cannot load them.
     # Checkpoints are provenance-pinned, first-party artifacts in this workflow.
-    ckpt = torch.load(args.checkpoint_path, map_location=device, weights_only=False)
-    args = _resolve_architecture(args, ckpt)
+    ckpt = torch.load(cfg.paths.checkpoint_path, map_location=device, weights_only=False)
+    cfg = _resolve_architecture(cfg, ckpt)
 
-    model = _load_main_model(
-        checkpoint_path=args.checkpoint_path,
-        n_hidden=args.n_hidden,
-        n_layers=args.n_layers,
-        num_particles=args.num_particles,
-        device=device,
-        use_reference_vectors=args.use_reference_vectors,
-        include_mass_condition=args.include_mass_condition,
-        regulator_mass=args.regulator_mass,
-        preloaded_ckpt=ckpt,
-        use_ema_weights=args.use_ema_weights,
-    )
+    model = _load_main_model(cfg, device, preloaded_ckpt=ckpt)
 
     # ── Stage 1: Vector field visualisation ───────────────────────────────────
-    run_cfg   = args.vf_mode in ("cfg",   "both")
-    run_nocfg = args.vf_mode in ("nocfg", "both")
+    run_cfg   = cfg.inference.vf_mode in ("cfg",   "both")
+    run_nocfg = cfg.inference.vf_mode in ("nocfg", "both")
 
     stage_status = {}
     if run_cfg:
@@ -172,15 +157,15 @@ def main():
                 jet_attr_model=jet_attr_model,
                 X_test=X_test,
                 scale=final_scale,
-                n_jet_types=len(args.jet_types),
-                n_particles_per_jet=args.num_particles,
+                n_jet_types=len(cfg.data.jet_types),
+                n_particles_per_jet=cfg.data.num_particles,
                 n_features_per_particle=NUM_PARTICLE_FEATURES,
-                n_viz_samples=args.n_viz_samples,
-                integration_steps=args.integration_steps,
+                n_viz_samples=cfg.inference.n_viz_samples,
+                integration_steps=cfg.inference.integration_steps,
                 use_cfg=True,
-                cfg_guidance_weight=args.cfg_guidance_weight,
-                use_hyperbolic=args.use_hyperbolic,
-                use_reference_vectors=args.use_reference_vectors,
+                cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
+                use_hyperbolic=True,
+                use_reference_vectors=cfg.model.use_reference_vectors,
             )
             print("CFG vector field done.")
             stage_status["vector_field_cfg"] = {"status": "ok"}
@@ -200,14 +185,14 @@ def main():
                 jet_attr_model=jet_attr_model,
                 X_test=X_test,
                 scale=final_scale,
-                n_jet_types=len(args.jet_types),
-                n_particles_per_jet=args.num_particles,
+                n_jet_types=len(cfg.data.jet_types),
+                n_particles_per_jet=cfg.data.num_particles,
                 n_features_per_particle=NUM_PARTICLE_FEATURES,
-                n_viz_samples=args.n_viz_samples,
-                integration_steps=args.integration_steps,
+                n_viz_samples=cfg.inference.n_viz_samples,
+                integration_steps=cfg.inference.integration_steps,
                 use_cfg=False,
-                use_hyperbolic=args.use_hyperbolic,
-                use_reference_vectors=args.use_reference_vectors,
+                use_hyperbolic=True,
+                use_reference_vectors=cfg.model.use_reference_vectors,
             )
             print("No-CFG vector field done.")
             stage_status["vector_field_nocfg"] = {"status": "ok"}
@@ -221,22 +206,22 @@ def main():
     gen_jet_types = None
     gen_pt_cond = None
     prior_samples = None
-    if not args.skip_samples:
+    if not cfg.inference.skip_samples:
         try:
             print("\n=== Sample generation ===")
             samples, gen_jet_types, gen_pt_cond, prior_samples, gen_jet_eta = generate_samples(
                 model=model,
                 jet_attr_model=jet_attr_model,
                 root_output_path=out_dir,
-                max_particles_per_jet=args.num_particles,
+                max_particles_per_jet=cfg.data.num_particles,
                 final_scale=final_scale,
-                integration_steps=args.integration_steps,
-                n_samples=args.n_samples,
-                n_jet_types=len(args.jet_types),
+                integration_steps=cfg.inference.integration_steps,
+                n_samples=cfg.inference.n_samples,
+                n_jet_types=len(cfg.data.jet_types),
                 device=device,
-                batch_size=args.batch_size,
-                replay_bundle_path=args.replay_bundle_path,
-                **generation_controls_from_namespace(args),
+                batch_size=cfg.inference.batch_size,
+                replay_bundle_path=cfg.paths.replay_bundle_path,
+                **generation_controls_from_config(cfg, cfg.inference.prior_dist),
             )
             print(f"Sample generation done. Shape: {samples.shape}")
             pt_path = os.path.join(out_dir, "samples.pt")
@@ -256,7 +241,7 @@ def main():
 
     # ── Stage 3: Metric calculation ────────────────────────────────────────────
     eval_info = None
-    if not args.skip_metrics:
+    if not cfg.inference.skip_metrics:
         if samples is None:
             stage_status["metrics"] = {"status": "failed", "error": "no samples available"}
             print("\n[WARN] No samples available — skipping metrics.")
@@ -265,7 +250,7 @@ def main():
                 print("\n=== Metric calculation ===")
                 eval_info = run_save_metrics(
                     X_test=X_test,
-                    jet_types=args.jet_types,
+                    jet_types=cfg.data.jet_types,
                     gen_samples=samples,
                     output_path=out_dir,
                     device=device,
@@ -290,7 +275,7 @@ def main():
         git_commit = None
 
     # Read source run's training summary for final_loss and full_config.
-    train_summary_path = os.path.join(args.output_path, "train", "summary.json")
+    train_summary_path = os.path.join(cfg.paths.output_path, "train", "summary.json")
     train_summary = {}
     if os.path.exists(train_summary_path):
         with open(train_summary_path) as f:
@@ -305,29 +290,29 @@ def main():
                 digest.update(chunk)
         return digest.hexdigest()
 
-    stage1_path = get_model_pth_path(args.output_path)
-    resolved_replay = (args.replay_bundle_path or os.path.join(out_dir, "replay_bundle.pt"))
+    stage1_path = get_model_pth_path(cfg.paths.output_path)
+    resolved_replay = (cfg.paths.replay_bundle_path or os.path.join(out_dir, "replay_bundle.pt"))
 
     summary = {
         "final_loss": train_summary.get("final_loss"),
-        "prior_dist": args.prior_dist,
+        "prior_dist": cfg.inference.prior_dist,
         "generation": {
-            "seed": args.seed,
-            "use_cfg": args.use_cfg,
-            "use_ema_weights": args.use_ema_weights,
-            "cfg_guidance_weight": args.cfg_guidance_weight,
-            "integration_steps": args.integration_steps,
-            "integration_end_time": args.integration_end_time,
-            "sampler": args.sampler,
-            "mass_shell_max_step_rapidity": args.mass_shell_max_step_rapidity,
-            "mass_shell_max_substeps": args.mass_shell_max_substeps,
-            "replay_bundle_path": args.replay_bundle_path,
+            "seed": cfg.inference.seed,
+            "use_cfg": cfg.inference.use_cfg,
+            "use_ema_weights": cfg.inference.use_ema_weights,
+            "cfg_guidance_weight": cfg.inference.cfg_guidance_weight,
+            "integration_steps": cfg.inference.integration_steps,
+            "integration_end_time": cfg.inference.integration_end_time,
+            "sampler": cfg.inference.sampler,
+            "mass_shell_max_step_rapidity": cfg.inference.mass_shell_max_step_rapidity,
+            "mass_shell_max_substeps": cfg.inference.mass_shell_max_substeps,
+            "replay_bundle_path": cfg.paths.replay_bundle_path,
         },
         "git_commit": git_commit,
         "stage_status": stage_status,
         "provenance": {
-            "checkpoint_path": os.path.abspath(args.checkpoint_path),
-            "checkpoint_sha256": _sha256(args.checkpoint_path),
+            "checkpoint_path": os.path.abspath(cfg.paths.checkpoint_path),
+            "checkpoint_sha256": _sha256(cfg.paths.checkpoint_path),
             "stage1_path": os.path.abspath(stage1_path),
             "stage1_sha256": _sha256(stage1_path),
             "replay_bundle_path": os.path.abspath(resolved_replay),

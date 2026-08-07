@@ -21,7 +21,6 @@ class DataConfig(BaseModel):
 
     jet_types: list[str] = Field(default_factory=lambda: ["g", "q", "t"])
     num_particles: int = 150
-    stage1_model_version: Literal["legacy", "v2", "v3"] = "legacy"
 
 
 class InferDataConfig(DataConfig):
@@ -256,137 +255,23 @@ def parse_config_cli(argv: Optional[list[str]] = None) -> tuple[Optional[str], l
     return ns.config, ns.overrides
 
 
-# ── Namespace bridges (temporary — removed once train/infer read
-#    cfg.section.field directly instead of args.field) ──────────────────────
+# ── Generation controls (shared by train-time viz/eval and standalone infer) ──
 
-def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
-    return argparse.Namespace(
-        output_path=cfg.paths.output_path,
-        jet_types=cfg.data.jet_types,
-        num_particles=cfg.data.num_particles,
-        n_hidden=cfg.model.n_hidden,
-        n_layers=cfg.model.n_layers,
-        n_train_samples=cfg.training.n_train_samples,
-        batch_size=cfg.training.batch_size,
-        target_batch_size=cfg.training.target_batch_size,
-        cfg_null_dropout_rate=cfg.training.cfg_null_dropout_rate,
-        num_epochs=cfg.training.num_epochs,
-        epoch_frac=cfg.training.epoch_frac,
-        max_optimizer_steps=cfg.training.max_optimizer_steps,
-        stability_probe_steps=cfg.training.stability_probe_steps,
-        stability_probe_save_checkpoints=cfg.training.stability_probe_save_checkpoints,
-        qualification_min_loss_improvement=cfg.training.qualification_min_loss_improvement,
-        time_sampling=cfg.training.time_sampling,
-        n_samples=cfg.inference.n_samples,
-        n_viz_samples=cfg.inference.n_viz_samples,
-        integration_steps=cfg.inference.integration_steps,
-        integration_end_time=cfg.inference.integration_end_time,
-        vf_mode=cfg.inference.vf_mode,
-        use_cfg=cfg.inference.use_cfg,
-        use_ema_weights=cfg.inference.use_ema_weights,
-        cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
-        inference_seed=cfg.inference.seed,
-        sampler=cfg.inference.sampler,
-        mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
-        mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
-        max_invalid_fraction=cfg.inference.max_invalid_fraction,
-        fail_on_qualification_error=cfg.inference.fail_on_qualification_error,
-        warn_invalid_fraction=cfg.inference.warn_invalid_fraction,
-        stability_probe_samples=cfg.inference.stability_probe_samples,
-        stability_probe_integration_steps=cfg.inference.stability_probe_integration_steps,
-        skip_metrics=cfg.inference.skip_metrics,
-        use_cosine_lr=cfg.training.use_cosine_lr,
-        lr_step_unit=cfg.training.lr_step_unit,
-        lr_schedule=cfg.training.lr_schedule,
-        lr_t0=cfg.training.lr_t0,
-        lr_warmup_epochs=cfg.training.lr_warmup_epochs,
-        lr_warmup_steps=cfg.training.lr_warmup_steps,
-        # Geometry is fixed: mass-shell GNN. These constants remain in the namespace only
-        # so the internal train/generate readers keep a stable contract.
-        use_hyperbolic=True,
-        hyperbolic_model="mass_shell",
-        backbone="mass_shell_gnn",
-        regulator_mass=cfg.model.regulator_mass,
-        include_mass_condition=cfg.model.include_mass_condition,
-        use_curriculum=cfg.training.use_curriculum,
-        use_time_sampling=cfg.training.use_time_sampling,
-        use_reference_vectors=cfg.model.use_reference_vectors,
-        prior_dist=cfg.training.prior_dist,
-        coupling=cfg.training.coupling,
-        eta_min_factor=cfg.training.eta_min_factor,
-        use_ema=cfg.training.use_ema,
-        ema_decay=cfg.training.ema_decay,
-        curriculum_alpha_start=cfg.training.curriculum_alpha_start,
-        n_curriculum_buckets=cfg.training.n_curriculum_buckets,
-        cache_dir=cfg.paths.cache_dir,
-        resume_weights=cfg.paths.resume_weights,
-        distributed=cfg.training.distributed,
-        model_seed=cfg.training.model_seed,
-        data_order_seed=cfg.training.data_order_seed,
-        time_seed=cfg.training.time_seed,
-        dropout_seed=cfg.training.dropout_seed,
-        prior_seed=cfg.training.prior_seed,
-        lr=cfg.training.lr,
-        weight_decay=cfg.training.weight_decay,
-    )
+def generation_controls_from_config(cfg, prior_dist):
+    """Generation kwargs for generate_samples(), read directly from a run config.
 
-
-def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
-    return argparse.Namespace(
-        checkpoint_path=cfg.paths.checkpoint_path,
-        output_path=cfg.paths.output_path,
-        out_dir=cfg.paths.out_dir,
-        replay_bundle_path=cfg.paths.replay_bundle_path,
-        n_hidden=cfg.model.n_hidden,
-        n_layers=cfg.model.n_layers,
-        num_particles=cfg.data.num_particles,
-        jet_types=cfg.data.jet_types,
-        n_samples=cfg.inference.n_samples,
-        n_viz_samples=cfg.inference.n_viz_samples,
-        integration_steps=cfg.inference.integration_steps,
-        integration_end_time=cfg.inference.integration_end_time,
-        batch_size=cfg.inference.batch_size,
-        cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
-        use_cfg=cfg.inference.use_cfg,
-        use_ema_weights=cfg.inference.use_ema_weights,
-        seed=cfg.inference.seed,
-        use_hyperbolic=True,
-        hyperbolic_model="mass_shell",
-        backbone="mass_shell_gnn",
-        regulator_mass=cfg.model.regulator_mass,
-        include_mass_condition=cfg.model.include_mass_condition,
-        sampler=cfg.inference.sampler,
-        mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
-        mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
-        use_reference_vectors=cfg.model.use_reference_vectors,
-        vf_mode=cfg.inference.vf_mode,
-        skip_samples=cfg.inference.skip_samples,
-        skip_metrics=cfg.inference.skip_metrics,
-        prior_dist=cfg.inference.prior_dist,
-    )
-
-
-def generation_controls_from_namespace(args: argparse.Namespace) -> dict:
-    """Return generation controls shared by train-time and standalone evaluation."""
-    controls = {
-        "use_cfg": args.use_cfg,
-        "cfg_guidance_weight": args.cfg_guidance_weight,
-        "use_hyperbolic": args.use_hyperbolic,
-        "hyperbolic_model": args.hyperbolic_model,
-        "regulator_mass": args.regulator_mass,
-        "use_reference_vectors": args.use_reference_vectors,
-        "sampler": args.sampler,
-        "mass_shell_max_step_rapidity": args.mass_shell_max_step_rapidity,
-        "mass_shell_max_substeps": args.mass_shell_max_substeps,
-        "integration_end_time": args.integration_end_time,
-        "prior_dist": args.prior_dist,
+    prior_dist differs by caller (training uses cfg.training.prior_dist; inference uses
+    cfg.inference.prior_dist), so it is passed explicitly.
+    """
+    return {
+        "use_cfg": cfg.inference.use_cfg,
+        "cfg_guidance_weight": cfg.inference.cfg_guidance_weight,
+        "regulator_mass": cfg.model.regulator_mass,
+        "use_reference_vectors": cfg.model.use_reference_vectors,
+        "include_mass_condition": cfg.model.include_mass_condition,
+        "sampler": cfg.inference.sampler,
+        "mass_shell_max_step_rapidity": cfg.inference.mass_shell_max_step_rapidity,
+        "mass_shell_max_substeps": cfg.inference.mass_shell_max_substeps,
+        "integration_end_time": cfg.inference.integration_end_time,
+        "prior_dist": prior_dist,
     }
-    # Older callers/tests construct a minimal Namespace. Only v2-aware namespaces carry
-    # these controls, preserving the exact legacy kwargs contract.
-    if hasattr(args, "backbone"):
-        controls["backbone"] = args.backbone
-    if hasattr(args, "include_mass_condition"):
-        controls["include_mass_condition"] = args.include_mass_condition
-    return controls
-
-

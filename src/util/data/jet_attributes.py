@@ -6,30 +6,7 @@ MAX_N_PARTICLES = 150  # Maximum number of particles in a jet
 MIN_N_PARTICLES = 4  # Minimum number of particles in a jet
 
 def load_model(model_path, device=torch.device("cpu")):
-    try:
-        model = torch.load(model_path, map_location=device, weights_only=False)
-    except AttributeError as error:
-        # One pre-publication Stage-1 v2 artifact was serialized while its training script
-        # was __main__. Recover that exact checkpoint without weakening the portable format
-        # used by all subsequent saves.
-        if "JetAttributeModelV2" not in str(error):
-            raise
-        import __main__
-        from models.stage1.jet_attr_model_v2 import JetAttributeModelV2
-        previous = getattr(__main__, "JetAttributeModelV2", None)
-        __main__.JetAttributeModelV2 = JetAttributeModelV2
-        try:
-            model = torch.load(model_path, map_location=device, weights_only=False)
-        finally:
-            if previous is None:
-                delattr(__main__, "JetAttributeModelV2")
-            else:
-                __main__.JetAttributeModelV2 = previous
-    if isinstance(model, dict) and model.get("format") == "jet_attribute_v2_state_dict":
-        from models.stage1.jet_attr_model_v2 import JetAttributeModelV2
-        model_v2 = JetAttributeModelV2(**model["config"])
-        model_v2.load_state_dict(model["state_dict"])
-        return model_v2.to(device)
+    model = torch.load(model_path, map_location=device, weights_only=False)
     if isinstance(model, dict) and model.get("format") == "jet_attribute_v3_state_dict":
         from models.stage1.jet_attr_model_v3 import JetAttributeFlowV3
         model_v3 = JetAttributeFlowV3(**model["config"])
@@ -52,18 +29,6 @@ def one_hot_enc_jet_type(y, num_classes=NUM_CLASSES):
     """
     one_hot_enc =  torch.nn.functional.one_hot(y, num_classes=num_classes).float()
     return one_hot_enc
-
-def one_hot_to_type(one_hot_types):
-    """
-    Convert one-hot encoded jet types back to class labels.
-    
-    Args:
-        one_hot_types (torch.Tensor): One-hot encoded tensor of jet types.
-        
-    Returns:
-        torch.Tensor: Class labels for the jet types.
-    """
-    return torch.argmax(one_hot_types, dim=1)
 
 def generate_jets(model, device, n_jet_types, num_jets=1000, one_hot_types=None):
     """

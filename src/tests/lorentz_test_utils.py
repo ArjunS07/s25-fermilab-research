@@ -8,7 +8,7 @@ import math
 
 import torch
 
-from models.LEFT_JeN import LEFTJeN
+from models.mass_shell_gnn import LEFTJeN
 from util.geometry.mass_shell import project_to_shell
 
 
