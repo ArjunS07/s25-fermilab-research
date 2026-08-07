@@ -3,8 +3,8 @@ import tempfile
 from pathlib import Path
 import __main__
 
-from jet_attr_model_v2 import JetAttributeModelV2
-from util.jet_attributes import load_model
+from models.stage1.jet_attr_model_v2 import JetAttributeModelV2
+from util.data.jet_attributes import load_model
 
 
 def test_discrete_multiplicity_sampling_respects_support_and_context():

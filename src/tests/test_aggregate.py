@@ -5,7 +5,7 @@ import os
 import numpy as np
 import pytest
 
-from util.ks import ks_statistic_vs_uniform, ks_pvalue
+from util.metrics.ks import ks_statistic_vs_uniform, ks_pvalue
 from analysis.aggregate_grid import (
     expected_break,
     verdict,

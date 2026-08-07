@@ -4,7 +4,7 @@ import torch
 pytest.importorskip("jetnet")
 
 from experiments.diagnose_mass_shell_checkpoint import paired_endpoint_diagnostics
-from util.mass_shell import (project_to_shell, pushforward_to_tangent,
+from util.geometry.mass_shell import (project_to_shell, pushforward_to_tangent,
                              tangent_error_diagnostics, exp_map)
 
 

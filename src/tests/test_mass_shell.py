@@ -12,8 +12,8 @@ import math
 import pytest
 import torch
 
-from util.minkowski_utils import dotsq4
-from util.mass_shell import (
+from util.geometry.minkowski_utils import dotsq4
+from util.geometry.mass_shell import (
     project_to_shell,
     geodesic_distance,
     exp_map,
@@ -26,7 +26,7 @@ from util.mass_shell import (
     massless_energy_view,
     tangent_error_diagnostics,
 )
-from util.minkowski_utils import normsq4
+from util.geometry.minkowski_utils import normsq4
 from tests.lorentz_test_utils import build_model, sample_inputs
 
 
@@ -198,13 +198,13 @@ def test_exp_map_clamps_stiff_regime():
 def test_model_mass_shell_step_stays_on_shell():
     """model.step_hyperbolic(hyperbolic_model='mass_shell') keeps real particles on H_m."""
     m = 0.1
-    model = build_model(use_reference_vectors=False, use_node_scalars=False, seed=0)
-    x, _, cond, mask, _ = sample_inputs(seed=2)
+    model = build_model(seed=0, regulator_mass=m)
+    x, _, cond, mask, refs = sample_inputs(seed=2, mass=m)
     y0 = project_to_shell(x * mask.unsqueeze(-1), m)
     t0 = torch.tensor(0.0, dtype=torch.float64)
     t1 = torch.tensor(0.1, dtype=torch.float64)
     y1 = model.step_hyperbolic(y0, cond, mask, t0, t1,
-                               hyperbolic_model="mass_shell", regulator_mass=m)
+                               hyperbolic_model="mass_shell", regulator_mass=m, ref_vectors=refs)
     assert torch.isfinite(y1).all()
     onshell = normsq4(y1)                                  # <y,y>
     real = mask > 0

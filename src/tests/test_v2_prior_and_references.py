@@ -1,8 +1,8 @@
 import torch
 
-from util.coordinates import build_reference_vectors
-from util.distributions import gen_initial_distribution
-from util.minkowski_utils import normsq4
+from util.geometry.coordinates import build_reference_vectors
+from util.data.distributions import gen_initial_distribution
+from util.geometry.minkowski_utils import normsq4
 
 
 def test_massive_reference_has_requested_invariant_mass():

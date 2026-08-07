@@ -2,7 +2,7 @@
 import torch
 import torch.nn as nn
 
-from util.ema import ModelEMA
+from util.infra.ema import ModelEMA
 
 
 def _tiny_model(seed):

@@ -9,6 +9,7 @@ import math
 import torch
 
 from models.LEFT_JeN import LEFTJeN
+from util.geometry.mass_shell import project_to_shell
 
 
 def rotation_4x4(axis: str, angle: float, dtype=torch.float64) -> torch.Tensor:
@@ -58,46 +59,48 @@ def apply_transform(vecs: torch.Tensor, Lambda: torch.Tensor) -> torch.Tensor:
     return vecs @ Lambda.transpose(-1, -2)
 
 
-def build_model(use_reference_vectors=False, use_node_scalars=False, seed=0, use_adaln=False,
-                use_attention=False):
-    """Small double-precision model in eval mode (dropout off) for deterministic checks."""
+MASS = 1.0  # shared regulator mass for test models/inputs (well-conditioned shell)
+
+
+def build_model(use_reference_vectors=True, seed=0, hidden_dim=16, num_layers=2,
+                regulator_mass=MASS, **_ignored):
+    """Small double-precision mass-shell GNN in eval mode for deterministic checks.
+
+    The mass-shell GNN is the single architecture; it always uses typed references and the
+    mass condition. Legacy kwargs (use_node_scalars/use_adaln/use_attention) are accepted
+    and ignored so historical call sites keep working.
+    """
     torch.manual_seed(seed)
     model = LEFTJeN(
         max_num_jet_types=5,
-        max_particles=8,
-        embed_dim=16,
-        num_layers=2,
-        message_dim=16,
-        hidden_dim=16,
+        num_layers=num_layers,
+        hidden_dim=hidden_dim,
         include_pt=True,
+        include_mass_condition=True,
         use_reference_vectors=use_reference_vectors,
-        use_node_scalars=use_node_scalars,
-        node_scalar_dim=16,
-        use_adaln=use_adaln,
-        use_attention=use_attention,
+        regulator_mass=regulator_mass,
     )
     return model.double().eval()
 
 
-def sample_inputs(batch=2, n_real=6, max_particles=8, jet_axis="z", seed=1, dtype=torch.float64):
-    """Build a small physical batch.
+def sample_inputs(batch=2, n_real=6, max_particles=8, jet_axis="z", seed=1, dtype=torch.float64,
+                  mass=MASS):
+    """Build a small on-shell physical batch for the mass-shell GNN.
 
-    Returns x, t, jet_conditions, mask, ref_vectors. The jet-momentum reference is aligned
-    with ``jet_axis`` (used by the residual-SO(2) test). One batch element has a padded row
-    to exercise masking.
+    Returns x (on the mass shell), t, jet_conditions (8-dim, incl. mass), mask, ref_vectors.
+    The jet-momentum reference is aligned with ``jet_axis`` (residual-SO(2) test). One batch
+    element has a padded row (parked at the shell apex so no zero-vector geometry appears).
     """
     g = torch.Generator().manual_seed(seed)
     max_p = max_particles
 
-    # Massless-ish particles: E = |p|, small momenta.
-    p3 = (torch.rand(batch, max_p, 3, generator=g, dtype=dtype) * 2 - 1) * 0.5
-    E = p3.norm(dim=-1, keepdim=True)
-    x = torch.cat([E, p3], dim=-1)
+    x = project_to_shell(
+        (torch.rand(batch, max_p, 4, generator=g, dtype=dtype) * 2 - 1) * 0.5, mass)
 
     mask = torch.zeros(batch, max_p, dtype=dtype)
     mask[:, :n_real] = 1.0
     mask[0, n_real - 1] = 0.0  # extra padded row in batch element 0
-    x = x * mask.unsqueeze(-1)
+    x[0, n_real - 1] = torch.tensor([mass, 0.0, 0.0, 0.0], dtype=dtype)  # park at apex
 
     t = torch.rand(batch, generator=g, dtype=dtype)
 
@@ -105,7 +108,8 @@ def sample_inputs(batch=2, n_real=6, max_particles=8, jet_axis="z", seed=1, dtyp
     onehot[:, 0] = 1.0  # gluon
     n_particles = mask.sum(dim=1, keepdim=True)
     pt = torch.rand(batch, 1, generator=g, dtype=dtype)
-    jet_conditions = torch.cat([onehot, n_particles, pt], dim=-1)
+    jet_mass = torch.rand(batch, 1, generator=g, dtype=dtype)
+    jet_conditions = torch.cat([onehot, n_particles, pt, jet_mass], dim=-1)  # 8 dims
 
     # References: e_t = (1,0,0,0); jet 4-momentum aligned to jet_axis.
     e_t = torch.tensor([1.0, 0.0, 0.0, 0.0], dtype=dtype).expand(batch, 1, 4)

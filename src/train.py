@@ -16,24 +16,24 @@ import random
 from torch.utils.data import DataLoader
 
 from models.LEFT_JeN import LEFTJeN
-from util import jet_attributes
-from util.jet_attributes import NUM_CLASSES
-from jet_attr_model import get_model_pth_path
-from util.distributions import gen_initial_distribution, time_dist
-from util.coordinates import (deterministic_jet_phi,
+from util.data import jet_attributes
+from util.data.jet_attributes import NUM_CLASSES
+from models.stage1.jet_attr_model import get_model_pth_path
+from util.data.distributions import gen_initial_distribution, time_dist
+from util.geometry.coordinates import (deterministic_jet_phi,
                               transform_rel_particle_coordinates_to_cartesian)
-from util.conditioning import scale_condition_pt
-from util.ema import ModelEMA
-from util.file_management import make_clear_folder
+from util.geometry.conditioning import scale_condition_pt
+from util.infra.ema import ModelEMA
+from util.infra.file_management import make_clear_folder
 from util.viz import generate_model_vector_field
-from util.metrics import run_save_metrics
+from util.metrics.metrics import run_save_metrics
 # from util.boost_equiv import boost_to_com_frame
 from generate_samples import generate_samples
 from data import get_data_path
-from util.online_coupling import online_geodesic_coupling
-from util.qualification import loss_improvement_summary, optimizer_limit_reached
-from util.rng import capture_rng_state, keyed_seed, keyed_torch_rng, restore_rng_state
-from util.lr_schedule import build_epoch_scheduler, build_step_scheduler
+from util.geometry.online_coupling import online_geodesic_coupling
+from util.metrics.qualification import loss_improvement_summary, optimizer_limit_reached
+from util.infra.rng import capture_rng_state, keyed_seed, keyed_torch_rng, restore_rng_state
+from util.infra.lr_schedule import build_epoch_scheduler, build_step_scheduler
 from training import flow_matching_loss
 from config import (TrainRunConfig, build_config, parse_config_cli, train_config_to_namespace,
                     generation_controls_from_namespace)
@@ -144,23 +144,12 @@ if __name__ == "__main__":
         torch.cuda.manual_seed_all(args.model_seed)
     model: LEFTJeN = LEFTJeN(
         max_num_jet_types=NUM_CLASSES,
-        max_particles=args.num_particles,
         num_layers=args.n_layers,
         hidden_dim=args.n_hidden,
-        use_residual_update=args.use_residual,
         include_pt=True,
         use_reference_vectors=args.use_reference_vectors,
-        use_node_scalars=args.use_node_scalars,
-        node_scalar_seed=args.node_scalar_seed,
-        use_adaln=args.use_adaln,
-        use_attention=args.use_attention,
-        backbone=args.backbone,
         include_mass_condition=args.include_mass_condition,
-        num_attention_heads=args.num_attention_heads,
-        vector_channels=args.vector_channels,
         regulator_mass=args.regulator_mass,
-        velocity_readout_init=args.velocity_readout_init,
-        geometric_state=args.geometric_state, use_global_pooling=args.use_global_pooling,
     ).to(device)
     
     start_epoch = 0
@@ -204,33 +193,24 @@ if __name__ == "__main__":
         "num_particles": args.num_particles,
         "n_layers": args.n_layers,
         "n_hidden": args.n_hidden,
-        "use_residual": args.use_residual,
         "include_pt": True,
         "use_reference_vectors": args.use_reference_vectors,
-        "use_node_scalars": args.use_node_scalars,
-        "use_adaln": args.use_adaln,
-        "use_attention": args.use_attention,
         "backbone": args.backbone,
         "include_mass_condition": args.include_mass_condition,
-        "num_attention_heads": args.num_attention_heads,
-        "vector_channels": args.vector_channels,
-        "velocity_readout_init": args.velocity_readout_init,
-        "geometric_state": args.geometric_state, "use_global_pooling": args.use_global_pooling,
         "regulator_mass": args.regulator_mass,
         "jet_types": args.jet_types,
         "final_scale": float(final_scale),
     }
-    # Full config (all sections), embedded alongside the legacy architecture-only
-    # `config` dict so infer.py can auto-load every knob a run was trained with.
+    # Full config (all sections), embedded alongside the architecture-only `config` dict
+    # so infer.py can auto-load every knob a run was trained with.
     full_config = cfg.model_dump()
     if args.resume_weights and is_rank0:
         prev = checkpoint.get("config")
         if prev is not None:
             mism = {k: (prev.get(k), run_config.get(k))
-                    for k in ("n_layers", "n_hidden", "num_particles", "use_reference_vectors",
-                              "use_node_scalars", "use_adaln", "use_attention", "backbone",
-                              "include_mass_condition", "num_attention_heads", "vector_channels",
-                              "velocity_readout_init")
+                    for k in ("n_layers", "n_hidden", "num_particles",
+                              "use_reference_vectors", "include_mass_condition",
+                              "regulator_mass")
                     if prev.get(k) != run_config.get(k)}
             if mism:
                 print(f"WARNING: resume architecture flags differ from checkpoint: {mism}. "
@@ -271,7 +251,7 @@ if __name__ == "__main__":
     # The frozen ICP cache has been removed. A fixed per-jet prior/pairing reused every
     # epoch let the field specialise to a finite bundle of paths (see discussions/22).
     # Training now always draws fresh prior noise per step (below) and applies the geodesic
-    # ICP coupling *online* (util.online_coupling), so the supervision measure is the true
+    # ICP coupling *online* (util.geometry.online_coupling), so the supervision measure is the true
     # fresh-noise marginal field. There is no cached path; `paired_x0_cache` stays None.
     paired_x0_cache = None
     if args.coupling == "online_geodesic_icp" and not (
@@ -561,7 +541,7 @@ if __name__ == "__main__":
             batch_jet_mass = batch_jet_info[:, 2]
             encoded_jet_types = jet_attributes.one_hot_enc_jet_type(batch_jet_info[:, 4].long()).to(device)
             # Legacy checkpoints consume raw pT. v2 uses model-scaled pT and mass.
-            cond_pt = scale_condition_pt(batch_jet_pt, final_scale, args.backbone)
+            cond_pt = scale_condition_pt(batch_jet_pt, final_scale)
             condition_parts = [
                 encoded_jet_types,
                 batch_jet_n_particles.unsqueeze(-1),
@@ -609,7 +589,7 @@ if __name__ == "__main__":
             # same attributes at inference and never leaks the target constituent sum.
             ref_vectors = None
             if args.use_reference_vectors:
-                from util.coordinates import build_reference_vectors
+                from util.geometry.coordinates import build_reference_vectors
                 ref_vectors = build_reference_vectors(batch_jet_info[:, 0], batch_jet_info[:, 1],
                                                       final_scale, device,
                                                       jet_phi=batch_jet_phi.to(device),

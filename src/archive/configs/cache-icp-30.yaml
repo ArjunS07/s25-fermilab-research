@@ -1,8 +1,0 @@
-data:
-  num_particles: 30
-
-cache:
-  icp_max_iter: 1000
-
-paths:
-  cache_dir: /mnt/data/caches

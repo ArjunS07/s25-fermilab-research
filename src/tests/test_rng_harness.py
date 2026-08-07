@@ -3,7 +3,7 @@ import random
 import numpy as np
 import torch
 
-from util.rng import (capture_rng_state, keyed_seed, keyed_torch_rng,
+from util.infra.rng import (capture_rng_state, keyed_seed, keyed_torch_rng,
                       restore_rng_state)
 
 

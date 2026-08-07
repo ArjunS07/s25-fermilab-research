@@ -30,69 +30,25 @@ class InferDataConfig(DataConfig):
 
 
 class ModelConfig(BaseModel):
+    """The single reference architecture: mass-shell Lorentz-equivariant GNN."""
     model_config = ConfigDict(extra="forbid")
 
     n_hidden: int = Field(default=128, ge=1)
     n_layers: int = Field(default=3, ge=1)
-    use_residual: bool = False
-    use_reference_vectors: bool = False
-    use_node_scalars: bool = False
-    # Source for the initial per-node scalar h_i (only used when use_node_scalars=True).
-    # "physics" — [ψ(m²), ψ(⟨x,e_t⟩)=E, ψ(⟨x,x_jet⟩)]; grid default (with cols 2–3 zeroed
-    # when refs off). "zero" — h_i seeded as zeros (blank channel, purely learned via
-    # message passing). "conditions" — jet_conditions (7-dim) broadcast per particle.
-    node_scalar_seed: Literal["physics", "zero", "conditions"] = "physics"
-    use_adaln: bool = False
-    use_attention: bool = False
-    use_hyperbolic: bool = False
-    # When use_hyperbolic, which Riemannian geometry: "poincare" (radial-tanh ball, the
-    # original) or "mass_shell" (hyperboloid at <p,p>=regulator_mass^2, Phase 4).
-    hyperbolic_model: Literal["poincare", "mass_shell"] = "poincare"
-    # Shell mass in normalised units (momenta are O(1) after final_scale). This is the primary
-    # Phase-4 ablation knob; smaller = more massless/relativistic but numerically stiffer
-    # (near-light-like, high curvature). 0.5 is a conditioned starting point.
+    # Shell mass in normalised units (momenta are O(1) after final_scale). The mass-shell
+    # regulator: smaller = more massless/relativistic but numerically stiffer. Runs use 0.1.
     regulator_mass: float = 0.5
-    # v2 keeps the ODE coordinates fixed inside the network and refines invariant scalar
-    # plus tangent-vector channels with typed reference cross-attention.
-    backbone: Literal["legacy", "tangent_attention", "mass_shell_gnn"] = "legacy"
-    geometric_state: Literal["readout_only", "tangent_channels"] = "readout_only"
-    use_global_pooling: bool = False
-    include_mass_condition: bool = False
-    num_attention_heads: int = Field(default=8, ge=1)
-    vector_channels: int = Field(default=16, ge=1)
-    velocity_readout_init: Literal["small_normal", "zero"] = "small_normal"
+    # Both are structural requirements of the mass-shell GNN (they shape the conditioning
+    # layout). Kept as explicit fields; the validator enforces they stay on.
+    use_reference_vectors: bool = True
+    include_mass_condition: bool = True
 
     @model_validator(mode="after")
-    def validate_tangent_attention_contract(self):
-        if self.backbone != "mass_shell_gnn":
-            if self.geometric_state != "readout_only" or self.use_global_pooling:
-                raise ValueError(
-                    "geometric_state and use_global_pooling are mass_shell_gnn-only fields"
-                )
-        if self.backbone in ("tangent_attention", "mass_shell_gnn"):
-            inactive_legacy_flags = [
-                name for name, enabled in (
-                    ("use_residual", self.use_residual),
-                    ("use_node_scalars", self.use_node_scalars),
-                    ("use_adaln", self.use_adaln),
-                    ("use_attention", self.use_attention),
-                ) if enabled
-            ]
-            if inactive_legacy_flags:
-                raise ValueError(
-                    f"{self.backbone} does not use legacy model flags: "
-                    + ", ".join(inactive_legacy_flags)
-                )
-            if not self.use_reference_vectors:
-                raise ValueError(f"{self.backbone} requires model.use_reference_vectors=true")
-            if not self.include_mass_condition:
-                raise ValueError(f"{self.backbone} requires model.include_mass_condition=true")
-            if not self.use_hyperbolic or self.hyperbolic_model != "mass_shell":
-                raise ValueError(f"{self.backbone} currently requires mass-shell geometry")
-            if self.backbone == "tangent_attention" and self.n_hidden % self.num_attention_heads:
-                raise ValueError("model.n_hidden must be divisible by model.num_attention_heads")
-            if self.backbone == "mass_shell_gnn" and self.velocity_readout_init == "zero":
-                raise ValueError("mass_shell_gnn requires small_normal velocity initialization")
+    def _require_reference_contract(self):
+        if not self.use_reference_vectors:
+            raise ValueError("model.use_reference_vectors must be true (mass-shell GNN contract)")
+        if not self.include_mass_condition:
+            raise ValueError("model.include_mass_condition must be true (mass-shell GNN contract)")
         return self
 
 
@@ -109,8 +65,6 @@ class TrainingConfig(BaseModel):
     stability_probe_steps: list[int] = Field(default_factory=list)
     stability_probe_save_checkpoints: bool = False
     qualification_min_loss_improvement: float | None = Field(default=None, ge=0, le=1)
-    sigma_min: float = 1e-4
-    train_space: Literal["cartesian", "polar"] = "cartesian"
     time_sampling: Literal["uniform", "power_law", "lognorm"] = "power_law"
 
     lr: float = 6e-4
@@ -312,7 +266,6 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         num_particles=cfg.data.num_particles,
         n_hidden=cfg.model.n_hidden,
         n_layers=cfg.model.n_layers,
-        use_residual=cfg.model.use_residual,
         n_train_samples=cfg.training.n_train_samples,
         batch_size=cfg.training.batch_size,
         target_batch_size=cfg.training.target_batch_size,
@@ -323,8 +276,6 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         stability_probe_steps=cfg.training.stability_probe_steps,
         stability_probe_save_checkpoints=cfg.training.stability_probe_save_checkpoints,
         qualification_min_loss_improvement=cfg.training.qualification_min_loss_improvement,
-        sigma_min=cfg.training.sigma_min,
-        train_space=cfg.training.train_space,
         time_sampling=cfg.training.time_sampling,
         n_samples=cfg.inference.n_samples,
         n_viz_samples=cfg.inference.n_viz_samples,
@@ -350,28 +301,21 @@ def train_config_to_namespace(cfg: TrainRunConfig) -> argparse.Namespace:
         lr_t0=cfg.training.lr_t0,
         lr_warmup_epochs=cfg.training.lr_warmup_epochs,
         lr_warmup_steps=cfg.training.lr_warmup_steps,
-        use_hyperbolic=cfg.model.use_hyperbolic,
-        hyperbolic_model=cfg.model.hyperbolic_model,
+        # Geometry is fixed: mass-shell GNN. These constants remain in the namespace only
+        # so the internal train/generate readers keep a stable contract.
+        use_hyperbolic=True,
+        hyperbolic_model="mass_shell",
+        backbone="mass_shell_gnn",
         regulator_mass=cfg.model.regulator_mass,
-        backbone=cfg.model.backbone,
         include_mass_condition=cfg.model.include_mass_condition,
-        num_attention_heads=cfg.model.num_attention_heads,
-        vector_channels=cfg.model.vector_channels,
-        velocity_readout_init=cfg.model.velocity_readout_init,
-        geometric_state=cfg.model.geometric_state,
-        use_global_pooling=cfg.model.use_global_pooling,
         use_curriculum=cfg.training.use_curriculum,
         use_time_sampling=cfg.training.use_time_sampling,
         use_reference_vectors=cfg.model.use_reference_vectors,
-        use_node_scalars=cfg.model.use_node_scalars,
-        node_scalar_seed=cfg.model.node_scalar_seed,
-        use_attention=cfg.model.use_attention,
         prior_dist=cfg.training.prior_dist,
         coupling=cfg.training.coupling,
         eta_min_factor=cfg.training.eta_min_factor,
         use_ema=cfg.training.use_ema,
         ema_decay=cfg.training.ema_decay,
-        use_adaln=cfg.model.use_adaln,
         curriculum_alpha_start=cfg.training.curriculum_alpha_start,
         n_curriculum_buckets=cfg.training.n_curriculum_buckets,
         cache_dir=cfg.paths.cache_dir,
@@ -395,7 +339,6 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         replay_bundle_path=cfg.paths.replay_bundle_path,
         n_hidden=cfg.model.n_hidden,
         n_layers=cfg.model.n_layers,
-        use_residual=cfg.model.use_residual,
         num_particles=cfg.data.num_particles,
         jet_types=cfg.data.jet_types,
         n_samples=cfg.inference.n_samples,
@@ -407,24 +350,15 @@ def infer_config_to_namespace(cfg: InferRunConfig) -> argparse.Namespace:
         use_cfg=cfg.inference.use_cfg,
         use_ema_weights=cfg.inference.use_ema_weights,
         seed=cfg.inference.seed,
-        use_hyperbolic=cfg.model.use_hyperbolic,
-        hyperbolic_model=cfg.model.hyperbolic_model,
+        use_hyperbolic=True,
+        hyperbolic_model="mass_shell",
+        backbone="mass_shell_gnn",
         regulator_mass=cfg.model.regulator_mass,
-        backbone=cfg.model.backbone,
         include_mass_condition=cfg.model.include_mass_condition,
-        num_attention_heads=cfg.model.num_attention_heads,
-        vector_channels=cfg.model.vector_channels,
-        velocity_readout_init=cfg.model.velocity_readout_init,
-        geometric_state=cfg.model.geometric_state,
-        use_global_pooling=cfg.model.use_global_pooling,
         sampler=cfg.inference.sampler,
         mass_shell_max_step_rapidity=cfg.inference.mass_shell_max_step_rapidity,
         mass_shell_max_substeps=cfg.inference.mass_shell_max_substeps,
         use_reference_vectors=cfg.model.use_reference_vectors,
-        use_node_scalars=cfg.model.use_node_scalars,
-        node_scalar_seed=cfg.model.node_scalar_seed,
-        use_adaln=cfg.model.use_adaln,
-        use_attention=cfg.model.use_attention,
         vf_mode=cfg.inference.vf_mode,
         skip_samples=cfg.inference.skip_samples,
         skip_metrics=cfg.inference.skip_metrics,
@@ -456,28 +390,3 @@ def generation_controls_from_namespace(args: argparse.Namespace) -> dict:
     return controls
 
 
-def run_config_dict(cfg: TrainRunConfig, final_scale: float) -> dict:
-    """Checkpoint-embeddable dict matching the pre-config `run_config` format
-    (architecture-only keys), for backward compatibility with older loaders."""
-    return {
-        "num_particles": cfg.data.num_particles,
-        "n_layers": cfg.model.n_layers,
-        "n_hidden": cfg.model.n_hidden,
-        "use_residual": cfg.model.use_residual,
-        "include_pt": True,
-        "use_reference_vectors": cfg.model.use_reference_vectors,
-        "use_node_scalars": cfg.model.use_node_scalars,
-        "node_scalar_seed": cfg.model.node_scalar_seed,
-        "use_adaln": cfg.model.use_adaln,
-        "use_attention": cfg.model.use_attention,
-        "backbone": cfg.model.backbone,
-        "include_mass_condition": cfg.model.include_mass_condition,
-        "num_attention_heads": cfg.model.num_attention_heads,
-        "vector_channels": cfg.model.vector_channels,
-        "velocity_readout_init": cfg.model.velocity_readout_init,
-        "geometric_state": cfg.model.geometric_state,
-        "use_global_pooling": cfg.model.use_global_pooling,
-        "regulator_mass": cfg.model.regulator_mass,
-        "jet_types": cfg.data.jet_types,
-        "final_scale": float(final_scale),
-    }

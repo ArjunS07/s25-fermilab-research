@@ -1,4 +1,4 @@
-"""Guards for the canonical FPND-input normalization (util.fpnd_input.build_fpnd_input).
+"""Guards for the canonical FPND-input normalization (util.data.fpnd_input.build_fpnd_input).
 
 The FPND input must normalize pt_rel by the *true clustered jet pT* (from the
 conditioning), not by the vector sum of the 30 retained constituents. The latter
@@ -12,7 +12,7 @@ import math
 import pytest
 import torch
 
-from util.fpnd_input import build_fpnd_input
+from util.data.fpnd_input import build_fpnd_input
 
 
 def _polar_abs(eta, phi, pt):

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from tests.lorentz_test_utils import apply_transform, random_proper_transform
-from util.online_coupling import geodesic_permutation, online_geodesic_coupling
+from util.geometry.online_coupling import geodesic_permutation, online_geodesic_coupling
 
 M = 0.1
 
@@ -32,7 +32,7 @@ def test_permutation_is_a_valid_permutation_and_beats_identity():
     x0, x1 = _clouds(10, seed=1)
     perm = geodesic_permutation(x0, x1, M)
     assert sorted(perm.tolist()) == list(range(10))  # a genuine permutation
-    from util.mass_shell import geodesic_cost_matrix
+    from util.geometry.mass_shell import geodesic_cost_matrix
     cost = geodesic_cost_matrix(x0, x1, M).square()
     paired_cost = cost[torch.as_tensor(perm, dtype=torch.long), torch.arange(10)].sum()
     identity_cost = cost.diagonal().sum()

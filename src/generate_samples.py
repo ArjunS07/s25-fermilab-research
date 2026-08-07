@@ -6,12 +6,11 @@ import os
 from jetnet.utils import EtaPhiPtE_to_cartesian
 
 from models.LEFT_JeN import LEFTJeN
-from util import jet_attributes
-from util.file_management import make_clear_folder
-from util.distributions import gen_initial_distribution
-from util.hyperbolic import to_poincare_ball, from_poincare_ball
-from util.coordinates import build_reference_vectors
-from util.conditioning import scale_condition_pt
+from util.data import jet_attributes
+from util.infra.file_management import make_clear_folder
+from util.data.distributions import gen_initial_distribution
+from util.geometry.coordinates import build_reference_vectors
+from util.geometry.conditioning import scale_condition_pt
 
 plt.rc("mathtext", fontset="cm")
 sns.set_style("whitegrid")
@@ -34,7 +33,7 @@ def _resilient_mass_shell_step(model, state, cond, masks, t_start, t_end, **kwar
             )
         raise FloatingPointError("mass-shell step returned non-finite state")
     except FloatingPointError as exc:
-        from util.mass_shell import MassShellIntegrationError
+        from util.geometry.mass_shell import MassShellIntegrationError
         failure_record = (
             exc.as_dict() if isinstance(exc, MassShellIntegrationError)
             else {"reason": "floating_point_error", "message": str(exc)}
@@ -205,12 +204,12 @@ def generate_samples(
             # multiplicity mask, orientation, and any geometry-specific projection.
             prior_x = x * masks.unsqueeze(-1)
             if use_hyperbolic and hyperbolic_model == 'mass_shell':
-                from util.mass_shell import project_to_shell
+                from util.geometry.mass_shell import project_to_shell
                 if replay_bundle is None:
                     prior_x = project_to_shell(prior_x, regulator_mass) * masks.unsqueeze(-1)
                 else:
                     prior_x = x * masks.unsqueeze(-1)
-            cond_pt = scale_condition_pt(gen_pt, final_scale, backbone)
+            cond_pt = scale_condition_pt(gen_pt, final_scale)
             condition_parts = [
                 jet_one_hot_enc,
                 gen_n_particles.unsqueeze(-1).float(),
@@ -231,7 +230,7 @@ def generate_samples(
             if use_hyperbolic and hyperbolic_model == 'mass_shell':
                 # Integrate the ODE geodesically on the mass shell. The state stays on H_m
                 # (Cartesian on-shell 4-vectors), so the final x is used directly.
-                from util.mass_shell import project_to_shell
+                from util.geometry.mass_shell import project_to_shell
                 y = project_to_shell(x * masks.unsqueeze(-1), regulator_mass)
                 failure_step = torch.full(
                     (current_batch_size,), -1, dtype=torch.int64, device=device)
@@ -279,29 +278,9 @@ def generate_samples(
                     if (new_explosive & unset).any():
                         explosion_step[active_indices[new_explosive & unset]] = i
                 x = y
-            elif use_hyperbolic:
-                y = to_poincare_ball(x, c=hyperbolic_c)
-                for i in range(integration_steps):
-                    y = model.step_hyperbolic(
-                        y_t=y,
-                        jet_conditions=cond,
-                        mask=masks,
-                        t_start=times[i],
-                        t_end=times[i + 1],
-                        c=hyperbolic_c,
-                        use_cfg=use_cfg,
-                        guidance_weight=cfg_guidance_weight,
-                        ref_vectors=ref_vectors,
-                    )
-                x = from_poincare_ball(y, c=hyperbolic_c)
-            else:
-                for i in range(integration_steps):
-                    x = model.step(x, cond, masks, times[i], times[i + 1], method=sampler,
-                                   use_cfg=use_cfg, guidance_weight=cfg_guidance_weight,
-                                   ref_vectors=ref_vectors)
 
             if use_hyperbolic and hyperbolic_model == 'mass_shell':
-                from util.mass_shell import massless_energy_view
+                from util.geometry.mass_shell import massless_energy_view
                 # H_m is only the regularized transport manifold.  Publish the physical
                 # massless endpoint while preserving the integrated spatial momentum.
                 shell_x = project_to_shell(x, regulator_mass)

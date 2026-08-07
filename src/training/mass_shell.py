@@ -2,14 +2,14 @@
 
 import torch
 
-from util.mass_shell import (
+from util.geometry.mass_shell import (
     conditional_vector_field,
     geodesic_interpolant,
     mass_shell_loss,
     project_to_shell,
     pushforward_to_tangent,
 )
-from util.minkowski_utils import normsq4
+from util.geometry.minkowski_utils import normsq4
 
 
 def mass_shell_flow_loss(*, model, raw_model, x0, x1, t, mask,

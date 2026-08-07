@@ -14,7 +14,7 @@ def _jet_features(batch, device="cpu"):
 
 def test_axis_aligned_prior_shape_energy_and_collimation():
     pytest.importorskip("jetnet")
-    from util.distributions import gen_initial_distribution
+    from util.data.distributions import gen_initial_distribution
 
     torch.manual_seed(0)
     batch, num_particles = 64, 30
@@ -45,7 +45,7 @@ def test_axis_aligned_prior_shape_energy_and_collimation():
 
 
 def test_unknown_prior_raises():
-    pytest.importorskip("jetnet")  # util.distributions imports jetnet at module load
-    from util.distributions import gen_initial_distribution
+    pytest.importorskip("jetnet")  # util.data.distributions imports jetnet at module load
+    from util.data.distributions import gen_initial_distribution
     with pytest.raises(ValueError):
         gen_initial_distribution(batch_size=4, num_particles=10, prior_dist="does_not_exist")

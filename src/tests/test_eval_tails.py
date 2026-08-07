@@ -2,7 +2,7 @@ import math
 
 import torch
 
-from util.tail_diagnostics import endpoint_tail_diagnostics
+from util.metrics.tail_diagnostics import endpoint_tail_diagnostics
 
 
 def test_endpoint_tail_diagnostics_separates_nonfinite_and_finite_explosions():

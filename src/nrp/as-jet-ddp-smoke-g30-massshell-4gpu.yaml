@@ -1,0 +1,87 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-ddp-smoke-g30-massshell-4gpu
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: as-jet-train-pvc-2
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              GIT_COMMIT="a70fbb99d445fb40bf022c3f188d819634cf9b54"
+              test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
+
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-massshell-ddp-4gpu-smoke"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+
+              tar -xf /mnt/data/caches/runtime/python-env-py310-torch271.tar -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" \
+                --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 \
+                --model-version v3
+
+              NGPU=$("$PYTHON" -c "import torch; print(torch.cuda.device_count())")
+              echo "Detected $NGPU GPU(s); four-GPU DDP qualification requires exactly 4"
+              test "$NGPU" -eq 4
+
+              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=4 train.py \
+                --config configs/g30-mass-shell.yaml \
+                --set paths.output_path="$OUT" \
+                --set training.batch_size=32 \
+                --set training.target_batch_size=64 \
+                --set training.n_train_samples=20000 \
+                --set training.num_epochs=2 \
+                --set training.max_optimizer_steps=100 \
+                --set training.lr_warmup_steps=25 \
+                --set training.stability_probe_steps="[0,10,100]" \
+                --set training.stability_probe_save_checkpoints=false \
+                --set training.qualification_min_loss_improvement=null \
+                --set inference.n_samples=64 \
+                --set inference.integration_steps=8 \
+                --set inference.skip_metrics=true
+
+              test -s "$OUT/train/models/latest_checkpoint.pth"
+              test -s "$OUT/train/models/final_checkpoint.pth"
+              test -s "$OUT/train/optimizer_steps.csv"
+              test -s "$OUT/train/training_loss.csv"
+              test -s "$OUT/train/summary.json"
+              test -s "$OUT/train/generation_diagnostics.json"
+              for STEP in 000000 000010 000100; do
+                test -s "$OUT/train/stability_probes/step_$STEP/probe_summary.json"
+              done
+              echo "Four-GPU DDP smoke artifact verification passed"
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/data
+          resources:
+            requests:
+              nvidia.com/a40: 4
+              cpu: "8"
+              memory: 64Gi
+            limits:
+              nvidia.com/a40: 4
+              cpu: "8"
+              memory: 64Gi

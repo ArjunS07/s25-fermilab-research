@@ -1,7 +1,7 @@
 import torch
 
 from analysis.analyze_mass_shell_samples import summarize
-from util.mass_shell import project_to_shell
+from util.geometry.mass_shell import project_to_shell
 
 
 def test_sample_summary_counts_invalid_and_preserves_spatial_view():

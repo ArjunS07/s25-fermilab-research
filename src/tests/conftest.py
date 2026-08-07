@@ -1,6 +1,6 @@
 """Make the project modules importable when running pytest from anywhere.
 
-The project uses absolute imports rooted at ``src`` (e.g. ``from util.minkowski_utils
+The project uses absolute imports rooted at ``src`` (e.g. ``from util.geometry.minkowski_utils
 import normsq4``), so ``src`` must be on ``sys.path``. This conftest inserts it.
 """
 import os

@@ -20,7 +20,7 @@ import argparse
 import json
 import os
 
-from util.ks import ks_statistic_vs_uniform
+from util.metrics.ks import ks_statistic_vs_uniform
 
 ISOTROPIC_PRIORS = {"isotropic_com", "isotropic_lognorm"}
 DEFAULT_KS_THRESHOLD = 1e-3
