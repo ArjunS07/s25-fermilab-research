@@ -30,7 +30,7 @@ items:
                 - -c
                 - |
                   set -euo pipefail
-                  GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+                  GIT_COMMIT="48d55b4a42c0a82c5b49cb182580cde410c8b91a"
                   if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
                     echo "GIT_COMMIT is still the placeholder — refusing to run (frozen-harness gate)."; exit 1
                   fi
