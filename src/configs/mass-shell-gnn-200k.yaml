@@ -1,0 +1,61 @@
+# Publication-track matrix base: mass-shell GNN (arm-a reference), 200k optimizer steps.
+#
+# One base recipe frozen from the width-96 arm-a frontrunner (readout_only/no-pool, ~513k
+# params, FPND 0.529 @ 600k): fresh prior + online squared-geodesic ICP, monotonic-cosine
+# optimizer-step LR 6e-4, regulator mass 0.1, EMA, adaptive Euler sampler.
+#
+# The manifest overrides only the per-run knobs via --set:
+#   data.jet_types            [g] | [q] | [t] | [g,q,t]
+#   data.num_particles        30 | 150
+#   training.cfg_null_dropout_rate   0.0 (no CFG) | 0.1 (CFG-capable)
+#   inference.use_cfg         false | true   (CFG sampling in the end-of-run eval)
+#
+# Comparability across the different dataset sizes is why the LR budget is pinned in
+# optimizer-step units (max_optimizer_steps + explicit lr_warmup_steps), NOT epochs:
+# steps/epoch varies with dataset size, so an epoch-valued warmup would differ per run.
+data: {jet_types: [g], num_particles: 30}
+model:
+  n_hidden: 96
+  n_layers: 4
+  use_reference_vectors: true
+  include_mass_condition: true
+  regulator_mass: 0.1
+training:
+  n_train_samples: 1000000
+  batch_size: 50
+  target_batch_size: 250
+  cfg_null_dropout_rate: 0.0
+  # High ceiling only; the optimizer-step gate below is what actually stops training. Must be
+  # large enough for the smallest dataset (single-type-30) to reach 200k steps.
+  num_epochs: 1000
+  max_optimizer_steps: 200000
+  stability_probe_steps: [0, 20000, 40000, 80000, 150000, 200000]
+  stability_probe_save_checkpoints: true
+  qualification_min_loss_improvement: null
+  time_sampling: uniform
+  use_time_sampling: false
+  use_curriculum: false
+  prior_dist: axis_aligned_per_jet
+  coupling: online_geodesic_icp
+  use_ema: true
+  ema_decay: 0.999
+  lr: 0.0006
+  use_cosine_lr: true
+  lr_schedule: monotonic_cosine
+  lr_step_unit: optimizer_step
+  lr_warmup_steps: 2000
+  eta_min_factor: 0.03
+inference:
+  n_samples: 50000
+  batch_size: 128
+  integration_steps: 64
+  prior_dist: axis_aligned_per_jet
+  sampler: euler
+  mass_shell_max_step_rapidity: 0.5
+  mass_shell_max_substeps: 64
+  use_cfg: false
+  cfg_guidance_weight: 2.0
+  warn_invalid_fraction: 0.0
+  max_invalid_fraction: 0.001
+paths:
+  cache_dir: /mnt/data/caches
