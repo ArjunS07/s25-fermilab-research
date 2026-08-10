@@ -29,11 +29,14 @@ class InferDataConfig(DataConfig):
 
 
 class ModelConfig(BaseModel):
-    """The single reference architecture: mass-shell Lorentz-equivariant GNN."""
+    """Reference type-A architecture or the matched LorentzNet FM ablation."""
     model_config = ConfigDict(extra="forbid")
 
     n_hidden: int = Field(default=128, ge=1)
     n_layers: int = Field(default=3, ge=1)
+    architecture: Literal["mass_shell_gnn", "lorentznet"] = "mass_shell_gnn"
+    flow_geometry: Literal["euclidean", "mass_shell"] = "mass_shell"
+    reference_mode: Literal["none", "plain_readout"] = "plain_readout"
     # Shell mass in normalised units (momenta are O(1) after final_scale). The mass-shell
     # regulator: smaller = more massless/relativistic but numerically stiffer. Runs use 0.1.
     regulator_mass: float = 0.5
@@ -44,10 +47,24 @@ class ModelConfig(BaseModel):
 
     @model_validator(mode="after")
     def _require_reference_contract(self):
-        if not self.use_reference_vectors:
-            raise ValueError("model.use_reference_vectors must be true (mass-shell GNN contract)")
-        if not self.include_mass_condition:
-            raise ValueError("model.include_mass_condition must be true (mass-shell GNN contract)")
+        if self.architecture == "mass_shell_gnn":
+            if self.flow_geometry != "mass_shell":
+                raise ValueError("mass_shell_gnn only supports flow_geometry='mass_shell'")
+            if not self.use_reference_vectors:
+                raise ValueError(
+                    "model.use_reference_vectors must be true (mass-shell GNN contract)"
+                )
+            if not self.include_mass_condition:
+                raise ValueError(
+                    "model.include_mass_condition must be true (mass-shell GNN contract)"
+                )
+        else:
+            expects_references = self.reference_mode == "plain_readout"
+            if self.use_reference_vectors != expects_references:
+                raise ValueError(
+                    "LorentzNet use_reference_vectors must match reference_mode: "
+                    "false for none, true for plain_readout"
+                )
         return self
 
 
@@ -269,6 +286,8 @@ def generation_controls_from_config(cfg, prior_dist):
         "regulator_mass": cfg.model.regulator_mass,
         "use_reference_vectors": cfg.model.use_reference_vectors,
         "include_mass_condition": cfg.model.include_mass_condition,
+        "use_hyperbolic": cfg.model.flow_geometry == "mass_shell",
+        "hyperbolic_model": "mass_shell",
         "sampler": cfg.inference.sampler,
         "mass_shell_max_step_rapidity": cfg.inference.mass_shell_max_step_rapidity,
         "mass_shell_max_substeps": cfg.inference.mass_shell_max_substeps,

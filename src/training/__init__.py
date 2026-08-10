@@ -1,7 +1,13 @@
-"""Mass-shell flow-matching objective (the single training geometry)."""
+"""Flow-matching objective dispatch."""
 
 def flow_matching_loss(*, model, raw_model, config, x0, x1, t, mask,
                        conditions, references):
+    if getattr(config, "flow_geometry", "mass_shell") == "euclidean":
+        from training.euclidean import euclidean_flow_loss
+        return euclidean_flow_loss(
+            model=model, x0=x0, x1=x1, t=t, mask=mask,
+            conditions=conditions, references=references,
+        )
     from training.mass_shell import mass_shell_flow_loss
     return mass_shell_flow_loss(
         model=model, raw_model=raw_model, x0=x0, x1=x1, t=t,

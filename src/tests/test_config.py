@@ -24,6 +24,9 @@ def test_train_defaults():
     assert cfg.data.num_particles == 150
     assert cfg.model.n_hidden == 128
     assert cfg.model.n_layers == 3
+    assert cfg.model.architecture == "mass_shell_gnn"
+    assert cfg.model.flow_geometry == "mass_shell"
+    assert cfg.model.reference_mode == "plain_readout"
     assert cfg.model.use_reference_vectors is True
     assert cfg.model.include_mass_condition is True
     assert cfg.training.n_train_samples == 1_000_000
@@ -104,6 +107,34 @@ def test_removed_legacy_field_rejected():
 def test_mass_shell_contract_flags_must_be_true(field):
     with pytest.raises(ValidationError):
         TrainRunConfig(model={field: False})
+
+
+@pytest.mark.parametrize("geometry", ["euclidean", "mass_shell"])
+@pytest.mark.parametrize("reference_mode,use_references", [
+    ("none", False), ("plain_readout", True),
+])
+def test_lorentznet_geometry_reference_matrix_validates(geometry, reference_mode, use_references):
+    cfg = TrainRunConfig(model={
+        "architecture": "lorentznet",
+        "flow_geometry": geometry,
+        "reference_mode": reference_mode,
+        "use_reference_vectors": use_references,
+    })
+    assert cfg.model.flow_geometry == geometry
+    assert cfg.model.reference_mode == reference_mode
+
+
+def test_lorentznet_reference_flag_must_match_mode():
+    with pytest.raises(ValidationError):
+        TrainRunConfig(model={
+            "architecture": "lorentznet", "reference_mode": "none",
+            "use_reference_vectors": True,
+        })
+    with pytest.raises(ValidationError):
+        TrainRunConfig(model={
+            "architecture": "lorentznet", "reference_mode": "plain_readout",
+            "use_reference_vectors": False,
+        })
 
 
 @pytest.mark.parametrize("field", ["n_hidden", "n_layers"])
@@ -243,5 +274,4 @@ def test_parse_config_cli_no_args():
     config_path, overrides = parse_config_cli([])
     assert config_path is None
     assert overrides == []
-
 

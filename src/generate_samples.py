@@ -2,6 +2,7 @@ import seaborn as sns
 import torch
 import matplotlib.pyplot as plt
 import os
+import time
 
 from jetnet.utils import EtaPhiPtE_to_cartesian
 
@@ -11,6 +12,7 @@ from util.infra.file_management import make_clear_folder
 from util.data.distributions import gen_initial_distribution
 from util.geometry.coordinates import build_reference_vectors
 from util.geometry.conditioning import scale_condition_pt
+from util.geometry.euclidean import euclidean_ode_step
 
 plt.rc("mathtext", fontset="cm")
 sns.set_style("whitegrid")
@@ -87,7 +89,7 @@ def generate_samples(
         mass_shell_max_substeps=64,
         replay_bundle_path=None,
 ):
-
+    sampling_start = time.perf_counter()
 
     if use_hyperbolic and hyperbolic_model == 'mass_shell' and sampler != 'euler':
         raise ValueError(
@@ -276,6 +278,46 @@ def generate_samples(
                     if (new_explosive & unset).any():
                         explosion_step[active_indices[new_explosive & unset]] = i
                 x = y
+            else:
+                # Vanilla ambient ODE integration.  Do not project, repair energies, or
+                # clamp components: physical invalidity is part of the Euclidean control.
+                y = x * masks.unsqueeze(-1)
+                failure_step = torch.full(
+                    (current_batch_size,), -1, dtype=torch.int64, device=device
+                )
+                explosion_step = torch.full_like(failure_step, -1)
+                failure_records = [None] * current_batch_size
+                step_telemetry = [[] for _ in range(current_batch_size)]
+                for i in range(integration_steps):
+                    active = failure_step < 0
+                    if not active.any():
+                        break
+                    refs_active = ref_vectors[active] if ref_vectors is not None else None
+                    stepped = euclidean_ode_step(
+                        model, y[active], cond[active], masks[active], times[i], times[i + 1],
+                        references=refs_active, sampler=sampler, use_cfg=use_cfg,
+                        guidance_weight=cfg_guidance_weight,
+                    )
+                    active_indices = active.nonzero(as_tuple=False).flatten()
+                    finite = torch.isfinite(stepped).all(dim=(1, 2))
+                    y = y.clone()
+                    y[active_indices[finite]] = stepped[finite]
+                    if (~finite).any():
+                        failed_indices = active_indices[~finite]
+                        y[failed_indices] = float("nan")
+                        failure_step[failed_indices] = i
+                        for global_idx in failed_indices.tolist():
+                            failure_records[global_idx] = {
+                                "integration_step": i,
+                                "reason": "nonfinite_state",
+                                "message": "Euclidean ODE step produced a non-finite state",
+                            }
+                    max_abs = stepped.abs().amax(dim=(1, 2))
+                    explosive = finite & (max_abs > 1e6)
+                    unset = explosion_step[active_indices] < 0
+                    if (explosive & unset).any():
+                        explosion_step[active_indices[explosive & unset]] = i
+                x = y
 
             if use_hyperbolic and hyperbolic_model == 'mass_shell':
                 from util.geometry.mass_shell import massless_energy_view
@@ -284,8 +326,6 @@ def generate_samples(
                 shell_x = project_to_shell(x, regulator_mass)
                 x = massless_energy_view(shell_x, masks)
                 prior_x = massless_energy_view(prior_x, masks)
-            else:
-                x = x.clamp(-50, 50)
             scaled_x = final_scale * x * masks.unsqueeze(-1)
             # torch.save(scaled_x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
 
@@ -298,11 +338,10 @@ def generate_samples(
             all_jet_phi.append(jet_phi.cpu())
             all_masks.append(masks.cpu())
             all_internal_prior.append(prior_x.cpu())
-            if use_hyperbolic and hyperbolic_model == 'mass_shell':
-                all_failure_steps.append(failure_step.cpu())
-                all_explosion_steps.append(explosion_step.cpu())
-                all_failure_records.extend(failure_records)
-                all_step_telemetry.extend(step_telemetry)
+            all_failure_steps.append(failure_step.cpu())
+            all_explosion_steps.append(explosion_step.cpu())
+            all_failure_records.extend(failure_records)
+            all_step_telemetry.extend(step_telemetry)
 
     all_samples_cat   = torch.cat(all_samples, dim=0)
     all_prior_samples_cat = torch.cat(all_prior_samples, dim=0)
@@ -395,6 +434,9 @@ def generate_samples(
             },
             "integration_steps": int(integration_steps),
             "integration_end_time": float(integration_end_time),
+            "flow_geometry": "mass_shell" if use_hyperbolic else "euclidean",
+            "sampler": sampler,
+            "sampling_seconds": time.perf_counter() - sampling_start,
             "max_step_rapidity": mass_shell_max_step_rapidity,
             "max_substeps": int(mass_shell_max_substeps),
             "all_trajectory_quantiles": {

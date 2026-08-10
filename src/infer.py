@@ -27,7 +27,7 @@ import hashlib
 import numpy as np
 import torch
 
-from models.mass_shell_gnn import LEFTJeN
+from models.factory import build_flow_model
 from util.data import jet_attributes
 from util.data.jet_attributes import NUM_CLASSES
 from models.stage1 import get_model_pth_path
@@ -72,15 +72,7 @@ def _resolve_architecture(cfg, ckpt):
 
 
 def _load_main_model(cfg, device, preloaded_ckpt=None):
-    model = LEFTJeN(
-        max_num_jet_types=NUM_CLASSES,
-        num_layers=cfg.model.n_layers,
-        hidden_dim=cfg.model.n_hidden,
-        include_pt=True,
-        use_reference_vectors=cfg.model.use_reference_vectors,
-        include_mass_condition=cfg.model.include_mass_condition,
-        regulator_mass=cfg.model.regulator_mass,
-    ).to(device)
+    model = build_flow_model(cfg.model, NUM_CLASSES).to(device)
 
     ckpt = (preloaded_ckpt if preloaded_ckpt is not None else
             torch.load(cfg.paths.checkpoint_path, map_location=device, weights_only=False))
@@ -164,7 +156,7 @@ def main():
                 integration_steps=cfg.inference.integration_steps,
                 use_cfg=True,
                 cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
-                use_hyperbolic=True,
+                use_hyperbolic=cfg.model.flow_geometry == "mass_shell",
                 use_reference_vectors=cfg.model.use_reference_vectors,
             )
             print("CFG vector field done.")
@@ -191,7 +183,7 @@ def main():
                 n_viz_samples=cfg.inference.n_viz_samples,
                 integration_steps=cfg.inference.integration_steps,
                 use_cfg=False,
-                use_hyperbolic=True,
+                use_hyperbolic=cfg.model.flow_geometry == "mass_shell",
                 use_reference_vectors=cfg.model.use_reference_vectors,
             )
             print("No-CFG vector field done.")
@@ -292,6 +284,11 @@ def main():
 
     stage1_path = get_model_pth_path(cfg.paths.output_path)
     resolved_replay = (cfg.paths.replay_bundle_path or os.path.join(out_dir, "replay_bundle.pt"))
+    generation_diagnostics = {}
+    generation_diagnostics_path = os.path.join(out_dir, "generation_diagnostics.json")
+    if os.path.isfile(generation_diagnostics_path):
+        with open(generation_diagnostics_path) as handle:
+            generation_diagnostics = json.load(handle)
 
     summary = {
         "final_loss": train_summary.get("final_loss"),
@@ -307,6 +304,8 @@ def main():
             "mass_shell_max_step_rapidity": cfg.inference.mass_shell_max_step_rapidity,
             "mass_shell_max_substeps": cfg.inference.mass_shell_max_substeps,
             "replay_bundle_path": cfg.paths.replay_bundle_path,
+            "sampling_seconds": generation_diagnostics.get("sampling_seconds"),
+            "sampler_failures": generation_diagnostics.get("n_failed"),
         },
         "git_commit": git_commit,
         "stage_status": stage_status,

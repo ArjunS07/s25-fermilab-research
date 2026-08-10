@@ -9,6 +9,7 @@ Shared by training (``build_checkpoint``/``build_run_config``) and inference
 ARCH_KEYS = (
     "n_hidden", "n_layers", "regulator_mass",
     "use_reference_vectors", "include_mass_condition",
+    "architecture", "flow_geometry", "reference_mode",
 )
 
 
@@ -37,7 +38,10 @@ def build_run_config(cfg, final_scale):
         "use_reference_vectors": cfg.model.use_reference_vectors,
         "include_mass_condition": cfg.model.include_mass_condition,
         "regulator_mass": cfg.model.regulator_mass,
-        "backbone": "mass_shell_gnn",
+        "backbone": cfg.model.architecture,
+        "architecture": cfg.model.architecture,
+        "flow_geometry": cfg.model.flow_geometry,
+        "reference_mode": cfg.model.reference_mode,
         "jet_types": cfg.data.jet_types,
         "final_scale": float(final_scale),
     }

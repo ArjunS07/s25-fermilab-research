@@ -15,7 +15,7 @@ from contextlib import nullcontext
 import random
 from torch.utils.data import DataLoader
 
-from models.mass_shell_gnn import LEFTJeN
+from models.factory import build_flow_model
 from util.data import jet_attributes
 from util.data.jet_attributes import NUM_CLASSES
 from models.stage1 import get_model_pth_path
@@ -136,15 +136,7 @@ if __name__ == "__main__":
     torch.manual_seed(cfg.training.model_seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(cfg.training.model_seed)
-    model: LEFTJeN = LEFTJeN(
-        max_num_jet_types=NUM_CLASSES,
-        num_layers=cfg.model.n_layers,
-        hidden_dim=cfg.model.n_hidden,
-        include_pt=True,
-        use_reference_vectors=cfg.model.use_reference_vectors,
-        include_mass_condition=cfg.model.include_mass_condition,
-        regulator_mass=cfg.model.regulator_mass,
-    ).to(device)
+    model = build_flow_model(cfg.model, NUM_CLASSES).to(device)
     
     start_epoch = 0
     resume_minibatch = 0
@@ -191,7 +183,8 @@ if __name__ == "__main__":
         prev = checkpoint.get("config")
         if prev is not None:
             mism = {k: (prev.get(k), run_config.get(k))
-                    for k in ("n_layers", "n_hidden", "num_particles",
+                    for k in ("n_layers", "n_hidden", "num_particles", "architecture",
+                              "flow_geometry", "reference_mode",
                               "use_reference_vectors", "include_mass_condition",
                               "regulator_mass")
                     if prev.get(k) != run_config.get(k)}
@@ -699,6 +692,7 @@ if __name__ == "__main__":
         if reached_optimizer_limit:
             break
 
+    training_seconds = round(time.time() - train_start_time, 1)
     if cfg.training.distributed:
         dist.barrier()          # all ranks finish training before rank 0 does inference
         dist.destroy_process_group()
@@ -762,7 +756,7 @@ if __name__ == "__main__":
                         integration_steps=cfg.inference.integration_steps,
                         use_cfg=True,
                         cfg_guidance_weight=2.0,
-                        use_hyperbolic=True,
+                        use_hyperbolic=cfg.model.flow_geometry == "mass_shell",
                         use_reference_vectors=cfg.model.use_reference_vectors,
                     )
                 if run_nocfg_vf:
@@ -779,7 +773,7 @@ if __name__ == "__main__":
                         n_viz_samples=vf_n_viz,
                         integration_steps=cfg.inference.integration_steps,
                         use_cfg=False,
-                        use_hyperbolic=True,
+                        use_hyperbolic=cfg.model.flow_geometry == "mass_shell",
                         use_reference_vectors=cfg.model.use_reference_vectors,
                     )
             except Exception as e:
@@ -942,27 +936,44 @@ if __name__ == "__main__":
                 "git_commit": git_commit,
                 # Provenance/scale knobs useful when comparing runs at a glance.
                 "n_parameters": sum(p.numel() for p in raw_model.parameters()),
-                "train_seconds": round(time.time() - train_start_time, 1),
-                "hyperbolic_model": "mass_shell",
-                "regulator_mass": cfg.model.regulator_mass if (True) else None,
+                "train_seconds": training_seconds,
+                "flow_geometry": cfg.model.flow_geometry,
+                "hyperbolic_model": (
+                    "mass_shell" if cfg.model.flow_geometry == "mass_shell" else None
+                ),
+                "regulator_mass": (
+                    cfg.model.regulator_mass if cfg.model.flow_geometry == "mass_shell" else None
+                ),
                 "effective_prior_dist": cfg.training.prior_dist,
                 "effective_coupling": {
                     "coupling": cfg.training.coupling,
                     "fresh_noise_per_step": True,
-                    "regulator_mass": cfg.model.regulator_mass if (
-                        True) else None,
+                    "regulator_mass": (
+                        cfg.model.regulator_mass
+                        if cfg.model.flow_geometry == "mass_shell" else None
+                    ),
                 },
                 "generation": {
                     "seed": cfg.inference.seed,
                     "use_cfg": bool(cfg.inference.use_cfg),
                     "cfg_guidance_weight": cfg.inference.cfg_guidance_weight,
                     "integration_steps": cfg.inference.integration_steps,
+                    "sampling_seconds": (
+                        generation_diagnostics.get("sampling_seconds")
+                        if generation_diagnostics is not None else None
+                    ),
+                    "sampler_failures": (
+                        generation_diagnostics.get("n_failed")
+                        if generation_diagnostics is not None else None
+                    ),
                 },
                 "config": run_config,
                 "full_config": full_config,
                 "metrics": {k: eval_info.get(k) for k in (
                     "w1m", "w1p", "w1efp", "fpd", "cov_mmd",
                     "frac_negative_energy", "frac_spacelike", "msq_median",
+                    "n_generated_invalid", "frac_generated_invalid",
+                    "n_generated_finite_max_abs_gt_1e6",
                     "isotropy_ks_costheta", "isotropy_ks_costheta_p",
                     "isotropy_ks_phi", "isotropy_ks_phi_p",
                     # FPND is stored per jet type under fpnd_{jet_type} (e.g. fpnd_g).

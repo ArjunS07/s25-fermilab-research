@@ -19,12 +19,27 @@ def test_generation_controls_from_config():
         "regulator_mass": 0.3,
         "use_reference_vectors": True,
         "include_mass_condition": True,
+        "use_hyperbolic": True,
+        "hyperbolic_model": "mass_shell",
         "sampler": "euler",
         "mass_shell_max_step_rapidity": 0.5,
         "mass_shell_max_substeps": 64,
         "integration_end_time": 0.99,
         "prior_dist": "axis_aligned",
     }
+
+
+def test_euclidean_generation_controls_disable_shell_integration():
+    cfg = InferRunConfig(model={
+        "architecture": "lorentznet",
+        "flow_geometry": "euclidean",
+        "reference_mode": "none",
+        "use_reference_vectors": False,
+    })
+    controls = generation_controls_from_config(cfg, "axis_aligned_per_jet")
+    assert controls["use_hyperbolic"] is False
+    assert controls["hyperbolic_model"] == "mass_shell"
+    assert controls["use_reference_vectors"] is False
 
 
 def test_scaled_pt_condition_contract():
