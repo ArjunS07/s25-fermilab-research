@@ -9,7 +9,7 @@ Shared by training (``build_checkpoint``/``build_run_config``) and inference
 ARCH_KEYS = (
     "n_hidden", "n_layers", "regulator_mass",
     "use_reference_vectors", "include_mass_condition",
-    "architecture", "flow_geometry", "reference_mode",
+    "architecture", "flow_geometry", "reference_mode", "scalar_init_mode",
 )
 
 
@@ -42,6 +42,7 @@ def build_run_config(cfg, final_scale):
         "architecture": cfg.model.architecture,
         "flow_geometry": cfg.model.flow_geometry,
         "reference_mode": cfg.model.reference_mode,
+        "scalar_init_mode": cfg.model.scalar_init_mode,
         "jet_types": cfg.data.jet_types,
         "final_scale": float(final_scale),
     }

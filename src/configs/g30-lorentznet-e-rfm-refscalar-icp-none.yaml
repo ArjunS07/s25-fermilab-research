@@ -1,0 +1,55 @@
+# E: RFM with invariant (e_t, p_J) scalar initialization, ICP, no reference readout.
+data: {jet_types: [g], num_particles: 30}
+model:
+  architecture: lorentznet
+  flow_geometry: mass_shell
+  reference_mode: none
+  scalar_init_mode: reference_contractions
+  use_reference_vectors: true
+  n_hidden: 96
+  n_layers: 6
+  include_mass_condition: true
+  regulator_mass: 0.1
+training:
+  n_train_samples: 1000000
+  batch_size: 50
+  target_batch_size: 250
+  cfg_null_dropout_rate: 0.0
+  num_epochs: 1000
+  max_optimizer_steps: 200000
+  stability_probe_steps: [0, 20000, 40000, 80000, 150000, 200000]
+  stability_probe_save_checkpoints: true
+  time_sampling: uniform
+  use_time_sampling: false
+  use_curriculum: false
+  prior_dist: axis_aligned_equal
+  coupling: online_geodesic_icp
+  use_ema: true
+  ema_decay: 0.999
+  lr: 0.0006
+  weight_decay: 0.000001
+  use_cosine_lr: true
+  lr_schedule: monotonic_cosine
+  lr_step_unit: optimizer_step
+  lr_warmup_steps: 2000
+  eta_min_factor: 0.03
+  model_seed: 42
+  data_order_seed: 1042
+  time_seed: 2042
+  dropout_seed: 3042
+  prior_seed: 4042
+inference:
+  n_samples: 50000
+  batch_size: 128
+  integration_steps: 64
+  integration_end_time: 0.99999
+  prior_dist: axis_aligned_equal
+  sampler: euler
+  seed: 42
+  use_cfg: false
+  use_ema_weights: true
+  mass_shell_max_step_rapidity: 0.5
+  mass_shell_max_substeps: 64
+  warn_invalid_fraction: 0.0
+  max_invalid_fraction: 0.001
+paths: {cache_dir: /mnt/data/caches}

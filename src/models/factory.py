@@ -23,6 +23,7 @@ def build_flow_model(model_config, max_num_jet_types: int):
             **common,
             flow_geometry=model_config.flow_geometry,
             reference_mode=model_config.reference_mode,
+            scalar_init_mode=model_config.scalar_init_mode,
         )
     raise ValueError(f"unknown model architecture: {model_config.architecture!r}")
 

@@ -27,6 +27,7 @@ def test_train_defaults():
     assert cfg.model.architecture == "mass_shell_gnn"
     assert cfg.model.flow_geometry == "mass_shell"
     assert cfg.model.reference_mode == "plain_readout"
+    assert cfg.model.scalar_init_mode == "normsq"
     assert cfg.model.use_reference_vectors is True
     assert cfg.model.include_mass_condition is True
     assert cfg.training.n_train_samples == 1_000_000
@@ -135,6 +136,47 @@ def test_lorentznet_reference_flag_must_match_mode():
             "architecture": "lorentznet", "reference_mode": "plain_readout",
             "use_reference_vectors": False,
         })
+
+
+def test_reference_contraction_scalar_init_requires_references_without_readout():
+    cfg = TrainRunConfig(model={
+        "architecture": "lorentznet",
+        "flow_geometry": "mass_shell",
+        "reference_mode": "none",
+        "scalar_init_mode": "reference_contractions",
+        "use_reference_vectors": True,
+    })
+    assert cfg.model.reference_mode == "none"
+    assert cfg.model.scalar_init_mode == "reference_contractions"
+    assert cfg.model.use_reference_vectors is True
+    with pytest.raises(ValidationError):
+        TrainRunConfig(model={
+            "architecture": "lorentznet",
+            "reference_mode": "none",
+            "scalar_init_mode": "reference_contractions",
+            "use_reference_vectors": False,
+        })
+
+
+def test_reference_contraction_scalar_init_rejected_for_mass_shell_gnn():
+    with pytest.raises(ValidationError):
+        TrainRunConfig(model={"scalar_init_mode": "reference_contractions"})
+
+
+@pytest.mark.parametrize("filename,reference_mode", [
+    ("g30-lorentznet-e-rfm-refscalar-icp-none.yaml", "none"),
+    ("g30-lorentznet-f-rfm-refscalar-icp-refs.yaml", "plain_readout"),
+])
+def test_reference_scalar_icp_experiment_configs_validate(filename, reference_mode):
+    path = os.path.join(os.path.dirname(__file__), "..", "configs", filename)
+    cfg = build_config(TrainRunConfig, path)
+    assert cfg.model.flow_geometry == "mass_shell"
+    assert cfg.model.scalar_init_mode == "reference_contractions"
+    assert cfg.model.reference_mode == reference_mode
+    assert cfg.model.use_reference_vectors is True
+    assert cfg.training.coupling == "online_geodesic_icp"
+    assert cfg.training.prior_dist == "axis_aligned_equal"
+    assert cfg.inference.prior_dist == "axis_aligned_equal"
 
 
 @pytest.mark.parametrize("field", ["n_hidden", "n_layers"])
@@ -274,4 +316,3 @@ def test_parse_config_cli_no_args():
     config_path, overrides = parse_config_cli([])
     assert config_path is None
     assert overrides == []
-

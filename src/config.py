@@ -37,6 +37,7 @@ class ModelConfig(BaseModel):
     architecture: Literal["mass_shell_gnn", "lorentznet"] = "mass_shell_gnn"
     flow_geometry: Literal["euclidean", "mass_shell"] = "mass_shell"
     reference_mode: Literal["none", "plain_readout"] = "plain_readout"
+    scalar_init_mode: Literal["normsq", "reference_contractions"] = "normsq"
     # Shell mass in normalised units (momenta are O(1) after final_scale). The mass-shell
     # regulator: smaller = more massless/relativistic but numerically stiffer. Runs use 0.1.
     regulator_mass: float = 0.5
@@ -58,12 +59,20 @@ class ModelConfig(BaseModel):
                 raise ValueError(
                     "model.include_mass_condition must be true (mass-shell GNN contract)"
                 )
+            if self.scalar_init_mode != "normsq":
+                raise ValueError(
+                    "model.scalar_init_mode is only configurable for LorentzNet"
+                )
         else:
-            expects_references = self.reference_mode == "plain_readout"
+            expects_references = (
+                self.reference_mode == "plain_readout"
+                or self.scalar_init_mode == "reference_contractions"
+            )
             if self.use_reference_vectors != expects_references:
                 raise ValueError(
-                    "LorentzNet use_reference_vectors must match reference_mode: "
-                    "false for none, true for plain_readout"
+                    "LorentzNet use_reference_vectors must be true when either "
+                    "plain_readout or reference_contractions needs references, and "
+                    "false otherwise"
                 )
         return self
 

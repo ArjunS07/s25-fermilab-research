@@ -110,11 +110,15 @@ class LorentzNetBackbone(nn.Module):
         width: int = 96,
         num_layers: int = 6,
         reference_mode: str = "none",
+        scalar_init_mode: str = "normsq",
     ):
         super().__init__()
         if reference_mode not in {"none", "plain_readout"}:
             raise ValueError(f"unknown LorentzNet reference mode: {reference_mode!r}")
+        if scalar_init_mode not in {"normsq", "reference_contractions"}:
+            raise ValueError(f"unknown LorentzNet scalar init mode: {scalar_init_mode!r}")
         self.reference_mode = reference_mode
+        self.scalar_init_mode = scalar_init_mode
         self.condition_embed = nn.Sequential(
             nn.Linear(condition_dim, width), nn.SiLU(), nn.Linear(width, width)
         )
@@ -122,7 +126,9 @@ class LorentzNetBackbone(nn.Module):
             nn.Linear(3, width), nn.SiLU(), nn.Linear(width, width)
         )
         self.node_seed = nn.Sequential(
-            nn.Linear(1, width), nn.SiLU(), nn.Linear(width, width)
+            nn.Linear(2 if scalar_init_mode == "reference_contractions" else 1, width),
+            nn.SiLU(),
+            nn.Linear(width, width),
         )
         self.blocks = nn.ModuleList([LorentzNetLGEB(width) for _ in range(num_layers)])
 
@@ -141,6 +147,50 @@ class LorentzNetBackbone(nn.Module):
             )
             _zero_linear(self.reference_mlp[-1])
 
+    @property
+    def needs_references(self) -> bool:
+        return (
+            self.reference_mode == "plain_readout"
+            or self.scalar_init_mode == "reference_contractions"
+        )
+
+    def initial_scalar_state(
+        self,
+        y: torch.Tensor,
+        t: torch.Tensor,
+        conditions: torch.Tensor,
+        mask: torch.Tensor,
+        references: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Construct h^0 using the selected invariant particle seed."""
+        dtype = next(self.parameters()).dtype
+        cond_embedding = self.condition_embed(conditions.to(dtype))
+        time_features = torch.stack(
+            (t, torch.sin(torch.pi * t), torch.cos(torch.pi * t)), dim=-1
+        )
+        time_embedding = self.time_embed(time_features.to(dtype))
+        if self.scalar_init_mode == "reference_contractions":
+            if references is None or references.shape[1] != 2:
+                raise ValueError(
+                    "reference_contractions requires ordered (e_t, jet_p4) references"
+                )
+            seed = signed_log(
+                dotsq4(y.unsqueeze(2), references.to(dtype).unsqueeze(1))
+            )
+            h = (
+                self.node_seed(seed)
+                - time_embedding.unsqueeze(1)
+                + cond_embedding.unsqueeze(1)
+            )
+        else:
+            seed = signed_log(normsq4(y)).unsqueeze(-1)
+            h = (
+                self.node_seed(seed)
+                + time_embedding.unsqueeze(1)
+                + cond_embedding.unsqueeze(1)
+            )
+        return h * mask.unsqueeze(-1).to(dtype)
+
     def forward(
         self,
         x: torch.Tensor,
@@ -149,21 +199,17 @@ class LorentzNetBackbone(nn.Module):
         mask: torch.Tensor,
         references: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        if self.reference_mode == "plain_readout":
+        if self.needs_references:
             if references is None or references.shape[1] != 2:
-                raise ValueError("plain_readout requires ordered (e_t, jet_p4) references")
+                raise ValueError(
+                    "configured LorentzNet requires ordered (e_t, jet_p4) references"
+                )
         elif references is not None:
-            raise ValueError("reference vectors were supplied with reference_mode='none'")
+            raise ValueError("reference vectors were supplied but no model path uses them")
 
         dtype = next(self.parameters()).dtype
         y = x.to(dtype) * mask.unsqueeze(-1).to(dtype)
-        cond = self.condition_embed(conditions.to(dtype))
-        time_features = torch.stack(
-            (t, torch.sin(torch.pi * t), torch.cos(torch.pi * t)), dim=-1
-        )
-        scalar_context = cond + self.time_embed(time_features.to(dtype))
-        h = self.node_seed(signed_log(normsq4(y)).unsqueeze(-1)) + scalar_context.unsqueeze(1)
-        h = h * mask.unsqueeze(-1).to(dtype)
+        h = self.initial_scalar_state(y, t, conditions, mask, references)
 
         for block in self.blocks:
             h, y = block(h, y, mask)
@@ -207,6 +253,7 @@ class LorentzNetFlow(nn.Module):
         regulator_mass: float = 0.1,
         flow_geometry: str = "euclidean",
         reference_mode: str = "none",
+        scalar_init_mode: str = "normsq",
     ):
         super().__init__()
         if flow_geometry not in {"euclidean", "mass_shell"}:
@@ -216,10 +263,11 @@ class LorentzNetFlow(nn.Module):
         self.regulator_mass = float(regulator_mass)
         self.flow_geometry = flow_geometry
         self.reference_mode = reference_mode
+        self.scalar_init_mode = scalar_init_mode
         self.backbone_name = "lorentznet"
         self.null_cond = nn.Parameter(torch.zeros(condition_dim))
         self.lorentznet_backbone = LorentzNetBackbone(
-            condition_dim, width, num_layers, reference_mode
+            condition_dim, width, num_layers, reference_mode, scalar_init_mode
         )
 
     def make_null_cond(self, conditions: torch.Tensor) -> torch.Tensor:
@@ -281,6 +329,7 @@ def build_lorentznet(
     regulator_mass: float = 0.1,
     flow_geometry: str = "euclidean",
     reference_mode: str = "none",
+    scalar_init_mode: str = "normsq",
 ) -> LorentzNetFlow:
     condition_dim = (
         max_num_jet_types + 1 + int(include_pt) + int(include_mass_condition)
@@ -293,6 +342,7 @@ def build_lorentznet(
         regulator_mass=regulator_mass,
         flow_geometry=flow_geometry,
         reference_mode=reference_mode,
+        scalar_init_mode=scalar_init_mode,
     )
 
 

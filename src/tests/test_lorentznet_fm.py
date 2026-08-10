@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from models.lorentznet_flow import build_lorentznet
+from models.lorentznet_flow import build_lorentznet, signed_log
 from tests.lorentz_test_utils import apply_transform, random_proper_transform
 from training import flow_matching_loss
 from training.euclidean import euclidean_interpolant_and_target
@@ -17,12 +17,19 @@ from util.geometry.minkowski_utils import dotsq4
 MASS = 1.0
 
 
-def _model(geometry="euclidean", references="none", seed=17, activate_head=True):
+def _model(
+    geometry="euclidean",
+    references="none",
+    seed=17,
+    activate_head=True,
+    scalar_init_mode="normsq",
+):
     torch.manual_seed(seed)
     model = build_lorentznet(
         5, num_layers=2, hidden_dim=24, include_pt=True,
         include_mass_condition=True, regulator_mass=MASS,
         flow_geometry=geometry, reference_mode=references,
+        scalar_init_mode=scalar_init_mode,
     ).double()
     if activate_head:
         # The production field starts at exactly zero.  Activate its invariant
@@ -85,6 +92,60 @@ def test_plain_reference_readout_is_jointly_lorentz_equivariant():
         apply_transform(refs, transform),
     )
     assert torch.allclose(transformed, apply_transform(field, transform), atol=2e-8, rtol=2e-8)
+
+
+def test_reference_contraction_scalar_init_matches_requested_formula():
+    model = _model(
+        "mass_shell", "none", activate_head=False,
+        scalar_init_mode="reference_contractions",
+    ).eval()
+    x, t, conditions, mask, refs = _inputs(on_shell=True)
+    y = x * mask.unsqueeze(-1)
+    backbone = model.lorentznet_backbone
+    actual = backbone.initial_scalar_state(y, t, conditions, mask, refs)
+    contractions = signed_log(dotsq4(y.unsqueeze(2), refs.unsqueeze(1)))
+    time_features = torch.stack(
+        (t, torch.sin(torch.pi * t), torch.cos(torch.pi * t)), dim=-1
+    )
+    expected = (
+        backbone.node_seed(contractions)
+        - backbone.time_embed(time_features).unsqueeze(1)
+        + backbone.condition_embed(conditions).unsqueeze(1)
+    ) * mask.unsqueeze(-1)
+    assert torch.equal(actual, expected)
+
+
+def test_reference_contraction_scalar_state_is_jointly_lorentz_invariant():
+    model = _model(
+        "mass_shell", "none", activate_head=False,
+        scalar_init_mode="reference_contractions",
+    ).eval()
+    x, t, conditions, mask, refs = _inputs(on_shell=True)
+    y = x * mask.unsqueeze(-1)
+    transform = random_proper_transform(14)
+    backbone = model.lorentznet_backbone
+    initial = backbone.initial_scalar_state(y, t, conditions, mask, refs)
+    transformed = backbone.initial_scalar_state(
+        apply_transform(y, transform), t, conditions, mask,
+        apply_transform(refs, transform),
+    )
+    assert torch.allclose(transformed, initial, atol=2e-8, rtol=2e-8)
+
+
+@pytest.mark.parametrize("references", ["none", "plain_readout"])
+def test_reference_contraction_rfm_field_is_jointly_equivariant(references):
+    model = _model(
+        "mass_shell", references,
+        scalar_init_mode="reference_contractions",
+    ).eval()
+    x, t, conditions, mask, refs = _inputs(on_shell=True)
+    transform = random_proper_transform(15)
+    field = model(x, t, conditions, mask, refs)
+    transformed = model(
+        apply_transform(x, transform), t, conditions, mask,
+        apply_transform(refs, transform),
+    )
+    assert torch.allclose(transformed, apply_transform(field, transform), atol=3e-8, rtol=3e-8)
 
 
 def test_rfm_output_is_tangent():
@@ -200,8 +261,64 @@ def test_mass_shell_sampling_smoke_stays_on_shell():
     assert torch.allclose(residual[mask > 0], torch.zeros_like(residual[mask > 0]), atol=2e-9)
 
 
+@pytest.mark.parametrize("references", ["none", "plain_readout"])
+def test_reference_contraction_rfm_forward_backward_and_sampling(references):
+    model = _model(
+        "mass_shell", references,
+        scalar_init_mode="reference_contractions",
+    ).train()
+    x0, t, conditions, mask, refs = _inputs()
+    x1 = torch.randn_like(x0) * mask.unsqueeze(-1)
+    loss = flow_matching_loss(
+        model=model,
+        raw_model=model,
+        config=SimpleNamespace(flow_geometry="mass_shell", regulator_mass=MASS),
+        x0=x0,
+        x1=x1,
+        t=t,
+        mask=mask,
+        conditions=conditions,
+        references=refs,
+    )
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert all(
+        parameter.grad is None or torch.isfinite(parameter.grad).all()
+        for parameter in model.parameters()
+    )
+
+    model.eval()
+    shell = project_to_shell(x0, MASS)
+    stepped = model.step_hyperbolic(
+        shell,
+        conditions,
+        mask,
+        torch.tensor(0.0, dtype=torch.float64),
+        torch.tensor(0.1, dtype=torch.float64),
+        ref_vectors=refs,
+        hyperbolic_model="mass_shell",
+        regulator_mass=MASS,
+    )
+    residual = dotsq4(stepped, stepped) - MASS**2
+    assert torch.isfinite(stepped).all()
+    assert torch.allclose(
+        residual[mask > 0], torch.zeros_like(residual[mask > 0]), atol=2e-9
+    )
+
+
 def test_requested_width96_parameter_counts_are_in_budget():
     none = build_lorentznet(5, hidden_dim=96, num_layers=6, reference_mode="none")
     refs = build_lorentznet(5, hidden_dim=96, num_layers=6, reference_mode="plain_readout")
     assert sum(p.numel() for p in none.parameters()) == 441_621
     assert sum(p.numel() for p in refs.parameters()) == 451_319
+
+    contraction_none = build_lorentznet(
+        5, hidden_dim=96, num_layers=6, reference_mode="none",
+        scalar_init_mode="reference_contractions",
+    )
+    contraction_refs = build_lorentznet(
+        5, hidden_dim=96, num_layers=6, reference_mode="plain_readout",
+        scalar_init_mode="reference_contractions",
+    )
+    assert sum(p.numel() for p in contraction_none.parameters()) == 441_717
+    assert sum(p.numel() for p in contraction_refs.parameters()) == 451_415

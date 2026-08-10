@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-smoke-g30-lnet-refscalar-icp-f}
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
+                echo "ERROR: pin GIT_COMMIT before launching reference-scalar ICP smoke F"
+                exit 1
+              fi
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-lnet-refscalar-icp-f-smoke"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              tar -xf /mnt/data/caches/runtime/python-env-py310-torch271.tar -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 --model-version v3
+              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+                --config configs/g30-lorentznet-f-rfm-refscalar-icp-refs.yaml \
+                --set paths.output_path="$OUT" \
+                --set training.num_epochs=1 --set training.max_optimizer_steps=20 \
+                --set training.stability_probe_steps="[0,20]" \
+                --set training.use_cosine_lr=false --set training.lr=0.0001 \
+                --set training.lr_warmup_steps=0 \
+                --set inference.n_samples=64 --set inference.integration_steps=8 \
+                --set inference.stability_probe_samples=32 \
+                --set inference.max_invalid_fraction=0 \
+                --set inference.fail_on_qualification_error=true \
+                --set inference.skip_metrics=true
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 24Gi}
