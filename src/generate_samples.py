@@ -162,6 +162,11 @@ def generate_samples(
             gen_mass = generated_jet_attrs[:, 7].to(device)
             gen_n_particles = generated_jet_attrs[:, -1].long().to(device)
             gen_n_particles = gen_n_particles.clamp(max=max_particles_per_jet)
+            masks = jet_attributes.generate_masks(
+                gen_n_particles,
+                max_particles_per_jet=max_particles_per_jet,
+                device=device,
+            )
 
             # Build jet_features for priors that need jet-axis info.
             jet_features = None
@@ -170,7 +175,10 @@ def generate_samples(
                 if replay_bundle is None else
                 replay_bundle["jet_phi"][start_idx:start_idx + current_batch_size].to(device)
             )
-            if prior_dist in ('axis_aligned', 'axis_aligned_per_jet', 'jet_ref_frame'):
+            if prior_dist in (
+                'axis_aligned', 'axis_aligned_per_jet', 'axis_aligned_equal',
+                'jet_ref_frame',
+            ):
                 gen_eta = generated_jet_attrs[:, 5].to(device)
                 gen_pt_prior = gen_pt
                 jet_features = torch.stack([gen_eta, gen_pt_prior], dim=-1)
@@ -184,13 +192,8 @@ def generate_samples(
                     jet_phi=jet_phi,
                     device=device,
                     model_scale=final_scale,
+                    particle_mask=masks,
                 ).to(device)
-
-            masks = jet_attributes.generate_masks(
-                gen_n_particles,
-                max_particles_per_jet=max_particles_per_jet,
-                device=device
-            )
             if replay_bundle is not None:
                 saved_masks = replay_bundle["masks"][
                     start_idx:start_idx + current_batch_size

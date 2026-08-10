@@ -105,7 +105,7 @@ class TrainingConfig(BaseModel):
 
     prior_dist: Literal[
         "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned",
-        "axis_aligned_per_jet"
+        "axis_aligned_per_jet", "axis_aligned_equal"
     ] = "isotropic_com"
 
     # Fresh-noise coupling applied online each step (no frozen cache → no path
@@ -181,7 +181,7 @@ class InferenceConfig(BaseModel):
     skip_metrics: bool = False
     prior_dist: Literal[
         "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned",
-        "axis_aligned_per_jet"
+        "axis_aligned_per_jet", "axis_aligned_equal"
     ] = "isotropic_com"
 
     @model_validator(mode="after")

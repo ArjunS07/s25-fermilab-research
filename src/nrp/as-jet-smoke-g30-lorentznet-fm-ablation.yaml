@@ -51,6 +51,7 @@ items:
                     --set training.num_epochs=1 --set training.max_optimizer_steps=20 \
                     --set training.stability_probe_steps="[0,20]" \
                     --set training.use_cosine_lr=false --set training.lr=0.0001 \
+                    --set training.lr_warmup_steps=0 \
                     --set inference.n_samples=64 --set inference.integration_steps=8 \
                     --set inference.stability_probe_samples=32 \
                     --set inference.max_invalid_fraction=0 \

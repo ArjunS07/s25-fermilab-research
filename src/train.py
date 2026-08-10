@@ -512,7 +512,7 @@ if __name__ == "__main__":
                 x_0 = gen_initial_distribution(
                     x_1=x_1, prior_dist=cfg.training.prior_dist,
                     jet_features=batch_jet_info, jet_phi=batch_jet_phi.to(device),
-                    device=device, model_scale=final_scale,
+                    device=device, model_scale=final_scale, particle_mask=true_masks,
                 ).to(device)
             # Online geodesic ICP coupling on the freshly drawn noise (minibatch OT-CFM).
             if cfg.training.coupling == "online_geodesic_icp":

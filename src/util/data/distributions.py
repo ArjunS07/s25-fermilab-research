@@ -2,7 +2,10 @@ import torch
 from util.geometry.coordinates import eta_phi_pt_e_to_cartesian
 
 
-def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, prior_dist='isotropic_com', jet_features=None, jet_phi=None, device='cpu', model_scale=None):
+def gen_initial_distribution(x_1=None, batch_size=None, num_particles=None,
+                             prior_dist='isotropic_com', jet_features=None,
+                             jet_phi=None, device='cpu', model_scale=None,
+                             particle_mask=None):
 
     if x_1 is not None:
         batch_size, num_particles = x_1.shape[:2]
@@ -116,6 +119,56 @@ def gen_initial_distribution(x_1 = None, batch_size = None, num_particles=None, 
         energy = pt * torch.cosh(eta)
         particles = eta_phi_pt_e_to_cartesian(torch.stack([eta, phi, pt, energy], dim=-1))
         return particles / float(model_scale)
+
+    elif prior_dist == 'axis_aligned_equal':
+        # Simple conditioned-axis prior: equal pT shares over real particles, followed by
+        # one per-jet scalar correction so the transverse vector sum matches conditioned pT.
+        # It deliberately carries no fragmentation hierarchy or conditioned jet mass.
+        if jet_features is None or model_scale is None or particle_mask is None:
+            raise ValueError(
+                "axis_aligned_equal requires jet_features, model_scale, and particle_mask"
+            )
+        if float(model_scale) <= 0:
+            raise ValueError("model_scale must be positive")
+        device = jet_features.device
+        real = particle_mask.to(device=device, dtype=jet_features.dtype)
+        if real.shape != (batch_size, num_particles):
+            raise ValueError(
+                "particle_mask shape must equal (batch_size, num_particles); "
+                f"got {tuple(real.shape)}"
+            )
+        multiplicity = real.sum(dim=1, keepdim=True)
+        if (multiplicity < 1).any():
+            raise ValueError("axis_aligned_equal requires at least one real particle per jet")
+
+        jet_eta = jet_features[:, 0]
+        jet_pt = jet_features[:, 1]
+        phi0 = (
+            (2 * torch.pi) * torch.rand(batch_size, device=device)
+            if jet_phi is None else jet_phi.to(device)
+        )
+        # Draw both offsets together so a jet's sample is unchanged when unrelated jets
+        # are appended to the batch under the same RNG seed.
+        angular_offsets = 0.15 * torch.randn(
+            batch_size, num_particles, 2, device=device, dtype=jet_features.dtype
+        )
+        eta = jet_eta.unsqueeze(1) + angular_offsets[..., 0]
+        phi = phi0.unsqueeze(1) + angular_offsets[..., 1]
+        equal_weight = real / multiplicity
+        transverse_unit_sum = torch.stack(
+            (
+                (equal_weight * torch.cos(phi)).sum(dim=1),
+                (equal_weight * torch.sin(phi)).sum(dim=1),
+            ),
+            dim=-1,
+        )
+        resultant = torch.linalg.vector_norm(transverse_unit_sum, dim=-1).clamp_min(1e-4)
+        pt = equal_weight * (jet_pt / resultant).unsqueeze(1)
+        energy = pt * torch.cosh(eta)
+        particles = eta_phi_pt_e_to_cartesian(
+            torch.stack((eta, phi, pt, energy), dim=-1)
+        )
+        return (particles / float(model_scale)) * real.unsqueeze(-1)
 
     else:
         raise ValueError(f"Unknown prior_dist: {prior_dist}")

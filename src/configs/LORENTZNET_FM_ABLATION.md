@@ -13,7 +13,7 @@ readout.
 
 All use six LGEB blocks at width 96, one million gluon-30 training examples per
 epoch stream, a 200,000 optimizer-step cap, effective batch 250 on one GPU, the
-same five RNG streams, the per-jet axis-aligned prior, no ICP/coupling, EMA, and
+same five RNG streams, the equal-share axis-aligned prior, no ICP/coupling, EMA, and
 64 Euler sampling steps for 50,000 evaluation jets.
 
 The Euclidean objective is ordinary masked component-wise MSE. It is frame
@@ -30,3 +30,8 @@ residual has a fixed 1e-2 scale. The learned field head is shared across geometr
 and explicitly includes self vectors. The optional reference head directly emits
 the ordered `(e_t, jet_p4)` coefficients, without role embeddings or reference
 tokens.
+
+The `axis_aligned_equal` prior uses the conditioned jet axis and equal pT shares
+over real particles only. One per-jet scalar correction makes the real-particle
+transverse vector sum exactly match conditioned jet pT. It contains no random
+fragmentation logits, target matching, or batch-level normalization.

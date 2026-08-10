@@ -21,7 +21,7 @@ training:
   time_sampling: uniform
   use_time_sampling: false
   use_curriculum: false
-  prior_dist: axis_aligned_per_jet
+  prior_dist: axis_aligned_equal
   coupling: none
   use_ema: true
   ema_decay: 0.999
@@ -42,7 +42,7 @@ inference:
   batch_size: 128
   integration_steps: 64
   integration_end_time: 0.99999
-  prior_dist: axis_aligned_per_jet
+  prior_dist: axis_aligned_equal
   sampler: euler
   mass_shell_max_step_rapidity: 0.5
   mass_shell_max_substeps: 64
