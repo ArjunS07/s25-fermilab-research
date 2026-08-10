@@ -17,13 +17,26 @@ from util.geometry.minkowski_utils import dotsq4
 MASS = 1.0
 
 
-def _model(geometry="euclidean", references="none", seed=17):
+def _model(geometry="euclidean", references="none", seed=17, activate_head=True):
     torch.manual_seed(seed)
-    return build_lorentznet(
+    model = build_lorentznet(
         5, num_layers=2, hidden_dim=24, include_pt=True,
         include_mass_condition=True, regulator_mass=MASS,
         flow_geometry=geometry, reference_mode=references,
     ).double()
+    if activate_head:
+        # The production field starts at exactly zero.  Activate its invariant
+        # coefficient heads here so the covariance tests exercise nonzero vectors.
+        generator = torch.Generator().manual_seed(seed + 10_000)
+        with torch.no_grad():
+            model.lorentznet_backbone.field_mlp[-1].weight.normal_(
+                std=1e-3, generator=generator
+            )
+            if references == "plain_readout":
+                model.lorentznet_backbone.reference_mlp[-1].weight.normal_(
+                    std=1e-3, generator=generator
+                )
+    return model
 
 
 def _inputs(on_shell=False):
@@ -49,6 +62,17 @@ def test_raw_euclidean_vector_field_is_lorentz_equivariant():
     field = model.raw_field(x, t, conditions, mask)
     transformed = model.raw_field(apply_transform(x, transform), t, conditions, mask)
     assert torch.allclose(transformed, apply_transform(field, transform), atol=2e-8, rtol=2e-8)
+
+
+@pytest.mark.parametrize("references", ["none", "plain_readout"])
+def test_vector_field_starts_at_exactly_zero(references):
+    model = _model(references=references, activate_head=False).eval()
+    x, t, conditions, mask, refs = _inputs()
+    refs = refs if references == "plain_readout" else None
+    assert torch.equal(
+        model.raw_field(x, t, conditions, mask, refs),
+        torch.zeros_like(x),
+    )
 
 
 def test_plain_reference_readout_is_jointly_lorentz_equivariant():

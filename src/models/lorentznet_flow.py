@@ -32,6 +32,13 @@ def _small_normal(layer: nn.Linear, std: float = 1e-3) -> None:
         nn.init.zeros_(layer.bias)
 
 
+def _zero_linear(layer: nn.Linear) -> None:
+    """Start a field contribution at exactly zero without freezing its parameters."""
+    nn.init.zeros_(layer.weight)
+    if layer.bias is not None:
+        nn.init.zeros_(layer.bias)
+
+
 def _pair_invariants(y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Return signed-log ((y_i-y_j)^2, <y_i,y_j>) for every ordered pair."""
     yi = y.unsqueeze(2)
@@ -122,13 +129,17 @@ class LorentzNetBackbone(nn.Module):
         self.field_mlp = nn.Sequential(
             nn.Linear(2 * width + 2, width), nn.SiLU(), nn.Linear(width, 1)
         )
-        _small_normal(self.field_mlp[-1])
+        # An ambient coefficient that is merely small can still become a very large
+        # tangent vector after projection on a small-mass shell.  Exact zero
+        # initialization gives both FM adapters the same benign initial vector field;
+        # gradients still reach this final layer on the first optimizer step.
+        _zero_linear(self.field_mlp[-1])
         if reference_mode == "plain_readout":
             # Ordered outputs are (e_t, jet_p4); role embeddings/tokens are unnecessary.
             self.reference_mlp = nn.Sequential(
                 nn.Linear(width + 2, width), nn.SiLU(), nn.Linear(width, 2)
             )
-            _small_normal(self.reference_mlp[-1])
+            _zero_linear(self.reference_mlp[-1])
 
     def forward(
         self,
