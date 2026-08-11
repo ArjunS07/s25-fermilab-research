@@ -36,8 +36,15 @@ class ModelConfig(BaseModel):
     n_layers: int = Field(default=3, ge=1)
     architecture: Literal["mass_shell_gnn", "lorentznet"] = "mass_shell_gnn"
     flow_geometry: Literal["euclidean", "mass_shell"] = "mass_shell"
-    reference_mode: Literal["none", "plain_readout"] = "plain_readout"
+    reference_mode: Literal[
+        "none", "plain_readout", "normalized_tangent_readout"
+    ] = "plain_readout"
     scalar_init_mode: Literal["normsq", "reference_contractions"] = "normsq"
+    particle_readout_mode: Literal["ambient", "normalized_logmap"] = "ambient"
+    geometry_mode: Literal["evolving_auxiliary", "fixed_physical_geodesic"] = (
+        "evolving_auxiliary"
+    )
+    field_degree_normalization: Literal["none", "sqrt"] = "none"
     # Shell mass in normalised units (momenta are O(1) after final_scale). The mass-shell
     # regulator: smaller = more massless/relativistic but numerically stiffer. Runs use 0.1.
     regulator_mass: float = 0.5
@@ -63,9 +70,19 @@ class ModelConfig(BaseModel):
                 raise ValueError(
                     "model.scalar_init_mode is only configurable for LorentzNet"
                 )
+            if self.particle_readout_mode != "ambient":
+                raise ValueError(
+                    "model.particle_readout_mode is only configurable for LorentzNet"
+                )
+            if self.geometry_mode != "evolving_auxiliary":
+                raise ValueError("model.geometry_mode is only configurable for LorentzNet")
+            if self.field_degree_normalization != "none":
+                raise ValueError(
+                    "model.field_degree_normalization is only configurable for LorentzNet"
+                )
         else:
             expects_references = (
-                self.reference_mode == "plain_readout"
+                self.reference_mode != "none"
                 or self.scalar_init_mode == "reference_contractions"
             )
             if self.use_reference_vectors != expects_references:
@@ -73,6 +90,21 @@ class ModelConfig(BaseModel):
                     "LorentzNet use_reference_vectors must be true when either "
                     "plain_readout or reference_contractions needs references, and "
                     "false otherwise"
+                )
+            needs_shell_geometry = (
+                self.reference_mode == "normalized_tangent_readout"
+                or self.particle_readout_mode == "normalized_logmap"
+                or self.geometry_mode == "fixed_physical_geodesic"
+            )
+            if needs_shell_geometry and self.flow_geometry != "mass_shell":
+                raise ValueError(
+                    "normalized tangent/log-map readouts and fixed physical geometry "
+                    "require flow_geometry='mass_shell'"
+                )
+            if (self.field_degree_normalization == "sqrt"
+                    and self.particle_readout_mode != "normalized_logmap"):
+                raise ValueError(
+                    "sqrt field-degree normalization requires normalized_logmap readout"
                 )
         return self
 
@@ -114,7 +146,7 @@ class TrainingConfig(BaseModel):
 
     prior_dist: Literal[
         "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned",
-        "axis_aligned_per_jet", "axis_aligned_equal"
+        "axis_aligned_per_jet", "axis_aligned_equal", "axis_aligned_lognormal"
     ] = "isotropic_com"
 
     # Fresh-noise coupling applied online each step (no frozen cache → no path
@@ -190,7 +222,7 @@ class InferenceConfig(BaseModel):
     skip_metrics: bool = False
     prior_dist: Literal[
         "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned",
-        "axis_aligned_per_jet", "axis_aligned_equal"
+        "axis_aligned_per_jet", "axis_aligned_equal", "axis_aligned_lognormal"
     ] = "isotropic_com"
 
     @model_validator(mode="after")

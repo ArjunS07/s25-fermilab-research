@@ -4,14 +4,15 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+import torch.nn as nn
 
-from models.lorentznet_flow import build_lorentznet, signed_log
+from models.lorentznet_flow import LorentzNetLGEB, build_lorentznet, signed_log
 from tests.lorentz_test_utils import apply_transform, random_proper_transform
 from training import flow_matching_loss
 from training.euclidean import euclidean_interpolant_and_target
-from util.geometry.mass_shell import project_to_shell
+from util.geometry.mass_shell import log_map, project_to_shell, pushforward_to_tangent
 from util.geometry.euclidean import euclidean_ode_step
-from util.geometry.minkowski_utils import dotsq4
+from util.geometry.minkowski_utils import dotsq4, normsq4
 
 
 MASS = 1.0
@@ -23,6 +24,9 @@ def _model(
     seed=17,
     activate_head=True,
     scalar_init_mode="normsq",
+    particle_readout_mode="ambient",
+    geometry_mode="evolving_auxiliary",
+    field_degree_normalization="none",
 ):
     torch.manual_seed(seed)
     model = build_lorentznet(
@@ -30,6 +34,9 @@ def _model(
         include_mass_condition=True, regulator_mass=MASS,
         flow_geometry=geometry, reference_mode=references,
         scalar_init_mode=scalar_init_mode,
+        particle_readout_mode=particle_readout_mode,
+        geometry_mode=geometry_mode,
+        field_degree_normalization=field_degree_normalization,
     ).double()
     if activate_head:
         # The production field starts at exactly zero.  Activate its invariant
@@ -39,7 +46,7 @@ def _model(
             model.lorentznet_backbone.field_mlp[-1].weight.normal_(
                 std=1e-3, generator=generator
             )
-            if references == "plain_readout":
+            if references != "none":
                 model.lorentznet_backbone.reference_mlp[-1].weight.normal_(
                     std=1e-3, generator=generator
                 )
@@ -72,14 +79,16 @@ def test_raw_euclidean_vector_field_is_lorentz_equivariant():
 
 
 @pytest.mark.parametrize("references", ["none", "plain_readout"])
-def test_vector_field_starts_at_exactly_zero(references):
+def test_field_heads_use_small_normal_weights_and_zero_biases(references):
     model = _model(references=references, activate_head=False).eval()
-    x, t, conditions, mask, refs = _inputs()
-    refs = refs if references == "plain_readout" else None
-    assert torch.equal(
-        model.raw_field(x, t, conditions, mask, refs),
-        torch.zeros_like(x),
-    )
+    backbone = model.lorentznet_backbone
+    heads = [backbone.field_mlp[-1]]
+    if references != "none":
+        heads.append(backbone.reference_mlp[-1])
+    for head in heads:
+        assert torch.count_nonzero(head.weight) > 0
+        assert 2e-4 < head.weight.std() < 2e-3
+        assert torch.equal(head.bias, torch.zeros_like(head.bias))
 
 
 def test_plain_reference_readout_is_jointly_lorentz_equivariant():
@@ -187,6 +196,133 @@ def test_padding_is_zero_and_cannot_affect_real_particles():
     changed_field = model(changed, t, conditions, mask, refs)
     assert torch.equal(field[mask == 0], torch.zeros_like(field[mask == 0]))
     assert torch.allclose(changed_field[mask > 0], field[mask > 0], atol=0, rtol=0)
+
+
+class _ConstantMessages(nn.Module):
+    def __init__(self, width, value):
+        super().__init__()
+        self.width = width
+        self.value = value
+
+    def forward(self, inputs):
+        return torch.full(
+            (*inputs.shape[:-1], self.width), self.value,
+            dtype=inputs.dtype, device=inputs.device,
+        )
+
+
+class _CaptureUpdate(nn.Module):
+    def __init__(self, width):
+        super().__init__()
+        self.width = width
+        self.inputs = None
+
+    def forward(self, inputs):
+        self.inputs = inputs.detach().clone()
+        return torch.zeros_like(inputs[..., :self.width])
+
+
+def test_lgeb_uses_signed_sqrt_degree_sum_without_message_gate():
+    width = 4
+    block = LorentzNetLGEB(width, geometry_mode="fixed_physical_geodesic").double()
+    assert not hasattr(block, "message_gate")
+    assert block.node_mlp[0].in_features == 2 * width
+    assert block.node_mlp[0].out_features == 2 * width
+    assert block.node_mlp[-1].in_features == 2 * width
+    assert block.node_mlp[-1].out_features == width
+    block.message_mlp = _ConstantMessages(width, -2.0)
+    capture = _CaptureUpdate(width)
+    block.node_mlp = capture
+    h = torch.zeros(1, 3, width, dtype=torch.float64)
+    y = project_to_shell(torch.randn(1, 3, 4, dtype=torch.float64), MASS)
+    mask = torch.ones(1, 3, dtype=torch.float64)
+    block(h, y, mask, fixed_edge=torch.zeros(1, 3, 3, 3, dtype=torch.float64))
+    aggregate = capture.inputs[..., width:]
+    assert torch.allclose(
+        aggregate,
+        torch.full_like(aggregate, -2.0 * 2.0**0.5),
+        atol=1e-12, rtol=1e-12,
+    )
+
+
+def test_output_support_excludes_self_terms():
+    model = _model(references="none").eval()
+    x = torch.tensor([[[1.2, 0.3, 0.4, 0.5]]], dtype=torch.float64)
+    t = torch.tensor([0.2], dtype=torch.float64)
+    conditions = torch.randn(1, 8, dtype=torch.float64)
+    mask = torch.ones(1, 1, dtype=torch.float64)
+    assert torch.equal(model.raw_field(x, t, conditions, mask), torch.zeros_like(x))
+
+
+class _UnitCoefficients(nn.Module):
+    def __init__(self, outputs=1):
+        super().__init__()
+        self.outputs = outputs
+
+    def forward(self, inputs):
+        return torch.ones(
+            (*inputs.shape[:-1], self.outputs),
+            dtype=inputs.dtype, device=inputs.device,
+        )
+
+
+def test_normalized_logmap_readout_matches_formula_and_sqrt_degree():
+    model = _model(
+        "mass_shell", "none", geometry_mode="fixed_physical_geodesic",
+        particle_readout_mode="normalized_logmap",
+        field_degree_normalization="sqrt",
+    ).eval()
+    x, t, conditions, mask, _ = _inputs(on_shell=True)
+    model.lorentznet_backbone.field_mlp = _UnitCoefficients()
+    actual = model.raw_field(x, t, conditions, mask)
+    relative, distance = log_map(
+        x.unsqueeze(2), x.unsqueeze(1), MASS, return_distance=True
+    )
+    n = x.shape[1]
+    support = (
+        mask.bool().unsqueeze(2) & mask.bool().unsqueeze(1)
+        & ~torch.eye(n, dtype=torch.bool).unsqueeze(0)
+    )
+    expected = (
+        (relative / (MASS + distance) * support.unsqueeze(-1)).sum(2)
+        / support.sum(2).clamp_min(1).sqrt().unsqueeze(-1)
+    ) * mask.unsqueeze(-1)
+    assert torch.allclose(actual, expected, atol=1e-8, rtol=1e-8)
+    assert torch.allclose(dotsq4(x, actual) * mask, torch.zeros_like(mask), atol=2e-10)
+
+
+def test_normalized_tangent_reference_readout_matches_formula():
+    model = _model(
+        "mass_shell", "normalized_tangent_readout",
+        particle_readout_mode="normalized_logmap",
+        field_degree_normalization="sqrt",
+    ).eval()
+    x, t, conditions, mask, refs = _inputs(on_shell=True)
+    with torch.no_grad():
+        model.lorentznet_backbone.field_mlp[-1].weight.zero_()
+        model.lorentznet_backbone.field_mlp[-1].bias.zero_()
+    model.lorentznet_backbone.reference_mlp = _UnitCoefficients(outputs=2)
+    actual = model.raw_field(x, t, conditions, mask, refs)
+    expanded = refs.unsqueeze(1).expand(-1, x.shape[1], -1, -1)
+    projected = pushforward_to_tangent(x.unsqueeze(2), expanded, MASS)
+    reference_norm = torch.sqrt((-normsq4(projected)).clamp_min(0))
+    expected = (projected / (MASS + reference_norm).unsqueeze(-1)).sum(2)
+    expected = expected * mask.unsqueeze(-1)
+    assert torch.allclose(actual, expected, atol=2e-10, rtol=2e-10)
+    assert torch.allclose(dotsq4(x, actual) * mask, torch.zeros_like(mask), atol=2e-10)
+
+
+def test_fixed_physical_geometry_has_no_auxiliary_coordinate_heads():
+    model = _model(
+        "mass_shell", "plain_readout",
+        geometry_mode="fixed_physical_geodesic",
+        particle_readout_mode="normalized_logmap",
+        field_degree_normalization="sqrt",
+    )
+    assert all(
+        not hasattr(block, "coordinate_mlp")
+        for block in model.lorentznet_backbone.blocks
+    )
 
 
 def test_euclidean_interpolation_and_target_are_exact():
@@ -306,11 +442,63 @@ def test_reference_contraction_rfm_forward_backward_and_sampling(references):
     )
 
 
+@pytest.mark.parametrize(
+    "reference_mode,geometry_mode",
+    [
+        ("plain_readout", "evolving_auxiliary"),
+        ("normalized_tangent_readout", "evolving_auxiliary"),
+        ("plain_readout", "fixed_physical_geodesic"),
+        ("normalized_tangent_readout", "fixed_physical_geodesic"),
+    ],
+)
+def test_logmap_factorial_is_equivariant_finite_and_samples_on_shell(
+    reference_mode, geometry_mode
+):
+    model = _model(
+        "mass_shell", reference_mode,
+        scalar_init_mode="reference_contractions",
+        particle_readout_mode="normalized_logmap",
+        geometry_mode=geometry_mode,
+        field_degree_normalization="sqrt",
+    ).train()
+    x, t, conditions, mask, refs = _inputs(on_shell=True)
+    transform = random_proper_transform(81)
+    field = model(x, t, conditions, mask, refs)
+    transformed = model(
+        apply_transform(x, transform), t, conditions, mask,
+        apply_transform(refs, transform),
+    )
+    assert torch.allclose(
+        transformed, apply_transform(field, transform), atol=5e-8, rtol=5e-8
+    )
+    loss = (field.square() * mask.unsqueeze(-1)).sum()
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert all(
+        parameter.grad is None or torch.isfinite(parameter.grad).all()
+        for parameter in model.parameters()
+    )
+    model.eval()
+    stepped = model.step_hyperbolic(
+        x, conditions, mask,
+        torch.tensor(0.0, dtype=torch.float64),
+        torch.tensor(0.05, dtype=torch.float64),
+        ref_vectors=refs,
+        hyperbolic_model="mass_shell",
+        regulator_mass=MASS,
+    )
+    residual = dotsq4(stepped, stepped) - MASS**2
+    assert torch.isfinite(stepped).all()
+    assert torch.allclose(
+        residual[mask > 0], torch.zeros_like(residual[mask > 0]), atol=2e-9
+    )
+
+
 def test_requested_width96_parameter_counts_are_in_budget():
     none = build_lorentznet(5, hidden_dim=96, num_layers=6, reference_mode="none")
     refs = build_lorentznet(5, hidden_dim=96, num_layers=6, reference_mode="plain_readout")
-    assert sum(p.numel() for p in none.parameters()) == 441_621
-    assert sum(p.numel() for p in refs.parameters()) == 451_319
+    assert sum(p.numel() for p in none.parameters()) == 607_503
+    assert sum(p.numel() for p in refs.parameters()) == 617_201
 
     contraction_none = build_lorentznet(
         5, hidden_dim=96, num_layers=6, reference_mode="none",
@@ -320,5 +508,25 @@ def test_requested_width96_parameter_counts_are_in_budget():
         5, hidden_dim=96, num_layers=6, reference_mode="plain_readout",
         scalar_init_mode="reference_contractions",
     )
-    assert sum(p.numel() for p in contraction_none.parameters()) == 441_717
-    assert sum(p.numel() for p in contraction_refs.parameters()) == 451_415
+    assert sum(p.numel() for p in contraction_none.parameters()) == 607_599
+    assert sum(p.numel() for p in contraction_refs.parameters()) == 617_297
+
+    for reference_mode in ("plain_readout", "normalized_tangent_readout"):
+        evolving = build_lorentznet(
+            5, hidden_dim=96, num_layers=6, flow_geometry="mass_shell",
+            reference_mode=reference_mode,
+            scalar_init_mode="reference_contractions",
+            particle_readout_mode="normalized_logmap",
+            geometry_mode="evolving_auxiliary",
+            field_degree_normalization="sqrt",
+        )
+        fixed = build_lorentznet(
+            5, hidden_dim=96, num_layers=6, flow_geometry="mass_shell",
+            reference_mode=reference_mode,
+            scalar_init_mode="reference_contractions",
+            particle_readout_mode="normalized_logmap",
+            geometry_mode="fixed_physical_geodesic",
+            field_degree_normalization="sqrt",
+        )
+        assert sum(p.numel() for p in evolving.parameters()) == 617_297
+        assert sum(p.numel() for p in fixed.parameters()) == 561_515

@@ -10,6 +10,7 @@ ARCH_KEYS = (
     "n_hidden", "n_layers", "regulator_mass",
     "use_reference_vectors", "include_mass_condition",
     "architecture", "flow_geometry", "reference_mode", "scalar_init_mode",
+    "particle_readout_mode", "geometry_mode", "field_degree_normalization",
 )
 
 
@@ -43,6 +44,9 @@ def build_run_config(cfg, final_scale):
         "flow_geometry": cfg.model.flow_geometry,
         "reference_mode": cfg.model.reference_mode,
         "scalar_init_mode": cfg.model.scalar_init_mode,
+        "particle_readout_mode": cfg.model.particle_readout_mode,
+        "geometry_mode": cfg.model.geometry_mode,
+        "field_degree_normalization": cfg.model.field_degree_normalization,
         "jet_types": cfg.data.jet_types,
         "final_scale": float(final_scale),
     }

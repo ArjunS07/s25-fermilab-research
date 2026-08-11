@@ -170,6 +170,65 @@ def gen_initial_distribution(x_1=None, batch_size=None, num_particles=None,
         )
         return (particles / float(model_scale)) * real.unsqueeze(-1)
 
+    elif prior_dist == 'axis_aligned_lognormal':
+        # Conditioned-axis prior with a random fragmentation hierarchy.  Positive
+        # lognormal draws are normalized only over real slots; a common per-jet
+        # correction then preserves the requested transverse vector-sum magnitude.
+        if jet_features is None or model_scale is None or particle_mask is None:
+            raise ValueError(
+                "axis_aligned_lognormal requires jet_features, model_scale, and particle_mask"
+            )
+        if float(model_scale) <= 0:
+            raise ValueError("model_scale must be positive")
+        device = jet_features.device
+        real = particle_mask.to(device=device, dtype=jet_features.dtype)
+        if real.shape != (batch_size, num_particles):
+            raise ValueError(
+                "particle_mask shape must equal (batch_size, num_particles); "
+                f"got {tuple(real.shape)}"
+            )
+        if (real.sum(dim=1) < 1).any():
+            raise ValueError(
+                "axis_aligned_lognormal requires at least one real particle per jet"
+            )
+
+        jet_eta = jet_features[:, 0]
+        jet_pt = jet_features[:, 1]
+        phi0 = (
+            (2 * torch.pi) * torch.rand(batch_size, device=device)
+            if jet_phi is None else jet_phi.to(device)
+        )
+        # Draw angles and log-weights together.  With a fixed seed this makes a jet's
+        # sample independent of whether unrelated jets are appended to the batch.
+        # Inverse-CDF normals preserve the prefix property of uniform RNG draws:
+        # sampling jet 0 alone or as the first row of a larger batch is bit-identical.
+        uniform = torch.rand(
+            batch_size, num_particles, 3,
+            device=device, dtype=jet_features.dtype,
+        )
+        eps = torch.finfo(jet_features.dtype).eps
+        draws = torch.erfinv(2 * uniform.clamp(min=eps, max=1 - eps) - 1) * (2.0**0.5)
+        eta = jet_eta.unsqueeze(1) + 0.15 * draws[..., 0]
+        phi = phi0.unsqueeze(1) + 0.15 * draws[..., 1]
+        positive = torch.exp(draws[..., 2]) * real
+        weights = positive / positive.sum(dim=1, keepdim=True).clamp_min(1e-12)
+        transverse_unit_sum = torch.stack(
+            (
+                (weights * torch.cos(phi)).sum(dim=1),
+                (weights * torch.sin(phi)).sum(dim=1),
+            ),
+            dim=-1,
+        )
+        resultant = torch.linalg.vector_norm(
+            transverse_unit_sum, dim=-1
+        ).clamp_min(1e-4)
+        pt = weights * (jet_pt / resultant).unsqueeze(1)
+        energy = pt * torch.cosh(eta)
+        particles = eta_phi_pt_e_to_cartesian(
+            torch.stack((eta, phi, pt, energy), dim=-1)
+        )
+        return (particles / float(model_scale)) * real.unsqueeze(-1)
+
     else:
         raise ValueError(f"Unknown prior_dist: {prior_dist}")
 

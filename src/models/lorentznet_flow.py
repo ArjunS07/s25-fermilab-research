@@ -17,7 +17,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from util.geometry.mass_shell import pushforward_to_tangent
+from util.geometry.mass_shell import log_map, pushforward_to_tangent
 from util.geometry.minkowski_utils import dotsq4, normsq4
 
 
@@ -32,13 +32,6 @@ def _small_normal(layer: nn.Linear, std: float = 1e-3) -> None:
         nn.init.zeros_(layer.bias)
 
 
-def _zero_linear(layer: nn.Linear) -> None:
-    """Start a field contribution at exactly zero without freezing its parameters."""
-    nn.init.zeros_(layer.weight)
-    if layer.bias is not None:
-        nn.init.zeros_(layer.bias)
-
-
 def _pair_invariants(y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """Return signed-log ((y_i-y_j)^2, <y_i,y_j>) for every ordered pair."""
     yi = y.unsqueeze(2)
@@ -46,28 +39,62 @@ def _pair_invariants(y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     return signed_log(normsq4(yi - yj)), signed_log(dotsq4(yi, yj))
 
 
+def _physical_geodesic_geometry(
+    x: torch.Tensor, mass: float, dtype: torch.dtype
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Invariant edge features, distance, and bounded log-map directions on H_m."""
+    relative, distance = log_map(
+        x.unsqueeze(2), x.unsqueeze(1), mass, return_distance=True
+    )
+    d = distance.squeeze(-1)
+    dot = dotsq4(x.unsqueeze(2), x.unsqueeze(1))
+    edge = torch.stack(
+        (
+            torch.log1p(d),
+            torch.log1p((dot / mass**2 - 1).clamp_min(0)),
+            d / (d + mass),
+        ),
+        dim=-1,
+    ).to(dtype)
+    return edge, distance, relative / (mass + distance)
+
+
 class LorentzNetLGEB(nn.Module):
     """One scalar-message, scalar-node, equivariant-vector update block."""
 
-    def __init__(self, width: int, coordinate_scale: float = 1e-2):
+    def __init__(
+        self,
+        width: int,
+        geometry_mode: str = "evolving_auxiliary",
+        coordinate_scale: float = 1e-2,
+    ):
         super().__init__()
+        if geometry_mode not in {"evolving_auxiliary", "fixed_physical_geodesic"}:
+            raise ValueError(f"unknown LorentzNet geometry mode: {geometry_mode!r}")
+        self.geometry_mode = geometry_mode
         self.coordinate_scale = float(coordinate_scale)
+        edge_dim = 3 if geometry_mode == "fixed_physical_geodesic" else 2
         self.scalar_norm = nn.LayerNorm(width)
         self.message_mlp = nn.Sequential(
-            nn.Linear(2 * width + 2, width), nn.SiLU(), nn.Linear(width, width), nn.SiLU()
+            nn.Linear(2 * width + edge_dim, width), nn.SiLU(),
+            nn.Linear(width, width), nn.SiLU()
         )
-        self.message_gate = nn.Sequential(nn.Linear(width, 1), nn.Sigmoid())
         self.node_mlp = nn.Sequential(
-            nn.Linear(2 * width, width), nn.SiLU(), nn.Linear(width, width)
+            nn.Linear(2 * width, 2 * width), nn.SiLU(), nn.Linear(2 * width, width)
         )
-        coordinate_final = nn.Linear(width, 1)
-        _small_normal(coordinate_final)
-        self.coordinate_mlp = nn.Sequential(
-            nn.Linear(width, width), nn.SiLU(), coordinate_final
-        )
+        if geometry_mode == "evolving_auxiliary":
+            coordinate_final = nn.Linear(width, 1)
+            _small_normal(coordinate_final)
+            self.coordinate_mlp = nn.Sequential(
+                nn.Linear(width, width), nn.SiLU(), coordinate_final
+            )
 
     def forward(
-        self, h: torch.Tensor, y: torch.Tensor, mask: torch.Tensor
+        self,
+        h: torch.Tensor,
+        y: torch.Tensor,
+        mask: torch.Tensor,
+        fixed_edge: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         batch, n_nodes, _ = h.shape
         real = mask.bool()
@@ -77,27 +104,35 @@ class LorentzNetLGEB(nn.Module):
             & ~torch.eye(n_nodes, device=h.device, dtype=torch.bool).unsqueeze(0)
         )
         support_f = support.unsqueeze(-1).to(h.dtype)
-        degree = support.sum(dim=2).clamp_min(1).unsqueeze(-1)
+        sqrt_degree = support.sum(dim=2).clamp_min(1).to(h.dtype).sqrt().unsqueeze(-1)
 
         hn = self.scalar_norm(h)
         hi = hn.unsqueeze(2).expand(-1, -1, n_nodes, -1)
         hj = hn.unsqueeze(1).expand(-1, n_nodes, -1, -1)
-        diff_sq, dot = _pair_invariants(y)
-        edge = torch.stack((diff_sq, dot), dim=-1).to(h.dtype)
+        if self.geometry_mode == "fixed_physical_geodesic":
+            if fixed_edge is None:
+                raise ValueError("fixed physical geometry requires precomputed edge features")
+            edge = fixed_edge
+        else:
+            diff_sq, dot = _pair_invariants(y)
+            edge = torch.stack((diff_sq, dot), dim=-1).to(h.dtype)
         message = self.message_mlp(torch.cat((hi, hj, edge), dim=-1))
-        message = message * self.message_gate(message) * support_f
+        # Signed sum: message components retain their signs.  There is deliberately
+        # no softmax, absolute value, positivity constraint, or sigmoid gate.
+        message = message * support_f
 
-        aggregate = message.sum(dim=2) / degree.to(h.dtype)
+        aggregate = message.sum(dim=2) / sqrt_degree
         h = (h + self.node_mlp(torch.cat((hn, aggregate), dim=-1)))
         h = h * mask.unsqueeze(-1).to(h.dtype)
 
-        # The released LorentzNet uses y_i-y_j for this update.  A small learned
-        # coefficient and fixed residual scale replace its non-equivariant emergency
-        # component clamp.
-        displacement = y.unsqueeze(2) - y.unsqueeze(1)
-        coefficient = self.coordinate_mlp(message).to(y.dtype) * support.unsqueeze(-1)
-        delta = (coefficient * displacement).sum(dim=2) / degree.to(y.dtype)
-        y = (y + self.coordinate_scale * delta) * mask.unsqueeze(-1).to(y.dtype)
+        if self.geometry_mode == "evolving_auxiliary":
+            # The released LorentzNet uses y_i-y_j for this update.  A small learned
+            # coefficient and fixed residual scale replace its non-equivariant emergency
+            # component clamp.
+            displacement = y.unsqueeze(2) - y.unsqueeze(1)
+            coefficient = self.coordinate_mlp(message).to(y.dtype) * support.unsqueeze(-1)
+            delta = (coefficient * displacement).sum(dim=2) / sqrt_degree.to(y.dtype)
+            y = (y + self.coordinate_scale * delta) * mask.unsqueeze(-1).to(y.dtype)
         return h, y
 
 
@@ -111,14 +146,37 @@ class LorentzNetBackbone(nn.Module):
         num_layers: int = 6,
         reference_mode: str = "none",
         scalar_init_mode: str = "normsq",
+        particle_readout_mode: str = "ambient",
+        geometry_mode: str = "evolving_auxiliary",
+        field_degree_normalization: str = "none",
+        regulator_mass: float = 0.1,
     ):
         super().__init__()
-        if reference_mode not in {"none", "plain_readout"}:
+        if reference_mode not in {
+            "none", "plain_readout", "normalized_tangent_readout"
+        }:
             raise ValueError(f"unknown LorentzNet reference mode: {reference_mode!r}")
         if scalar_init_mode not in {"normsq", "reference_contractions"}:
             raise ValueError(f"unknown LorentzNet scalar init mode: {scalar_init_mode!r}")
+        if particle_readout_mode not in {"ambient", "normalized_logmap"}:
+            raise ValueError(
+                f"unknown LorentzNet particle readout mode: {particle_readout_mode!r}"
+            )
+        if geometry_mode not in {"evolving_auxiliary", "fixed_physical_geodesic"}:
+            raise ValueError(f"unknown LorentzNet geometry mode: {geometry_mode!r}")
+        if field_degree_normalization not in {"none", "sqrt"}:
+            raise ValueError(
+                "unknown LorentzNet field degree normalization: "
+                f"{field_degree_normalization!r}"
+            )
+        if field_degree_normalization == "sqrt" and particle_readout_mode != "normalized_logmap":
+            raise ValueError("sqrt degree normalization requires normalized_logmap readout")
         self.reference_mode = reference_mode
         self.scalar_init_mode = scalar_init_mode
+        self.particle_readout_mode = particle_readout_mode
+        self.geometry_mode = geometry_mode
+        self.field_degree_normalization = field_degree_normalization
+        self.regulator_mass = float(regulator_mass)
         self.condition_embed = nn.Sequential(
             nn.Linear(condition_dim, width), nn.SiLU(), nn.Linear(width, width)
         )
@@ -130,27 +188,26 @@ class LorentzNetBackbone(nn.Module):
             nn.SiLU(),
             nn.Linear(width, width),
         )
-        self.blocks = nn.ModuleList([LorentzNetLGEB(width) for _ in range(num_layers)])
-
-        self.field_mlp = nn.Sequential(
-            nn.Linear(2 * width + 2, width), nn.SiLU(), nn.Linear(width, 1)
+        self.blocks = nn.ModuleList(
+            [LorentzNetLGEB(width, geometry_mode=geometry_mode) for _ in range(num_layers)]
         )
-        # An ambient coefficient that is merely small can still become a very large
-        # tangent vector after projection on a small-mass shell.  Exact zero
-        # initialization gives both FM adapters the same benign initial vector field;
-        # gradients still reach this final layer on the first optimizer step.
-        _zero_linear(self.field_mlp[-1])
-        if reference_mode == "plain_readout":
+
+        edge_dim = 3 if geometry_mode == "fixed_physical_geodesic" else 2
+        self.field_mlp = nn.Sequential(
+            nn.Linear(2 * width + edge_dim, width), nn.SiLU(), nn.Linear(width, 1)
+        )
+        _small_normal(self.field_mlp[-1])
+        if reference_mode != "none":
             # Ordered outputs are (e_t, jet_p4); role embeddings/tokens are unnecessary.
             self.reference_mlp = nn.Sequential(
                 nn.Linear(width + 2, width), nn.SiLU(), nn.Linear(width, 2)
             )
-            _zero_linear(self.reference_mlp[-1])
+            _small_normal(self.reference_mlp[-1])
 
     @property
     def needs_references(self) -> bool:
         return (
-            self.reference_mode == "plain_readout"
+            self.reference_mode != "none"
             or self.scalar_init_mode == "reference_contractions"
         )
 
@@ -208,23 +265,56 @@ class LorentzNetBackbone(nn.Module):
             raise ValueError("reference vectors were supplied but no model path uses them")
 
         dtype = next(self.parameters()).dtype
+        x64 = x.to(torch.float64) * mask.unsqueeze(-1).to(torch.float64)
         y = x.to(dtype) * mask.unsqueeze(-1).to(dtype)
         h = self.initial_scalar_state(y, t, conditions, mask, references)
 
+        fixed_edge = None
+        physical_distance = None
+        physical_direction = None
+        if (self.geometry_mode == "fixed_physical_geodesic"
+                or self.particle_readout_mode == "normalized_logmap"):
+            physical_edge, physical_distance, physical_direction = (
+                _physical_geodesic_geometry(x64, self.regulator_mass, dtype)
+            )
+            if self.geometry_mode == "fixed_physical_geodesic":
+                fixed_edge = physical_edge
+
         for block in self.blocks:
-            h, y = block(h, y, mask)
+            h, y = block(h, y, mask, fixed_edge=fixed_edge)
 
         n_nodes = y.shape[1]
         hi = h.unsqueeze(2).expand(-1, -1, n_nodes, -1)
         hj = h.unsqueeze(1).expand(-1, n_nodes, -1, -1)
-        diff_sq, dot = _pair_invariants(y)
-        edge = torch.stack((diff_sq, dot), dim=-1).to(dtype)
+        if self.geometry_mode == "fixed_physical_geodesic":
+            edge = fixed_edge
+        else:
+            diff_sq, dot = _pair_invariants(y)
+            edge = torch.stack((diff_sq, dot), dim=-1).to(dtype)
         coefficients = self.field_mlp(torch.cat((hi, hj, edge), dim=-1)).squeeze(-1)
-        # Include self edges explicitly so the field spans y_i as well as neighbour vectors.
-        support = mask.bool().unsqueeze(2) & mask.bool().unsqueeze(1)
-        raw = torch.einsum("bij,bjf->bif", coefficients * support, y)
+        if self.particle_readout_mode == "normalized_logmap":
+            support = (
+                mask.bool().unsqueeze(2)
+                & mask.bool().unsqueeze(1)
+                & ~torch.eye(n_nodes, device=x.device, dtype=torch.bool).unsqueeze(0)
+            )
+            raw = torch.einsum(
+                "bij,bijf->bif",
+                coefficients.to(torch.float64) * support,
+                physical_direction,
+            )
+            if self.field_degree_normalization == "sqrt":
+                sqrt_degree = support.sum(dim=2).clamp_min(1).to(torch.float64).sqrt()
+                raw = raw / sqrt_degree.unsqueeze(-1)
+        else:
+            support = (
+                mask.bool().unsqueeze(2)
+                & mask.bool().unsqueeze(1)
+                & ~torch.eye(n_nodes, device=x.device, dtype=torch.bool).unsqueeze(0)
+            )
+            raw = torch.einsum("bij,bjf->bif", coefficients * support, y)
 
-        if self.reference_mode == "plain_readout":
+        if self.reference_mode != "none":
             refs = references.to(dtype)
             reference_invariants = signed_log(
                 dotsq4(y.unsqueeze(2), refs.unsqueeze(1))
@@ -232,7 +322,26 @@ class LorentzNetBackbone(nn.Module):
             reference_coefficients = self.reference_mlp(
                 torch.cat((h, reference_invariants), dim=-1)
             )
-            raw = raw + torch.einsum("bir,brf->bif", reference_coefficients, refs)
+            if self.reference_mode == "normalized_tangent_readout":
+                refs64 = references.to(torch.float64)
+                expanded_refs = refs64.unsqueeze(1).expand(-1, n_nodes, -1, -1)
+                projected = pushforward_to_tangent(
+                    x64.unsqueeze(2), expanded_refs, self.regulator_mass
+                )
+                projected_norm = torch.sqrt((-normsq4(projected)).clamp_min(0))
+                normalized_refs = projected / (
+                    self.regulator_mass + projected_norm
+                ).unsqueeze(-1)
+                reference_field = torch.einsum(
+                    "bir,birf->bif",
+                    reference_coefficients.to(torch.float64),
+                    normalized_refs,
+                )
+            else:
+                reference_field = torch.einsum(
+                    "bir,brf->bif", reference_coefficients, refs
+                )
+            raw = raw + reference_field.to(raw.dtype)
 
         return raw * mask.unsqueeze(-1).to(dtype)
 
@@ -254,6 +363,9 @@ class LorentzNetFlow(nn.Module):
         flow_geometry: str = "euclidean",
         reference_mode: str = "none",
         scalar_init_mode: str = "normsq",
+        particle_readout_mode: str = "ambient",
+        geometry_mode: str = "evolving_auxiliary",
+        field_degree_normalization: str = "none",
     ):
         super().__init__()
         if flow_geometry not in {"euclidean", "mass_shell"}:
@@ -264,10 +376,21 @@ class LorentzNetFlow(nn.Module):
         self.flow_geometry = flow_geometry
         self.reference_mode = reference_mode
         self.scalar_init_mode = scalar_init_mode
+        self.particle_readout_mode = particle_readout_mode
+        self.geometry_mode = geometry_mode
+        self.field_degree_normalization = field_degree_normalization
         self.backbone_name = "lorentznet"
         self.null_cond = nn.Parameter(torch.zeros(condition_dim))
         self.lorentznet_backbone = LorentzNetBackbone(
-            condition_dim, width, num_layers, reference_mode, scalar_init_mode
+            condition_dim,
+            width,
+            num_layers,
+            reference_mode,
+            scalar_init_mode,
+            particle_readout_mode,
+            geometry_mode,
+            field_degree_normalization,
+            regulator_mass,
         )
 
     def make_null_cond(self, conditions: torch.Tensor) -> torch.Tensor:
@@ -330,6 +453,9 @@ def build_lorentznet(
     flow_geometry: str = "euclidean",
     reference_mode: str = "none",
     scalar_init_mode: str = "normsq",
+    particle_readout_mode: str = "ambient",
+    geometry_mode: str = "evolving_auxiliary",
+    field_degree_normalization: str = "none",
 ) -> LorentzNetFlow:
     condition_dim = (
         max_num_jet_types + 1 + int(include_pt) + int(include_mass_condition)
@@ -343,6 +469,9 @@ def build_lorentznet(
         flow_geometry=flow_geometry,
         reference_mode=reference_mode,
         scalar_init_mode=scalar_init_mode,
+        particle_readout_mode=particle_readout_mode,
+        geometry_mode=geometry_mode,
+        field_degree_normalization=field_degree_normalization,
     )
 
 

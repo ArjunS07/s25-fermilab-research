@@ -28,6 +28,9 @@ def test_train_defaults():
     assert cfg.model.flow_geometry == "mass_shell"
     assert cfg.model.reference_mode == "plain_readout"
     assert cfg.model.scalar_init_mode == "normsq"
+    assert cfg.model.particle_readout_mode == "ambient"
+    assert cfg.model.geometry_mode == "evolving_auxiliary"
+    assert cfg.model.field_degree_normalization == "none"
     assert cfg.model.use_reference_vectors is True
     assert cfg.model.include_mass_condition is True
     assert cfg.training.n_train_samples == 1_000_000
@@ -138,6 +141,30 @@ def test_lorentznet_reference_flag_must_match_mode():
         })
 
 
+def test_shell_geometric_lorentznet_modes_require_mass_shell_geometry():
+    common = {
+        "architecture": "lorentznet",
+        "flow_geometry": "mass_shell",
+        "reference_mode": "normalized_tangent_readout",
+        "particle_readout_mode": "normalized_logmap",
+        "geometry_mode": "fixed_physical_geodesic",
+        "field_degree_normalization": "sqrt",
+        "use_reference_vectors": True,
+    }
+    cfg = TrainRunConfig(model=common)
+    assert cfg.model.geometry_mode == "fixed_physical_geodesic"
+    with pytest.raises(ValidationError):
+        TrainRunConfig(model={**common, "flow_geometry": "euclidean"})
+    with pytest.raises(ValidationError):
+        TrainRunConfig(model={
+            "architecture": "lorentznet",
+            "reference_mode": "plain_readout",
+            "particle_readout_mode": "ambient",
+            "field_degree_normalization": "sqrt",
+            "use_reference_vectors": True,
+        })
+
+
 def test_reference_contraction_scalar_init_requires_references_without_readout():
     cfg = TrainRunConfig(model={
         "architecture": "lorentznet",
@@ -177,6 +204,29 @@ def test_reference_scalar_icp_experiment_configs_validate(filename, reference_mo
     assert cfg.training.coupling == "online_geodesic_icp"
     assert cfg.training.prior_dist == "axis_aligned_equal"
     assert cfg.inference.prior_dist == "axis_aligned_equal"
+
+
+@pytest.mark.parametrize(
+    "filename,reference_mode,geometry_mode",
+    [
+        ("g30-lorentznet-g-rfm-logmap-lognormal.yaml", "plain_readout", "evolving_auxiliary"),
+        ("g30-lorentznet-h-rfm-logmap-tangentrefs.yaml", "normalized_tangent_readout", "evolving_auxiliary"),
+        ("g30-lorentznet-i-rfm-logmap-fixedgeom.yaml", "plain_readout", "fixed_physical_geodesic"),
+        ("g30-lorentznet-j-rfm-logmap-fixedgeom-tangentrefs.yaml", "normalized_tangent_readout", "fixed_physical_geodesic"),
+    ],
+)
+def test_logmap_factorial_configs_validate(filename, reference_mode, geometry_mode):
+    path = os.path.join(os.path.dirname(__file__), "..", "configs", filename)
+    cfg = build_config(TrainRunConfig, path)
+    assert cfg.model.flow_geometry == "mass_shell"
+    assert cfg.model.scalar_init_mode == "reference_contractions"
+    assert cfg.model.reference_mode == reference_mode
+    assert cfg.model.particle_readout_mode == "normalized_logmap"
+    assert cfg.model.geometry_mode == geometry_mode
+    assert cfg.model.field_degree_normalization == "sqrt"
+    assert cfg.training.prior_dist == "axis_aligned_lognormal"
+    assert cfg.inference.prior_dist == "axis_aligned_lognormal"
+    assert cfg.training.coupling == "online_geodesic_icp"
 
 
 @pytest.mark.parametrize("field", ["n_hidden", "n_layers"])

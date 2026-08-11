@@ -186,6 +186,8 @@ if __name__ == "__main__":
                     for k in ("n_layers", "n_hidden", "num_particles", "architecture",
                               "flow_geometry", "reference_mode",
                               "scalar_init_mode",
+                              "particle_readout_mode", "geometry_mode",
+                              "field_degree_normalization",
                               "use_reference_vectors", "include_mass_condition",
                               "regulator_mass")
                     if prev.get(k) != run_config.get(k)}
