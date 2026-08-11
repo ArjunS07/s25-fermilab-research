@@ -2,6 +2,15 @@ import torch
 from util.geometry.coordinates import eta_phi_pt_e_to_cartesian
 
 
+JET_FEATURE_PRIORS = frozenset({
+    "axis_aligned",
+    "axis_aligned_per_jet",
+    "axis_aligned_equal",
+    "axis_aligned_lognormal",
+    "jet_ref_frame",
+})
+
+
 def gen_initial_distribution(x_1=None, batch_size=None, num_particles=None,
                              prior_dist='isotropic_com', jet_features=None,
                              jet_phi=None, device='cpu', model_scale=None,

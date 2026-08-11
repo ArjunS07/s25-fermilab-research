@@ -2,7 +2,7 @@
 
 import torch
 
-from util.data.distributions import gen_initial_distribution
+from util.data.distributions import JET_FEATURE_PRIORS, gen_initial_distribution
 from util.geometry.mass_shell import project_to_shell
 from util.geometry.minkowski_utils import normsq4
 
@@ -32,6 +32,10 @@ def _sample(features, phi, mask, scale=50.0, x1=None):
     else:
         kwargs["x_1"] = x1
     return gen_initial_distribution(**kwargs)
+
+
+def test_lognormal_axis_prior_is_routed_jet_features_during_generation():
+    assert "axis_aligned_lognormal" in JET_FEATURE_PRIORS
 
 
 def test_lognormal_axis_prior_is_masked_positive_massless_and_exact_pt():

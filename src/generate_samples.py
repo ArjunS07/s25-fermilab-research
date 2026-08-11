@@ -9,7 +9,7 @@ from jetnet.utils import EtaPhiPtE_to_cartesian
 from models.mass_shell_gnn import LEFTJeN
 from util.data import jet_attributes
 from util.infra.file_management import make_clear_folder
-from util.data.distributions import gen_initial_distribution
+from util.data.distributions import JET_FEATURE_PRIORS, gen_initial_distribution
 from util.geometry.coordinates import build_reference_vectors
 from util.geometry.conditioning import scale_condition_pt
 from util.geometry.euclidean import euclidean_ode_step
@@ -175,10 +175,7 @@ def generate_samples(
                 if replay_bundle is None else
                 replay_bundle["jet_phi"][start_idx:start_idx + current_batch_size].to(device)
             )
-            if prior_dist in (
-                'axis_aligned', 'axis_aligned_per_jet', 'axis_aligned_equal',
-                'jet_ref_frame',
-            ):
+            if prior_dist in JET_FEATURE_PRIORS:
                 gen_eta = generated_jet_attrs[:, 5].to(device)
                 gen_pt_prior = gen_pt
                 jet_features = torch.stack([gen_eta, gen_pt_prior], dim=-1)
