@@ -45,6 +45,7 @@ class ModelConfig(BaseModel):
         "evolving_auxiliary"
     )
     field_degree_normalization: Literal["none", "sqrt"] = "none"
+    inject_condition_time_each_block: bool = False
     # Shell mass in normalised units (momenta are O(1) after final_scale). The mass-shell
     # regulator: smaller = more massless/relativistic but numerically stiffer. Runs use 0.1.
     regulator_mass: float = 0.5
@@ -79,6 +80,10 @@ class ModelConfig(BaseModel):
             if self.field_degree_normalization != "none":
                 raise ValueError(
                     "model.field_degree_normalization is only configurable for LorentzNet"
+                )
+            if self.inject_condition_time_each_block:
+                raise ValueError(
+                    "model.inject_condition_time_each_block is only configurable for LorentzNet"
                 )
         else:
             expects_references = (

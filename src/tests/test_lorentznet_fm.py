@@ -27,6 +27,7 @@ def _model(
     particle_readout_mode="ambient",
     geometry_mode="evolving_auxiliary",
     field_degree_normalization="none",
+    inject_condition_time_each_block=False,
 ):
     torch.manual_seed(seed)
     model = build_lorentznet(
@@ -37,6 +38,7 @@ def _model(
         particle_readout_mode=particle_readout_mode,
         geometry_mode=geometry_mode,
         field_degree_normalization=field_degree_normalization,
+        inject_condition_time_each_block=inject_condition_time_each_block,
     ).double()
     if activate_head:
         # The production field starts at exactly zero.  Activate its invariant
@@ -325,6 +327,60 @@ def test_fixed_physical_geometry_has_no_auxiliary_coordinate_heads():
     )
 
 
+def test_condition_time_injection_expands_every_block_inputs():
+    model = _model(
+        "mass_shell", "normalized_tangent_readout",
+        scalar_init_mode="reference_contractions",
+        particle_readout_mode="normalized_logmap",
+        field_degree_normalization="sqrt",
+        inject_condition_time_each_block=True,
+    )
+    for block in model.lorentznet_backbone.blocks:
+        assert block.inject_condition_time is True
+        assert block.message_mlp[0].in_features == 3 * 24 + 2
+        assert block.node_mlp[0].in_features == 3 * 24
+
+
+def test_condition_time_injection_factorial_is_equivariant_finite_and_on_shell():
+    model = _model(
+        "mass_shell", "normalized_tangent_readout",
+        scalar_init_mode="reference_contractions",
+        particle_readout_mode="normalized_logmap",
+        field_degree_normalization="sqrt",
+        inject_condition_time_each_block=True,
+    ).train()
+    x, t, conditions, mask, refs = _inputs(on_shell=True)
+    transform = random_proper_transform(91)
+    field = model(x, t, conditions, mask, refs)
+    transformed = model(
+        apply_transform(x, transform), t, conditions, mask,
+        apply_transform(refs, transform),
+    )
+    assert torch.allclose(
+        transformed, apply_transform(field, transform), atol=5e-8, rtol=5e-8
+    )
+    loss = (field.square() * mask.unsqueeze(-1)).sum()
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert all(
+        parameter.grad is None or torch.isfinite(parameter.grad).all()
+        for parameter in model.parameters()
+    )
+    model.eval()
+    stepped = model.step_hyperbolic(
+        x, conditions, mask,
+        torch.tensor(0.0, dtype=torch.float64),
+        torch.tensor(0.05, dtype=torch.float64),
+        ref_vectors=refs,
+        hyperbolic_model="mass_shell", regulator_mass=MASS,
+    )
+    residual = dotsq4(stepped, stepped) - MASS**2
+    assert torch.isfinite(stepped).all()
+    assert torch.allclose(
+        residual[mask > 0], torch.zeros_like(residual[mask > 0]), atol=2e-9
+    )
+
+
 def test_euclidean_interpolation_and_target_are_exact():
     x0 = torch.tensor([[[1.0, 2.0, 3.0, 4.0]]])
     x1 = torch.tensor([[[5.0, 8.0, 11.0, 14.0]]])
@@ -530,3 +586,14 @@ def test_requested_width96_parameter_counts_are_in_budget():
         )
         assert sum(p.numel() for p in evolving.parameters()) == 617_297
         assert sum(p.numel() for p in fixed.parameters()) == 561_515
+
+    block_context = build_lorentznet(
+        5, hidden_dim=96, num_layers=6, flow_geometry="mass_shell",
+        reference_mode="normalized_tangent_readout",
+        scalar_init_mode="reference_contractions",
+        particle_readout_mode="normalized_logmap",
+        geometry_mode="evolving_auxiliary",
+        field_degree_normalization="sqrt",
+        inject_condition_time_each_block=True,
+    )
+    assert sum(p.numel() for p in block_context.parameters()) == 783_185

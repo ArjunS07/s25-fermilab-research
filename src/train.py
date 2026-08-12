@@ -188,6 +188,7 @@ if __name__ == "__main__":
                               "scalar_init_mode",
                               "particle_readout_mode", "geometry_mode",
                               "field_degree_normalization",
+                              "inject_condition_time_each_block",
                               "use_reference_vectors", "include_mass_condition",
                               "regulator_mass")
                     if prev.get(k) != run_config.get(k)}

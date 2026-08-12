@@ -27,6 +27,9 @@ def build_flow_model(model_config, max_num_jet_types: int):
             particle_readout_mode=model_config.particle_readout_mode,
             geometry_mode=model_config.geometry_mode,
             field_degree_normalization=model_config.field_degree_normalization,
+            inject_condition_time_each_block=(
+                model_config.inject_condition_time_each_block
+            ),
         )
     raise ValueError(f"unknown model architecture: {model_config.architecture!r}")
 

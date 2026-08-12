@@ -31,6 +31,7 @@ def test_train_defaults():
     assert cfg.model.particle_readout_mode == "ambient"
     assert cfg.model.geometry_mode == "evolving_auxiliary"
     assert cfg.model.field_degree_normalization == "none"
+    assert cfg.model.inject_condition_time_each_block is False
     assert cfg.model.use_reference_vectors is True
     assert cfg.model.include_mass_condition is True
     assert cfg.training.n_train_samples == 1_000_000
@@ -188,6 +189,8 @@ def test_reference_contraction_scalar_init_requires_references_without_readout()
 def test_reference_contraction_scalar_init_rejected_for_mass_shell_gnn():
     with pytest.raises(ValidationError):
         TrainRunConfig(model={"scalar_init_mode": "reference_contractions"})
+    with pytest.raises(ValidationError):
+        TrainRunConfig(model={"inject_condition_time_each_block": True})
 
 
 @pytest.mark.parametrize("filename,reference_mode", [
@@ -227,6 +230,48 @@ def test_logmap_factorial_configs_validate(filename, reference_mode, geometry_mo
     assert cfg.training.prior_dist == "axis_aligned_lognormal"
     assert cfg.inference.prior_dist == "axis_aligned_lognormal"
     assert cfg.training.coupling == "online_geodesic_icp"
+
+
+@pytest.mark.parametrize(
+    "filename,steps,block_context",
+    [
+        ("g30-lorentznet-h-rfm-logmap-tangentrefs-500k.yaml", 500000, False),
+        ("g30-lorentznet-g-rfm-logmap-lognormal-500k.yaml", 500000, False),
+        ("g30-lorentznet-h-rfm-logmap-blockcond-200k.yaml", 200000, True),
+    ],
+)
+def test_next_campaign_configs_validate(filename, steps, block_context):
+    path = os.path.join(os.path.dirname(__file__), "..", "configs", filename)
+    cfg = build_config(TrainRunConfig, path)
+    assert cfg.model.flow_geometry == "mass_shell"
+    assert cfg.model.inject_condition_time_each_block is block_context
+    assert cfg.training.max_optimizer_steps == steps
+    assert cfg.training.stability_probe_steps[-1] == steps
+    assert cfg.training.prior_dist == "axis_aligned_lognormal"
+    assert cfg.training.coupling == "online_geodesic_icp"
+
+
+@pytest.mark.parametrize(
+    "base_name,long_name",
+    [
+        (
+            "g30-lorentznet-h-rfm-logmap-tangentrefs.yaml",
+            "g30-lorentznet-h-rfm-logmap-tangentrefs-500k.yaml",
+        ),
+        (
+            "g30-lorentznet-g-rfm-logmap-lognormal.yaml",
+            "g30-lorentznet-g-rfm-logmap-lognormal-500k.yaml",
+        ),
+    ],
+)
+def test_500k_arms_only_change_budget_and_budget_dependent_schedule(base_name, long_name):
+    root = os.path.join(os.path.dirname(__file__), "..", "configs")
+    base = build_config(TrainRunConfig, os.path.join(root, base_name)).model_dump()
+    long = build_config(TrainRunConfig, os.path.join(root, long_name)).model_dump()
+    for key in ("num_epochs", "max_optimizer_steps", "stability_probe_steps"):
+        base["training"].pop(key)
+        long["training"].pop(key)
+    assert long == base
 
 
 @pytest.mark.parametrize("field", ["n_hidden", "n_layers"])

@@ -66,21 +66,25 @@ class LorentzNetLGEB(nn.Module):
         self,
         width: int,
         geometry_mode: str = "evolving_auxiliary",
+        inject_condition_time: bool = False,
         coordinate_scale: float = 1e-2,
     ):
         super().__init__()
         if geometry_mode not in {"evolving_auxiliary", "fixed_physical_geodesic"}:
             raise ValueError(f"unknown LorentzNet geometry mode: {geometry_mode!r}")
         self.geometry_mode = geometry_mode
+        self.inject_condition_time = bool(inject_condition_time)
         self.coordinate_scale = float(coordinate_scale)
         edge_dim = 3 if geometry_mode == "fixed_physical_geodesic" else 2
+        context_width = width if self.inject_condition_time else 0
         self.scalar_norm = nn.LayerNorm(width)
         self.message_mlp = nn.Sequential(
-            nn.Linear(2 * width + edge_dim, width), nn.SiLU(),
+            nn.Linear(2 * width + edge_dim + context_width, width), nn.SiLU(),
             nn.Linear(width, width), nn.SiLU()
         )
         self.node_mlp = nn.Sequential(
-            nn.Linear(2 * width, 2 * width), nn.SiLU(), nn.Linear(2 * width, width)
+            nn.Linear(2 * width + context_width, 2 * width), nn.SiLU(),
+            nn.Linear(2 * width, width)
         )
         if geometry_mode == "evolving_auxiliary":
             coordinate_final = nn.Linear(width, 1)
@@ -95,6 +99,7 @@ class LorentzNetLGEB(nn.Module):
         y: torch.Tensor,
         mask: torch.Tensor,
         fixed_edge: torch.Tensor | None = None,
+        condition_time: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         batch, n_nodes, _ = h.shape
         real = mask.bool()
@@ -116,13 +121,25 @@ class LorentzNetLGEB(nn.Module):
         else:
             diff_sq, dot = _pair_invariants(y)
             edge = torch.stack((diff_sq, dot), dim=-1).to(h.dtype)
-        message = self.message_mlp(torch.cat((hi, hj, edge), dim=-1))
+        message_fields = [hi, hj, edge]
+        if self.inject_condition_time:
+            if condition_time is None:
+                raise ValueError(
+                    "per-block condition/time injection requires a global embedding"
+                )
+            message_fields.append(
+                condition_time[:, None, None, :].expand(-1, n_nodes, n_nodes, -1)
+            )
+        message = self.message_mlp(torch.cat(message_fields, dim=-1))
         # Signed sum: message components retain their signs.  There is deliberately
         # no softmax, absolute value, positivity constraint, or sigmoid gate.
         message = message * support_f
 
         aggregate = message.sum(dim=2) / sqrt_degree
-        h = (h + self.node_mlp(torch.cat((hn, aggregate), dim=-1)))
+        node_fields = [hn, aggregate]
+        if self.inject_condition_time:
+            node_fields.append(condition_time[:, None, :].expand(-1, n_nodes, -1))
+        h = h + self.node_mlp(torch.cat(node_fields, dim=-1))
         h = h * mask.unsqueeze(-1).to(h.dtype)
 
         if self.geometry_mode == "evolving_auxiliary":
@@ -149,6 +166,7 @@ class LorentzNetBackbone(nn.Module):
         particle_readout_mode: str = "ambient",
         geometry_mode: str = "evolving_auxiliary",
         field_degree_normalization: str = "none",
+        inject_condition_time_each_block: bool = False,
         regulator_mass: float = 0.1,
     ):
         super().__init__()
@@ -176,6 +194,7 @@ class LorentzNetBackbone(nn.Module):
         self.particle_readout_mode = particle_readout_mode
         self.geometry_mode = geometry_mode
         self.field_degree_normalization = field_degree_normalization
+        self.inject_condition_time_each_block = bool(inject_condition_time_each_block)
         self.regulator_mass = float(regulator_mass)
         self.condition_embed = nn.Sequential(
             nn.Linear(condition_dim, width), nn.SiLU(), nn.Linear(width, width)
@@ -189,7 +208,14 @@ class LorentzNetBackbone(nn.Module):
             nn.Linear(width, width),
         )
         self.blocks = nn.ModuleList(
-            [LorentzNetLGEB(width, geometry_mode=geometry_mode) for _ in range(num_layers)]
+            [
+                LorentzNetLGEB(
+                    width,
+                    geometry_mode=geometry_mode,
+                    inject_condition_time=inject_condition_time_each_block,
+                )
+                for _ in range(num_layers)
+            ]
         )
 
         edge_dim = 3 if geometry_mode == "fixed_physical_geodesic" else 2
@@ -268,6 +294,15 @@ class LorentzNetBackbone(nn.Module):
         x64 = x.to(torch.float64) * mask.unsqueeze(-1).to(torch.float64)
         y = x.to(dtype) * mask.unsqueeze(-1).to(dtype)
         h = self.initial_scalar_state(y, t, conditions, mask, references)
+        condition_time = None
+        if self.inject_condition_time_each_block:
+            time_features = torch.stack(
+                (t, torch.sin(torch.pi * t), torch.cos(torch.pi * t)), dim=-1
+            )
+            condition_time = (
+                self.condition_embed(conditions.to(dtype))
+                - self.time_embed(time_features.to(dtype))
+            )
 
         fixed_edge = None
         physical_distance = None
@@ -281,7 +316,9 @@ class LorentzNetBackbone(nn.Module):
                 fixed_edge = physical_edge
 
         for block in self.blocks:
-            h, y = block(h, y, mask, fixed_edge=fixed_edge)
+            h, y = block(
+                h, y, mask, fixed_edge=fixed_edge, condition_time=condition_time
+            )
 
         n_nodes = y.shape[1]
         hi = h.unsqueeze(2).expand(-1, -1, n_nodes, -1)
@@ -366,6 +403,7 @@ class LorentzNetFlow(nn.Module):
         particle_readout_mode: str = "ambient",
         geometry_mode: str = "evolving_auxiliary",
         field_degree_normalization: str = "none",
+        inject_condition_time_each_block: bool = False,
     ):
         super().__init__()
         if flow_geometry not in {"euclidean", "mass_shell"}:
@@ -379,6 +417,7 @@ class LorentzNetFlow(nn.Module):
         self.particle_readout_mode = particle_readout_mode
         self.geometry_mode = geometry_mode
         self.field_degree_normalization = field_degree_normalization
+        self.inject_condition_time_each_block = bool(inject_condition_time_each_block)
         self.backbone_name = "lorentznet"
         self.null_cond = nn.Parameter(torch.zeros(condition_dim))
         self.lorentznet_backbone = LorentzNetBackbone(
@@ -390,6 +429,7 @@ class LorentzNetFlow(nn.Module):
             particle_readout_mode,
             geometry_mode,
             field_degree_normalization,
+            inject_condition_time_each_block,
             regulator_mass,
         )
 
@@ -456,6 +496,7 @@ def build_lorentznet(
     particle_readout_mode: str = "ambient",
     geometry_mode: str = "evolving_auxiliary",
     field_degree_normalization: str = "none",
+    inject_condition_time_each_block: bool = False,
 ) -> LorentzNetFlow:
     condition_dim = (
         max_num_jet_types + 1 + int(include_pt) + int(include_mass_condition)
@@ -472,6 +513,7 @@ def build_lorentznet(
         particle_readout_mode=particle_readout_mode,
         geometry_mode=geometry_mode,
         field_degree_normalization=field_degree_normalization,
+        inject_condition_time_each_block=inject_condition_time_each_block,
     )
 
 
