@@ -25,7 +25,7 @@ items:
                 - -c
                 - |
                   set -euo pipefail
-                  GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+                  GIT_COMMIT="d5032b2dc86b5606e87fc81e8aaf3cd91d9d4034"
                   if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
                     echo "ERROR: pin GIT_COMMIT before launching the LorentzNet ablation"
                     exit 1
