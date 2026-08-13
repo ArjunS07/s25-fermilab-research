@@ -66,13 +66,7 @@ def generate_masks(num_particles, max_particles_per_jet, device):
     Returns:
         torch.Tensor: Random masks for the particles in each jet.
     """
-    num_particles = num_particles.to(torch.int64)
+    num_particles = num_particles.to(device=device, dtype=torch.int64)
     assert (num_particles <= max_particles_per_jet).all()
-    masks = [
-        torch.concat((
-            torch.ones(int(n_ones), device=device),
-            torch.zeros(max_particles_per_jet - int(n_ones), device=device)
-        ))
-        for n_ones in num_particles
-    ]
-    return torch.stack(masks)
+    positions = torch.arange(max_particles_per_jet, device=device)
+    return (positions.unsqueeze(0) < num_particles.unsqueeze(1)).to(torch.float32)
