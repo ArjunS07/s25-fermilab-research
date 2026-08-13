@@ -34,6 +34,7 @@ from util.geometry.online_coupling import online_geodesic_coupling
 from util.metrics.qualification import loss_improvement_summary, optimizer_limit_reached
 from util.infra.rng import capture_rng_state, keyed_seed, keyed_torch_rng, restore_rng_state
 from util.infra.checkpoint_config import build_run_config, build_checkpoint
+from util.infra.grad_stats import collect_gradient_stats
 from util.infra.lr_schedule import build_epoch_scheduler, build_step_scheduler
 from training import flow_matching_loss
 from training.curriculum import CurriculumSampler
@@ -559,20 +560,8 @@ if __name__ == "__main__":
             accumulated_loss += loss.item()
 
             if is_last_accum_step:
-                grad_stats = {}
-                for name, param in raw_model.named_parameters():
-                    if param.grad is not None:
-                        current_weight = param.data.norm(2).item()
-                        grad_norm = param.grad.norm(2).item()
-                        grad_mean = param.grad.abs().mean().item()
-                        grad_stats[name] = {
-                            'norm': grad_norm,
-                            'mean': grad_mean,
-                            'weight_norm': current_weight,
-                            'update_ratio': grad_norm / (current_weight + 1e-8)
-                        }
-                
                 if is_rank0 and global_optimizer_step % 10 == 0:
+                    grad_stats = collect_gradient_stats(raw_model)
                     with open(f"{model_output_path}/gradient_stats.csv", "a") as f:
                         if global_optimizer_step == 0 and not cfg.paths.resume_weights:
                             f.write("epoch,step," + ",".join([f"{name}_grad_norm,{name}_mean,{name}_update_ratio"
