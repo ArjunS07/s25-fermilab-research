@@ -179,7 +179,6 @@ Raw `git diff ca0d8a5..HEAD --stat` line counts are **dominated by `src/download
 ## 9. Shell scripts and local workflow
 
 - **Git:** **`local.sh`**: multi-step smoke / local pipeline (**data → jet attribute NF → `cache_icp` → `train.py`** with documented flags).
-- **Git:** **`archive_incomplete.sh`** for archiving partial runs.
 
 ---
 

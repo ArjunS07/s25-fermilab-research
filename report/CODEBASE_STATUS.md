@@ -108,7 +108,7 @@ These are the big movements visible in **git history** and the **current tree** 
 - **Optional hyperbolic FM** (`util/hyperbolic.py`, `--use_hyperbolic`).
 - **DDP** training path and **`--resume_weights`**.
 - **Richer metrics** (relative/absolute kinematic histograms, jet-level plots, **p_T** comparisons) and **`infer.py`**; **`viz_lr.py`**, **`viz_curriculum.py`**.
-- **`local.sh`** and **`archive_incomplete.sh`** for local and housekeeping workflows.
+- **`local.sh`** for the remaining local workflow.
 - **NRP YAML** set expanded/renamed (ICP, hyperbolic, particle counts); **per-mode YAML duplication** reduced in favor of **CLI flags**.
 - **Lorentz COM boost** experimented with then **removed from the default training path** (code left commented, **`boost_equiv`** still in repo).
 - **Notebook / ancillary churn** (e.g. large `download.ipynb` updates) and removal of an old **jetnet tutorial** path—noise for line-count stats, not core logic.
