@@ -43,6 +43,14 @@ def test_full_rng_checkpoint_loads_under_pytorch_weights_only_default(tmp_path):
     restore_rng_state(checkpoint["rng_state"])
 
 
+def test_rng_restore_normalizes_array_state_to_cpu_byte_tensor():
+    state = capture_rng_state()
+    expected = torch.rand(4)
+    state["torch"] = state["torch"].numpy()
+    restore_rng_state(state)
+    assert torch.equal(expected, torch.rand(4))
+
+
 def test_keyed_partial_epoch_resume_matches_uninterrupted_updates():
     def run(model, optimizer, start_batch, stop_batch):
         for batch in range(start_batch, stop_batch):
