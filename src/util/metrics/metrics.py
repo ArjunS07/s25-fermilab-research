@@ -77,7 +77,11 @@ def run_save_metrics(
     # A handful of non-finite jets must not erase every metric. Drop whole invalid jets,
     # report the exact count, and compare the remaining generated sample to an equally-sized
     # prefix of the frozen test set.
-    tail_report = endpoint_tail_diagnostics(gen_samples)
+    # Tail diagnostics, physicality, and plotting all consume the same CPU tensor.
+    # Preserve one host copy instead of transferring the full generated sample for
+    # each downstream consumer.
+    gen_samples_cpu = gen_samples.detach().cpu()
+    tail_report = endpoint_tail_diagnostics(gen_samples_cpu)
     os.makedirs(output_path, exist_ok=True)
     with open(os.path.join(output_path, "endpoint_tail_diagnostics.json"), "w") as handle:
         json.dump(tail_report, handle, indent=2)
@@ -98,6 +102,7 @@ def run_save_metrics(
             gen_jet_eta = gen_jet_eta[finite_jet.to(gen_jet_eta.device)]
         if prior_samples is not None:
             prior_samples = prior_samples[finite_jet.to(prior_samples.device)]
+        gen_samples_cpu = gen_samples.detach().cpu()
 
     gen_polar_abs = cartesian_to_EtaPhiPtE(gen_samples.to(device))
     prior_polar_abs = (cartesian_to_EtaPhiPtE(prior_samples.to(device))
@@ -153,7 +158,7 @@ def run_save_metrics(
             "fraction_finite_max_abs_gt_1e6", 0.0),
     }
     try:
-        eval_info.update(physicality_isotropy_scalars(gen_samples.cpu(), test_polar_abs))
+        eval_info.update(physicality_isotropy_scalars(gen_samples_cpu, test_polar_abs))
         print(f"Physicality: E<0 {eval_info['frac_negative_energy']:.2%}, "
               f"spacelike {eval_info['frac_spacelike']:.2%}")
     except Exception as e:
@@ -161,7 +166,7 @@ def run_save_metrics(
 
     try:
         eval_report(
-            gen_cartesian=gen_samples.cpu(),
+            gen_cartesian=gen_samples_cpu,
             test_polar_abs=test_polar_abs,
             gen_polar_abs=gen_polar_abs,
             test_polar_rel=test_polar_rel,
