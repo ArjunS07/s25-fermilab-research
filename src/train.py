@@ -468,7 +468,7 @@ if __name__ == "__main__":
 
         optimizer.zero_grad()
         accumulation_steps = cfg.training.target_batch_size // cfg.training.batch_size
-        accumulated_loss = 0
+        accumulated_losses = []
         accumulated_batches = 0
         accumulated_field = {
             "n_real": 0, "target_norm_sum": 0.0, "target_norm_sq_sum": 0.0,
@@ -481,11 +481,12 @@ if __name__ == "__main__":
 
             batch_jet_info = batch_jet_info.to(device)
             batch_particle_info = batch_particle_info.to(device)
+            batch_jet_phi = batch_jet_phi.to(device)
 
             batch_jet_n_particles = batch_jet_info[:, 3]
             batch_jet_pt = batch_jet_info[:, 1]  # normalized pT from FeaturewiseLinear
             batch_jet_mass = batch_jet_info[:, 2]
-            encoded_jet_types = jet_attributes.one_hot_enc_jet_type(batch_jet_info[:, 4].long()).to(device)
+            encoded_jet_types = jet_attributes.one_hot_enc_jet_type(batch_jet_info[:, 4].long())
             # Legacy checkpoints consume raw pT. v2 uses model-scaled pT and mass.
             cond_pt = scale_condition_pt(batch_jet_pt, final_scale)
             condition_parts = [
@@ -495,30 +496,40 @@ if __name__ == "__main__":
             ]
             if cfg.model.include_mass_condition:
                 condition_parts.append((batch_jet_mass / final_scale).unsqueeze(-1))
-            batch_jet_info_cropped = torch.cat(condition_parts, dim=-1).to(device)
+            batch_jet_info_cropped = torch.cat(condition_parts, dim=-1)
 
             # Per-sample CFG dropout: each sample independently drops jet type + pT
             # conditioning. n_particles is preserved because it is already encoded in
             # the particle mask, so nulling it adds no guidance signal and only weakens
             # the unconditional-conditional gap.
-            with keyed_torch_rng(cfg.training.dropout_seed, epoch, i, rank, device):
-                dropout_mask = (torch.rand(batch_jet_info_cropped.shape[0], device=device)
-                                < cfg.training.cfg_null_dropout_rate)
-            if dropout_mask.any():
+            dropout_rate = cfg.training.cfg_null_dropout_rate
+            if dropout_rate <= 0:
+                dropout_mask = None
+            elif dropout_rate >= 1:
+                dropout_mask = torch.ones(
+                    batch_jet_info_cropped.shape[0], dtype=torch.bool, device=device
+                )
+            else:
+                with keyed_torch_rng(cfg.training.dropout_seed, epoch, i, rank, device):
+                    dropout_mask = (
+                        torch.rand(batch_jet_info_cropped.shape[0], device=device)
+                        < dropout_rate
+                    )
+            if dropout_mask is not None and (dropout_rate >= 1 or dropout_mask.any()):
                 null_for_batch = raw_model.make_null_cond(batch_jet_info_cropped)
                 batch_jet_info_cropped = torch.where(
                     dropout_mask.unsqueeze(-1), null_for_batch, batch_jet_info_cropped
                 )
 
-            x_1 = batch_particle_info[:, :, :4].to(device)
-            true_masks = batch_particle_info[:, :, 4].to(device)   # always use mask
+            x_1 = batch_particle_info[:, :, :4]
+            true_masks = batch_particle_info[:, :, 4]   # always use mask
             # Fresh prior noise every step (no frozen cache → no path memorization).
             with keyed_torch_rng(cfg.training.prior_seed, epoch, i, rank, device):
                 x_0 = gen_initial_distribution(
                     x_1=x_1, prior_dist=cfg.training.prior_dist,
-                    jet_features=batch_jet_info, jet_phi=batch_jet_phi.to(device),
+                    jet_features=batch_jet_info, jet_phi=batch_jet_phi,
                     device=device, model_scale=final_scale, particle_mask=true_masks,
-                ).to(device)
+                )
             # Online geodesic ICP coupling on the freshly drawn noise (minibatch OT-CFM).
             if cfg.training.coupling == "online_geodesic_icp":
                 x_0 = online_geodesic_coupling(x_0, x_1, true_masks, cfg.model.regulator_mass)
@@ -533,12 +544,12 @@ if __name__ == "__main__":
             if cfg.model.use_reference_vectors:
                 ref_vectors = build_reference_vectors(batch_jet_info[:, 0], batch_jet_info[:, 1],
                                                       final_scale, device,
-                                                      jet_phi=batch_jet_phi.to(device),
+                                                      jet_phi=batch_jet_phi,
                                                       jet_mass=(batch_jet_info[:, 2]
                                                                 if cfg.model.include_mass_condition else None))
 
             with keyed_torch_rng(cfg.training.time_seed, epoch, i, rank, device):
-                t = _sample_t(x_0.shape[0]).to(device)
+                t = _sample_t(x_0.shape[0])
             loss_result = flow_matching_loss(
                 model=model, raw_model=raw_model, config=cfg.model,
                 x0=x_0, x1=x_1, t=t, mask=true_masks,
@@ -557,7 +568,7 @@ if __name__ == "__main__":
             ctx = model.no_sync() if (cfg.training.distributed and not is_last_accum_step) else nullcontext()
             with ctx:
                 loss.backward()
-            accumulated_loss += loss.item()
+            accumulated_losses.append(loss.detach())
 
             if is_last_accum_step:
                 if is_rank0 and global_optimizer_step % 10 == 0:
@@ -583,6 +594,9 @@ if __name__ == "__main__":
                 if ema is not None:
                     ema.update(raw_model)
 
+                # Transfer all accumulated scalar losses together, then preserve the
+                # historical ordered Python-float summation exactly.
+                accumulated_loss = sum(torch.stack(accumulated_losses).cpu().tolist())
                 optimizer_loss = accumulated_loss / accumulated_batches
                 epoch_loss += optimizer_loss
                 epoch_optimizer_steps += 1
@@ -628,7 +642,7 @@ if __name__ == "__main__":
                                 f"{target_mean},{target_var},{prediction_mean},"
                                 f"{prediction_var}\n"
                             )
-                accumulated_loss = 0
+                accumulated_losses.clear()
                 accumulated_batches = 0
                 for key in accumulated_field:
                     accumulated_field[key] = 0
