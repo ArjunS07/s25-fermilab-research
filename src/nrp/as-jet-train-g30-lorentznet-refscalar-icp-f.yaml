@@ -20,7 +20,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              GIT_COMMIT="8b5994df27e23769b2970779f63a3e6378d8488e"
               if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
                 echo "ERROR: pin GIT_COMMIT before launching reference-scalar ICP F"
                 exit 1
