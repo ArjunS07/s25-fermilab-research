@@ -138,7 +138,7 @@ def generate_samples(
         if mismatches:
             raise ValueError(f"incompatible replay bundle metadata: {mismatches}")
 
-    with torch.no_grad():
+    with torch.inference_mode():
         model.eval()
         jet_attr_model.eval()
 
@@ -237,13 +237,27 @@ def generate_samples(
                 explosion_step = torch.full_like(failure_step, -1)
                 failure_records = [None] * current_batch_size
                 step_telemetry = [[] for _ in range(current_batch_size)]
+                full_batch_active = True
                 for i in range(integration_steps):
-                    active = failure_step < 0
-                    if not active.any():
-                        break
-                    refs_active = ref_vectors[active] if ref_vectors is not None else None
+                    used_full_batch = full_batch_active
+                    if used_full_batch:
+                        active = None
+                        active_y = y
+                        active_cond = cond
+                        active_masks = masks
+                        refs_active = ref_vectors
+                        active_indices = None
+                    else:
+                        active = failure_step < 0
+                        if not active.any():
+                            break
+                        active_y = y[active]
+                        active_cond = cond[active]
+                        active_masks = masks[active]
+                        refs_active = ref_vectors[active] if ref_vectors is not None else None
+                        active_indices = active.nonzero(as_tuple=False).flatten()
                     stepped, failed, telemetry_records, step_failure_records = _resilient_mass_shell_step(
-                        model, y[active], cond[active], masks[active], times[i], times[i + 1],
+                        model, active_y, active_cond, active_masks, times[i], times[i + 1],
                         regulator_mass=regulator_mass,
                         use_cfg=use_cfg,
                         guidance_weight=cfg_guidance_weight,
@@ -251,32 +265,51 @@ def generate_samples(
                         max_step_rapidity=mass_shell_max_step_rapidity,
                         max_substeps=mass_shell_max_substeps,
                     )
-                    y = y.clone()
-                    y[active] = stepped
-                    active_indices = active.nonzero(as_tuple=False).flatten()
-                    for local_idx, global_idx in enumerate(active_indices.tolist()):
-                        telemetry = telemetry_records[local_idx]
+                    if used_full_batch:
+                        y = stepped
+                    else:
+                        y = y.clone()
+                        y[active] = stepped
+                    for local_idx, telemetry in enumerate(telemetry_records):
+                        global_idx = (
+                            local_idx if used_full_batch
+                            else int(active_indices[local_idx])
+                        )
                         if telemetry is not None:
                             step_telemetry[global_idx].append({
                                 "integration_step": i,
                                 **telemetry,
                             })
                     if failed.any():
-                        failure_step[active_indices[failed]] = i
-                        for local_idx in failed.nonzero(as_tuple=False).flatten().tolist():
-                            global_idx = int(active_indices[local_idx])
+                        failed_local = failed.nonzero(as_tuple=False).flatten().tolist()
+                        if used_full_batch:
+                            failure_step[failed] = i
+                        else:
+                            failure_step[active_indices[failed]] = i
+                        for local_idx in failed_local:
+                            global_idx = (
+                                local_idx if used_full_batch
+                                else int(active_indices[local_idx])
+                            )
                             failure_records[global_idx] = {
                                 "integration_step": i,
                                 **(step_failure_records[local_idx] or {
                                     "reason": "unknown", "message": "missing failure record"
                                 }),
                             }
+                        full_batch_active = False
                     finite = torch.isfinite(stepped).all(dim=(1, 2))
                     max_abs = stepped.abs().amax(dim=(1, 2))
                     new_explosive = finite & (max_abs > 1e6)
-                    unset = explosion_step[active_indices] < 0
+                    unset = (
+                        explosion_step < 0 if used_full_batch
+                        else explosion_step[active_indices] < 0
+                    )
                     if (new_explosive & unset).any():
-                        explosion_step[active_indices[new_explosive & unset]] = i
+                        if used_full_batch:
+                            explosion_step[new_explosive & unset] = i
+                        else:
+                            explosion_step[active_indices[new_explosive & unset]] = i
                 x = y
             else:
                 # Vanilla ambient ODE integration.  Do not project, repair energies, or
