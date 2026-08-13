@@ -1,6 +1,6 @@
 apiVersion: batch/v1
 kind: Job
-metadata: {name: as-jet-train-g30-lnet-logmap-j}
+metadata: {name: as-jet-train-g30-lnet-logmap-j-r1}
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -20,12 +20,12 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              GIT_COMMIT="2770fe95e0811b64a5d1782956295c8c4a497976"
               if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
                 echo "ERROR: pin GIT_COMMIT before launching LorentzNet log-map J"
                 exit 1
               fi
-              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-lnet-logmap-j"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-lnet-logmap-j-r1"
               mkdir -p "$OUT" /tmp/runtime
               exec > >(tee "$OUT/run.log") 2>&1
               printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
