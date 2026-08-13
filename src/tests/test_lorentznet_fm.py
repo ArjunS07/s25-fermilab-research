@@ -247,6 +247,37 @@ def test_lgeb_uses_signed_sqrt_degree_sum_without_message_gate():
     )
 
 
+def test_lgeb_cached_support_matches_internal_support_bitwise():
+    torch.manual_seed(29)
+    width = 8
+    block = LorentzNetLGEB(width).double().eval()
+    h = torch.randn(2, 5, width, dtype=torch.float64)
+    y = torch.randn(2, 5, 4, dtype=torch.float64)
+    mask = torch.tensor([
+        [1, 1, 1, 0, 0],
+        [1, 1, 1, 1, 1],
+    ], dtype=torch.float64)
+    real = mask.bool()
+    support = (
+        real.unsqueeze(2)
+        & real.unsqueeze(1)
+        & ~torch.eye(5, dtype=torch.bool).unsqueeze(0)
+    )
+    support_f = support.unsqueeze(-1).to(h.dtype)
+    sqrt_degree = support.sum(2).clamp_min(1).to(h.dtype).sqrt().unsqueeze(-1)
+
+    expected_h, expected_y = block(h, y, mask)
+    actual_h, actual_y = block(
+        h, y, mask,
+        support=support,
+        support_f=support_f,
+        sqrt_degree=sqrt_degree,
+    )
+
+    assert torch.equal(actual_h, expected_h)
+    assert torch.equal(actual_y, expected_y)
+
+
 def test_output_support_excludes_self_terms():
     model = _model(references="none").eval()
     x = torch.tensor([[[1.2, 0.3, 0.4, 0.5]]], dtype=torch.float64)

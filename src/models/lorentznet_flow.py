@@ -100,16 +100,24 @@ class LorentzNetLGEB(nn.Module):
         mask: torch.Tensor,
         fixed_edge: torch.Tensor | None = None,
         condition_time: torch.Tensor | None = None,
+        support: torch.Tensor | None = None,
+        support_f: torch.Tensor | None = None,
+        sqrt_degree: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         batch, n_nodes, _ = h.shape
-        real = mask.bool()
-        support = (
-            real.unsqueeze(2)
-            & real.unsqueeze(1)
-            & ~torch.eye(n_nodes, device=h.device, dtype=torch.bool).unsqueeze(0)
-        )
-        support_f = support.unsqueeze(-1).to(h.dtype)
-        sqrt_degree = support.sum(dim=2).clamp_min(1).to(h.dtype).sqrt().unsqueeze(-1)
+        if support is None:
+            real = mask.bool()
+            support = (
+                real.unsqueeze(2)
+                & real.unsqueeze(1)
+                & ~torch.eye(n_nodes, device=h.device, dtype=torch.bool).unsqueeze(0)
+            )
+        if support_f is None:
+            support_f = support.unsqueeze(-1).to(h.dtype)
+        if sqrt_degree is None:
+            sqrt_degree = (
+                support.sum(dim=2).clamp_min(1).to(h.dtype).sqrt().unsqueeze(-1)
+            )
 
         hn = self.scalar_norm(h)
         hi = hn.unsqueeze(2).expand(-1, -1, n_nodes, -1)
@@ -293,6 +301,17 @@ class LorentzNetBackbone(nn.Module):
         dtype = next(self.parameters()).dtype
         x64 = x.to(torch.float64) * mask.unsqueeze(-1).to(torch.float64)
         y = x.to(dtype) * mask.unsqueeze(-1).to(dtype)
+        n_nodes = y.shape[1]
+        real = mask.bool()
+        support = (
+            real.unsqueeze(2)
+            & real.unsqueeze(1)
+            & ~torch.eye(n_nodes, device=x.device, dtype=torch.bool).unsqueeze(0)
+        )
+        support_f = support.unsqueeze(-1).to(dtype)
+        sqrt_degree = (
+            support.sum(dim=2).clamp_min(1).to(dtype).sqrt().unsqueeze(-1)
+        )
         h = self.initial_scalar_state(y, t, conditions, mask, references)
         condition_time = None
         if self.inject_condition_time_each_block:
@@ -317,10 +336,10 @@ class LorentzNetBackbone(nn.Module):
 
         for block in self.blocks:
             h, y = block(
-                h, y, mask, fixed_edge=fixed_edge, condition_time=condition_time
+                h, y, mask, fixed_edge=fixed_edge, condition_time=condition_time,
+                support=support, support_f=support_f, sqrt_degree=sqrt_degree,
             )
 
-        n_nodes = y.shape[1]
         hi = h.unsqueeze(2).expand(-1, -1, n_nodes, -1)
         hj = h.unsqueeze(1).expand(-1, n_nodes, -1, -1)
         if self.geometry_mode == "fixed_physical_geodesic":
@@ -330,11 +349,6 @@ class LorentzNetBackbone(nn.Module):
             edge = torch.stack((diff_sq, dot), dim=-1).to(dtype)
         coefficients = self.field_mlp(torch.cat((hi, hj, edge), dim=-1)).squeeze(-1)
         if self.particle_readout_mode == "normalized_logmap":
-            support = (
-                mask.bool().unsqueeze(2)
-                & mask.bool().unsqueeze(1)
-                & ~torch.eye(n_nodes, device=x.device, dtype=torch.bool).unsqueeze(0)
-            )
             raw = torch.einsum(
                 "bij,bijf->bif",
                 coefficients.to(torch.float64) * support,
@@ -344,11 +358,6 @@ class LorentzNetBackbone(nn.Module):
                 sqrt_degree = support.sum(dim=2).clamp_min(1).to(torch.float64).sqrt()
                 raw = raw / sqrt_degree.unsqueeze(-1)
         else:
-            support = (
-                mask.bool().unsqueeze(2)
-                & mask.bool().unsqueeze(1)
-                & ~torch.eye(n_nodes, device=x.device, dtype=torch.bool).unsqueeze(0)
-            )
             raw = torch.einsum("bij,bjf->bif", coefficients * support, y)
 
         if self.reference_mode != "none":
