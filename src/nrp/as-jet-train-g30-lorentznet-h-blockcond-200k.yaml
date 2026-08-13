@@ -20,7 +20,7 @@ spec:
             - -c
             - |
               set -euo pipefail
-              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              GIT_COMMIT="6b7164c48a8fa5c517dc9efdc7b5f67e88b0a314"
               if [ "$GIT_COMMIT" = "REPLACE_WITH_FROZEN_COMMIT_SHA" ]; then
                 echo "ERROR: pin GIT_COMMIT before launching H-BlockCond-200K"
                 exit 1
