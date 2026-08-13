@@ -132,12 +132,14 @@ def exp_map(p: torch.Tensor, u: torch.Tensor, m: float) -> torch.Tensor:
 
 
 def log_map(p: torch.Tensor, q: torch.Tensor, m: float,
-            return_distance: bool = False):
+            return_distance: bool = False,
+            return_inner_product: bool = False):
     """Logarithm map log_p(q): the tangent vector at p pointing toward q with norm d(p,q).
 
     p, q : (..., 4) on H_m. Returns (..., 4) tangent at p, input dtype. With
-    ``return_distance=True`` also returns the geodesic distance ``d`` (..., 1) that
-    the map already computes, so callers need not recompute ``sqrt(-<rel,rel>)``.
+    ``return_distance=True`` also returns the geodesic distance ``d`` (..., 1), and
+    ``return_inner_product=True`` returns ``<p,q>`` (..., 1). Both are already
+    computed by the map, so pairwise callers can reuse them without duplicate work.
     """
     p64, q64 = _to_f64(p, q)
     pq = dotsq4(p64, q64).unsqueeze(-1)              # (..., 1)
@@ -146,8 +148,12 @@ def log_map(p: torch.Tensor, q: torch.Tensor, m: float,
     arg = torch.clamp(pq / (m * m), min=1.0 + _EPS)
     d = m * torch.acosh(arg)                         # (..., 1)
     out = d * (w / w_norm.clamp(min=_EPS))           # 0 when p == q (d -> 0, w -> 0)
+    if return_distance and return_inner_product:
+        return out, d, pq
     if return_distance:
         return out, d
+    if return_inner_product:
+        return out, pq
     return out
 
 

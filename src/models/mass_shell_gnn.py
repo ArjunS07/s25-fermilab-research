@@ -31,13 +31,17 @@ class Geometry(NamedTuple):
     typed_refs: torch.Tensor       # (B,2,width) role-tagged reference tokens
     support: torch.Tensor          # (B,N,N) bool adjacency (no self, real-real)
     count: torch.Tensor            # (B,N) sqrt(degree), float64
+    count_model: torch.Tensor      # (B,N) sqrt(degree), model dtype
     mass: float
 
 
 def _geometry(x, mass, dtype):
-    rel, d = log_map(x.unsqueeze(2), x.unsqueeze(1), mass, return_distance=True)
+    rel, d, dot = log_map(
+        x.unsqueeze(2), x.unsqueeze(1), mass,
+        return_distance=True, return_inner_product=True,
+    )
     distance = d.squeeze(-1)
-    dot = dotsq4(x.unsqueeze(2), x.unsqueeze(1))
+    dot = dot.squeeze(-1)
     edge = torch.stack((torch.log1p(distance),
                         torch.log1p((dot / mass**2 - 1).clamp_min(0)),
                         distance / (distance + mass)), -1).to(dtype)
@@ -60,7 +64,7 @@ class MassShellGNNBlock(nn.Module):
                   hn.unsqueeze(1).expand(-1, n, -1, -1), g.edge,
                   g.cond[:, None, None, :].expand(-1, n, n, -1)]
         message = self.edge_mlp(torch.cat(fields, -1)) * g.support.unsqueeze(-1)
-        aggregate = message.sum(2) / g.count.unsqueeze(-1).to(message.dtype)
+        aggregate = message.sum(2) / g.count_model.unsqueeze(-1)
         node_fields = [hn, aggregate, g.cond[:, None, :].expand(-1, n, -1)]
         h = (h + self.node_mlp(torch.cat(node_fields, -1))) * g.mask.unsqueeze(-1).to(h.dtype)
         return h
@@ -92,9 +96,11 @@ class MassShellGNNBackbone(nn.Module):
         h = (self.node_seed((seed.sign() * torch.log1p(seed.abs())).to(dtype)) + cond[:, None])
         h *= mask.unsqueeze(-1).to(dtype)
         n = x.shape[1]
-        support = (mask.bool().unsqueeze(2) & mask.bool().unsqueeze(1) &
+        real = mask.bool()
+        support = (real.unsqueeze(2) & real.unsqueeze(1) &
                    ~torch.eye(n, device=x.device, dtype=torch.bool).unsqueeze(0))
         count = support.sum(-1).clamp_min(1).to(torch.float64).sqrt()
+        count_model = count.to(dtype)
         edge, direction = _geometry(x64, self.mass, dtype)
         projected = pushforward_to_tangent(x64.unsqueeze(2), refs.unsqueeze(1).expand(-1, n, -1, -1), self.mass)
         ref_norm = torch.sqrt((-normsq4(projected)).clamp_min(0))
@@ -103,7 +109,7 @@ class MassShellGNNBackbone(nn.Module):
         typed_refs = cond[:, None, :] + self.ref_roles[None]
         g = Geometry(x=x64, cond=cond, mask=mask, edge=edge, direction=direction,
                      projected_refs=projected, typed_refs=typed_refs, support=support,
-                     count=count, mass=self.mass)
+                     count=count, count_model=count_model, mass=self.mass)
         for block in self.blocks:
             h = block(h, g)
         hi = h.unsqueeze(2).expand(-1, -1, n, -1); hj = h.unsqueeze(1).expand(-1, n, -1, -1)

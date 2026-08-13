@@ -43,11 +43,12 @@ def _physical_geodesic_geometry(
     x: torch.Tensor, mass: float, dtype: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Invariant edge features, distance, and bounded log-map directions on H_m."""
-    relative, distance = log_map(
-        x.unsqueeze(2), x.unsqueeze(1), mass, return_distance=True
+    relative, distance, dot = log_map(
+        x.unsqueeze(2), x.unsqueeze(1), mass,
+        return_distance=True, return_inner_product=True,
     )
     d = distance.squeeze(-1)
-    dot = dotsq4(x.unsqueeze(2), x.unsqueeze(1))
+    dot = dot.squeeze(-1)
     edge = torch.stack(
         (
             torch.log1p(d),

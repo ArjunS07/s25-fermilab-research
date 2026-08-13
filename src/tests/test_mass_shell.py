@@ -127,6 +127,19 @@ def test_distance_equals_tangent_norm_of_log():
     assert torch.allclose(norm, geodesic_distance(p, q, 1.0), atol=1e-6)
 
 
+def test_log_map_reuses_distance_and_inner_product_bitwise():
+    p, _ = _shell_points(seed=15)
+    q, _ = _shell_points(seed=16)
+
+    relative, distance, inner = log_map(
+        p, q, 1.0, return_distance=True, return_inner_product=True
+    )
+
+    assert torch.equal(relative, log_map(p, q, 1.0))
+    assert torch.equal(distance.squeeze(-1), geodesic_distance(p, q, 1.0))
+    assert torch.equal(inner.squeeze(-1), dotsq4(p, q))
+
+
 @pytest.mark.parametrize("m", [1.0, 0.8])
 def test_interpolant_endpoints(m):
     x0, _ = _shell_points(seed=7, m=m)
