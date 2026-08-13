@@ -4,7 +4,11 @@ import numpy as np
 import torch
 
 from tests.lorentz_test_utils import apply_transform, random_proper_transform
-from util.geometry.online_coupling import geodesic_permutation, online_geodesic_coupling
+from util.geometry.online_coupling import (
+    _batched_geodesic_cost_matrices,
+    geodesic_permutation,
+    online_geodesic_coupling,
+)
 
 M = 0.1
 
@@ -89,3 +93,19 @@ def test_batch_matches_per_jet_permutation():
     for b in range(B):
         perm = geodesic_permutation(x0[b], x1[b], M)
         assert torch.allclose(paired[b], x0[b][torch.as_tensor(perm, dtype=torch.long)])
+
+
+def test_batched_costs_are_bitwise_equal_to_per_jet_costs():
+    from util.geometry.mass_shell import geodesic_cost_matrix
+
+    B, P = 4, 9
+    g = torch.Generator().manual_seed(17)
+    x0 = torch.randn(B, P, 4, generator=g, dtype=torch.float64)
+    x1 = torch.randn(B, P, 4, generator=g, dtype=torch.float64)
+
+    expected = torch.stack([
+        geodesic_cost_matrix(x0[b], x1[b], M) for b in range(B)
+    ])
+    actual = _batched_geodesic_cost_matrices(x0, x1, M)
+
+    assert torch.equal(actual, expected)

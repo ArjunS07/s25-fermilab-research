@@ -19,7 +19,20 @@ import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment
 
-from util.geometry.mass_shell import geodesic_cost_matrix
+from util.geometry.mass_shell import (
+    geodesic_cost_matrix,
+    geodesic_distance,
+    project_to_shell,
+)
+
+
+def _batched_geodesic_cost_matrices(
+    x0: torch.Tensor, x1: torch.Tensor, regulator_mass: float
+) -> torch.Tensor:
+    """Return all per-jet pairwise costs without changing per-pair arithmetic."""
+    p0 = project_to_shell(x0.to(torch.float64), regulator_mass)
+    p1 = project_to_shell(x1.to(torch.float64), regulator_mass)
+    return geodesic_distance(p0.unsqueeze(2), p1.unsqueeze(1), regulator_mass)
 
 
 def geodesic_permutation(x0_real: torch.Tensor, x1_real: torch.Tensor,
@@ -64,14 +77,25 @@ def online_geodesic_coupling(x0: torch.Tensor, x1: torch.Tensor, mask: torch.Ten
     # Compute the (CPU, scipy) assignment on host copies moved once per batch, then apply the
     # permutation on-device. Slicing device tensors per jet would force one GPU→CPU sync per
     # jet inside geodesic_permutation — costly over a long run; two transfers per batch instead.
-    x0_cpu = x0.detach().to("cpu")
-    x1_cpu = x1.detach().to("cpu")
-    n_real = mask.to(torch.long).sum(dim=1).tolist()
+    x0_cpu = x0.detach().to(device="cpu", dtype=torch.float64)
+    x1_cpu = x1.detach().to(device="cpu", dtype=torch.float64)
+    n_real = mask.detach().to(device="cpu", dtype=torch.long).sum(dim=1).tolist()
+    if max(n_real, default=0) <= 1:
+        return paired
+
+    costs = _batched_geodesic_cost_matrices(x0_cpu, x1_cpu, regulator_mass)
+    if assignment_cost == "squared_geodesic":
+        costs = costs.square()
+    elif assignment_cost != "geodesic":
+        raise ValueError(f"unsupported mass-shell assignment cost: {assignment_cost!r}")
+    costs_np = costs.numpy()
+
     for b in range(x0.shape[0]):
         n = int(n_real[b])
         if n <= 1:
             # 0 or 1 real particle: the assignment is trivially the identity.
             continue
-        perm = geodesic_permutation(x0_cpu[b, :n], x1_cpu[b, :n], regulator_mass, assignment_cost)
+        _, col_ind = linear_sum_assignment(costs_np[b, :n, :n])
+        perm = np.argsort(col_ind).astype(np.int32)
         paired[b, :n] = x0[b, :n][torch.as_tensor(perm, device=x0.device, dtype=torch.long)]
     return paired
