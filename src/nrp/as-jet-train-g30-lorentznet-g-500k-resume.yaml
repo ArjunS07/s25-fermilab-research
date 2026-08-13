@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-train-g30-lnet-g-500k-resume-r2}
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: train
+          image: python:3.10-slim
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              GIT_COMMIT="ed05f03002c5cc71096761fb63c4c5d288e4dd1e"
+              OUT="/mnt/data/output/2026-08-12_21-59-55--67b51810-3a53-4264-a94d-794fa613ea6d-g30-lnet-g-500k"
+              CHECKPOINT="$OUT/train/models/latest_checkpoint.pth"
+              test -f "$CHECKPOINT"
+              exec > >(tee -a "$OUT/run.log") 2>&1
+              echo "Resuming G-500K from $CHECKPOINT at $(date -Is)"
+              mkdir -p /tmp/runtime
+              tar -xf /mnt/data/caches/runtime/python-env-py310-torch271.tar -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+                --config configs/g30-lorentznet-g-rfm-logmap-lognormal-500k.yaml \
+                --set paths.output_path="$OUT" \
+                --set paths.resume_weights="$CHECKPOINT"
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 24Gi}
