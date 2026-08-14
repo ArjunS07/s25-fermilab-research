@@ -252,6 +252,31 @@ def test_next_campaign_configs_validate(filename, steps, block_context):
 
 
 @pytest.mark.parametrize(
+    "filename,num_particles,batch_size,inference_batch_size",
+    [
+        ("gqt30-lorentznet-h-rfm-logmap-200k.yaml", 30, 50, 128),
+        ("gqt150-lorentznet-h-rfm-logmap-200k.yaml", 150, 5, 16),
+    ],
+)
+def test_joint_gqt_pipeline_configs_validate(
+    filename, num_particles, batch_size, inference_batch_size
+):
+    path = os.path.join(os.path.dirname(__file__), "..", "configs", filename)
+    cfg = build_config(TrainRunConfig, path)
+    assert cfg.data.jet_types == ["g", "q", "t"]
+    assert cfg.data.num_particles == num_particles
+    assert cfg.model.reference_mode == "normalized_tangent_readout"
+    assert cfg.model.scalar_init_mode == "reference_contractions"
+    assert cfg.model.particle_readout_mode == "normalized_logmap"
+    assert cfg.model.field_degree_normalization == "sqrt"
+    assert cfg.training.batch_size == batch_size
+    assert cfg.training.target_batch_size == 250
+    assert cfg.training.max_optimizer_steps == 200000
+    assert cfg.training.coupling == "online_geodesic_icp"
+    assert cfg.inference.batch_size == inference_batch_size
+
+
+@pytest.mark.parametrize(
     "base_name,long_name",
     [
         (
