@@ -236,6 +236,7 @@ def test_logmap_factorial_configs_validate(filename, reference_mode, geometry_mo
     "filename,steps,block_context",
     [
         ("g30-lorentznet-h-rfm-logmap-tangentrefs-500k.yaml", 500000, False),
+        ("g30-lorentznet-h-rfm-logmap-tangentrefs-994k.yaml", 994000, False),
         ("g30-lorentznet-g-rfm-logmap-lognormal-500k.yaml", 500000, False),
         ("g30-lorentznet-h-rfm-logmap-blockcond-200k.yaml", 200000, True),
     ],
@@ -284,12 +285,16 @@ def test_joint_gqt_pipeline_configs_validate(
             "g30-lorentznet-h-rfm-logmap-tangentrefs-500k.yaml",
         ),
         (
+            "g30-lorentznet-h-rfm-logmap-tangentrefs.yaml",
+            "g30-lorentznet-h-rfm-logmap-tangentrefs-994k.yaml",
+        ),
+        (
             "g30-lorentznet-g-rfm-logmap-lognormal.yaml",
             "g30-lorentznet-g-rfm-logmap-lognormal-500k.yaml",
         ),
     ],
 )
-def test_500k_arms_only_change_budget_and_budget_dependent_schedule(base_name, long_name):
+def test_long_arms_only_change_budget_and_budget_dependent_schedule(base_name, long_name):
     root = os.path.join(os.path.dirname(__file__), "..", "configs")
     base = build_config(TrainRunConfig, os.path.join(root, base_name)).model_dump()
     long = build_config(TrainRunConfig, os.path.join(root, long_name)).model_dump()
