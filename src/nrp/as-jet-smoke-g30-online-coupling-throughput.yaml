@@ -99,13 +99,21 @@ spec:
 ---
 apiVersion: batch/v1
 kind: Job
-metadata: {name: as-jet-smoke-g30-icp-gpu}
+metadata: {name: as-jet-smoke-g30-icp-gpu-r2}
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
   template:
     spec:
       restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
       volumes:
         - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
       containers:
@@ -124,7 +132,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              ARM="gpu"
+              ARM="gpu-r2"
               GIT_COMMIT="8bd68dc85a9bd6eaa0e943fb4386509e4533bd12"
               CONFIG="configs/g30-lorentznet-h-rfm-logmap-tangentrefs-994k.yaml"
               OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-icp-$ARM-smoke"
@@ -136,7 +144,7 @@ spec:
               "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
               mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
               cd /tmp/repo/src
-              "$PYTHON" -m pytest -q tests/test_online_coupling.py
+              "$PYTHON" -c 'import torch; from util.geometry.online_coupling import online_geodesic_coupling as f; B,P=8,30; g=torch.Generator().manual_seed(23); x0=torch.randn(B,P,4,generator=g); x1=torch.randn(B,P,4,generator=g); mask=torch.zeros(B,P); ns=[30,27,24,20,12,6,1,0]; [mask.__setitem__((b,slice(None,n)),1) for b,n in enumerate(ns)]; cpu=f(x0,x1,mask,0.1); gpu=f(x0.cuda(),x1.cuda(),mask.cuda(),0.1).cpu(); print("CUDA coupling parity:",torch.equal(cpu,gpu)); assert torch.equal(cpu,gpu)'
               "$PYTHON" prepare_stage1.py --output-path "$OUT" --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 --model-version v3
               "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
                 --config "$CONFIG" --set paths.output_path="$OUT" \
