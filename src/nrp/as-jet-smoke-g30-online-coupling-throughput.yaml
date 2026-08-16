@@ -1,0 +1,149 @@
+# Controlled 500-optimizer-step throughput comparison under the production CPU quota.
+# Arms: original per-jet CPU costs; batched CPU costs with caps; GPU costs with caps.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-smoke-g30-icp-original}
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              ARM="original"
+              GIT_COMMIT="2770fe95e0811b64a5d1782956295c8c4a497976"
+              CONFIG="configs/g30-lorentznet-h-rfm-logmap-tangentrefs.yaml"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-icp-$ARM-smoke"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              tar -xf /mnt/data/caches/runtime/python-env-py310-torch271.tar -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" -c 'import torch; print(f"CPU thread pools: intra_op={torch.get_num_threads()} inter_op={torch.get_num_interop_threads()}")'
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 --model-version v3
+              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+                --config "$CONFIG" --set paths.output_path="$OUT" \
+                --set training.num_epochs=2 --set training.max_optimizer_steps=500 \
+                --set training.stability_probe_steps="[0,500]" \
+                --set inference.n_samples=1000 --set inference.integration_steps=4
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 24Gi}
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-smoke-g30-icp-capped}
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              ARM="capped"
+              GIT_COMMIT="123068041b94ba936523c16f37e6f6454da1b92a"
+              CONFIG="configs/g30-lorentznet-h-rfm-logmap-tangentrefs-994k.yaml"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-icp-$ARM-smoke"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              tar -xf /mnt/data/caches/runtime/python-env-py310-torch271.tar -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" -c 'import torch; print(f"CPU thread pools: intra_op={torch.get_num_threads()} inter_op={torch.get_num_interop_threads()}")'
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 --model-version v3
+              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+                --config "$CONFIG" --set paths.output_path="$OUT" \
+                --set training.num_epochs=2 --set training.max_optimizer_steps=500 \
+                --set training.stability_probe_steps="[0,500]" \
+                --set inference.n_samples=1000 --set inference.integration_steps=4
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 24Gi}
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-smoke-g30-icp-gpu}
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              ARM="gpu"
+              GIT_COMMIT="8bd68dc85a9bd6eaa0e943fb4386509e4533bd12"
+              CONFIG="configs/g30-lorentznet-h-rfm-logmap-tangentrefs-994k.yaml"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-icp-$ARM-smoke"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              tar -xf /mnt/data/caches/runtime/python-env-py310-torch271.tar -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" -m pytest -q tests/test_online_coupling.py
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 --model-version v3
+              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+                --config "$CONFIG" --set paths.output_path="$OUT" \
+                --set training.num_epochs=2 --set training.max_optimizer_steps=500 \
+                --set training.stability_probe_steps="[0,500]" \
+                --set inference.n_samples=1000 --set inference.integration_steps=4
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 24Gi}
