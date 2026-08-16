@@ -73,29 +73,39 @@ def online_geodesic_coupling(x0: torch.Tensor, x1: torch.Tensor, mask: torch.Ten
     """
     if x0.shape != x1.shape:
         raise ValueError(f"x0 and x1 must have the same shape, got {tuple(x0.shape)} vs {tuple(x1.shape)}")
-    paired = x0.clone()
-    # Compute the (CPU, scipy) assignment on host copies moved once per batch, then apply the
-    # permutation on-device. Slicing device tensors per jet would force one GPU→CPU sync per
-    # jet inside geodesic_permutation — costly over a long run; two transfers per batch instead.
-    x0_cpu = x0.detach().to(device="cpu", dtype=torch.float64)
-    x1_cpu = x1.detach().to(device="cpu", dtype=torch.float64)
+    # The CPU implementation deliberately stays per-jet. A batched float64 PyTorch cost
+    # calculation recruits the whole host thread pool; under the 2.4-core NRP CFS quota that
+    # exhausted the quota early in almost every period and starved the GPU. On CUDA, build the
+    # dense costs on-device and transfer only the resulting small cost tensor for SciPy's
+    # Hungarian solve.
     n_real = mask.detach().to(device="cpu", dtype=torch.long).sum(dim=1).tolist()
     if max(n_real, default=0) <= 1:
+        return x0.clone()
+
+    if x0.device.type == "cpu":
+        paired = x0.clone()
+        for b, n in enumerate(n_real):
+            if n > 1:
+                perm = geodesic_permutation(
+                    x0[b, :n], x1[b, :n], regulator_mass, assignment_cost
+                )
+                index = torch.as_tensor(perm, device=x0.device, dtype=torch.long)
+                paired[b, :n] = x0[b, :n][index]
         return paired
 
-    costs = _batched_geodesic_cost_matrices(x0_cpu, x1_cpu, regulator_mass)
+    costs = _batched_geodesic_cost_matrices(x0.detach(), x1.detach(), regulator_mass)
     if assignment_cost == "squared_geodesic":
         costs = costs.square()
     elif assignment_cost != "geodesic":
         raise ValueError(f"unsupported mass-shell assignment cost: {assignment_cost!r}")
-    costs_np = costs.numpy()
+    costs_np = costs.cpu().numpy()
 
-    for b in range(x0.shape[0]):
-        n = int(n_real[b])
-        if n <= 1:
-            # 0 or 1 real particle: the assignment is trivially the identity.
-            continue
-        _, col_ind = linear_sum_assignment(costs_np[b, :n, :n])
-        perm = np.argsort(col_ind).astype(np.int32)
-        paired[b, :n] = x0[b, :n][torch.as_tensor(perm, device=x0.device, dtype=torch.long)]
-    return paired
+    # Build padded identity permutations on the host, fill the real prefixes with their
+    # Hungarian solutions, then apply every jet permutation in one device gather.
+    permutations = torch.arange(x0.shape[1], dtype=torch.long).expand(x0.shape[0], -1).clone()
+    for b, n in enumerate(n_real):
+        if n > 1:
+            _, col_ind = linear_sum_assignment(costs_np[b, :n, :n])
+            permutations[b, :n] = torch.from_numpy(np.argsort(col_ind).astype(np.int64))
+    gather_index = permutations.to(x0.device).unsqueeze(-1).expand_as(x0)
+    return torch.gather(x0, dim=1, index=gather_index)

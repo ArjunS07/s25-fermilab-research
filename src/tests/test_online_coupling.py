@@ -1,6 +1,7 @@
 """Tests for the online per-batch geodesic ICP coupling (fresh-noise flow matching)."""
 
 import numpy as np
+import pytest
 import torch
 
 from tests.lorentz_test_utils import apply_transform, random_proper_transform
@@ -108,4 +109,17 @@ def test_batched_costs_are_bitwise_equal_to_per_jet_costs():
     ])
     actual = _batched_geodesic_cost_matrices(x0, x1, M)
 
+    assert torch.equal(actual, expected)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_cuda_batch_matches_cpu_per_jet_assignments():
+    """The accelerated training path must preserve the established CPU coupling."""
+    B, P = 8, 30
+    g = torch.Generator().manual_seed(23)
+    x0 = torch.randn(B, P, 4, generator=g)
+    x1 = torch.randn(B, P, 4, generator=g)
+    mask = torch.ones(B, P)
+    expected = online_geodesic_coupling(x0, x1, mask, M)
+    actual = online_geodesic_coupling(x0.cuda(), x1.cuda(), mask.cuda(), M).cpu()
     assert torch.equal(actual, expected)

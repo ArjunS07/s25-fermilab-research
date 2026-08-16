@@ -59,6 +59,14 @@ class PairedDataset(torch.utils.data.Dataset):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)    
+    if "TORCH_NUM_THREADS" in os.environ:
+        torch.set_num_threads(int(os.environ["TORCH_NUM_THREADS"]))
+    if "TORCH_NUM_INTEROP_THREADS" in os.environ:
+        torch.set_num_interop_threads(int(os.environ["TORCH_NUM_INTEROP_THREADS"]))
+    print(
+        f"CPU thread pools: intra_op={torch.get_num_threads()} "
+        f"inter_op={torch.get_num_interop_threads()}"
+    )
     torch.manual_seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
     random.seed(RANDOM_SEED)
