@@ -99,7 +99,7 @@ spec:
 ---
 apiVersion: batch/v1
 kind: Job
-metadata: {name: as-jet-smoke-g30-icp-gpu-r2}
+metadata: {name: as-jet-smoke-g30-icp-gpu-r3}
 spec:
   ttlSecondsAfterFinished: 3600
   backoffLimit: 0
@@ -132,7 +132,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              ARM="gpu-r2"
+              ARM="gpu-r3"
               GIT_COMMIT="8bd68dc85a9bd6eaa0e943fb4386509e4533bd12"
               CONFIG="configs/g30-lorentznet-h-rfm-logmap-tangentrefs-994k.yaml"
               OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-icp-$ARM-smoke"
@@ -149,6 +149,7 @@ spec:
               "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
                 --config "$CONFIG" --set paths.output_path="$OUT" \
                 --set training.num_epochs=2 --set training.max_optimizer_steps=500 \
+                --set training.lr_warmup_steps=50 \
                 --set training.stability_probe_steps="[0,500]" \
                 --set inference.n_samples=1000 --set inference.integration_steps=4
           volumeMounts: [{name: data, mountPath: /mnt/data}]
