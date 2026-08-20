@@ -8,11 +8,36 @@ import jetnet.evaluation as jetnet_eval
 
 from util.metrics.eval_report import eval_report, physicality_isotropy_scalars
 from util.metrics.tail_diagnostics import endpoint_tail_diagnostics
-from util.data.fpnd_input import build_fpnd_input
+from util.data.fpnd_input import build_fpnd_input, iter_fpnd_class_subsets
 
 # Fixed seed so the random jet-phi assignment (and hence the isotropy reference) is
 # reproducible across runs — the harness is a fixed yardstick (experiment plan 0.4).
 EVAL_SEED = 42
+
+
+def _compute_fpnd_by_jet_type(gen_fpnd_input, gen_jet_types, jet_types):
+    """Compute FPND against each class reference using only that generated class.
+
+    ``gen_jet_types`` contains indices into ``jet_types``.  Passing a mixed batch
+    to every class-specific ParticleNet reference produces meaningless distances,
+    so each reference must see only the matching generated subset.
+    """
+    fpnd_by_type = {}
+    for jet_type, class_fpnd_input in iter_fpnd_class_subsets(
+        gen_fpnd_input, gen_jet_types, jet_types
+    ):
+        try:
+            fpnd_by_type[f"fpnd_{jet_type}"] = jetnet_eval.fpnd(
+                # JetNet's pretrained ParticleNet weights are float32.  The
+                # mass-shell pipeline deliberately retains float64 through
+                # generation, so cast only at this external model boundary.
+                jets=class_fpnd_input.float(),
+                jet_type=jet_type,
+                use_tqdm=False,
+            )
+        except Exception as e:
+            print(f"Error occurred while computing fpnd for {jet_type}: {e}")
+    return fpnd_by_type
 
 
 def __x_test_to_abs(X_test, device='cpu'):
@@ -249,18 +274,9 @@ def run_save_metrics(
               "JetNet's published values).")
         gen_fpnd_input = gen_polar_rel
 
-    for jet_type in jet_types:
-        try:
-            eval_info[f"fpnd_{jet_type}"] = jetnet_eval.fpnd(
-                # JetNet's pretrained ParticleNet weights are float32.  The
-                # mass-shell pipeline deliberately retains float64 through
-                # generation, so cast only at this external model boundary.
-                jets=gen_fpnd_input.float(),
-                jet_type=jet_type,
-                use_tqdm=False
-            )
-        except Exception as e:
-            print(f"Error occurred while computing fpnd for {jet_type}: {e}")
+    eval_info.update(
+        _compute_fpnd_by_jet_type(gen_fpnd_input, gen_jet_types, jet_types)
+    )
 
     with open(f"{output_path}/metrics.csv", "w") as f:
         f.write("Metric,Value\n")

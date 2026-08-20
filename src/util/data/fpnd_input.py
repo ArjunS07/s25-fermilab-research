@@ -24,6 +24,19 @@ them through this helper.
 import torch
 
 
+def iter_fpnd_class_subsets(fpnd_input, class_labels, jet_types):
+    """Yield each configured jet type with only its matching generated jets."""
+    if fpnd_input.shape[0] != class_labels.shape[0]:
+        raise ValueError("FPND inputs and generated class labels must have equal length")
+
+    for class_index, jet_type in enumerate(jet_types):
+        class_mask = class_labels == class_index
+        if class_mask.any():
+            yield jet_type, fpnd_input[class_mask]
+        else:
+            print(f"WARNING: no generated {jet_type} jets; skipping fpnd_{jet_type}")
+
+
 def build_fpnd_input(polar_abs, jet_eta, jet_pt, mask, eps=1e-8):
     """Canonical (eta_rel, phi_rel, pt_rel) FPND input from absolute polar coords.
 
