@@ -1,0 +1,77 @@
+# Corrected class-filtered FPND reevaluation of the completed GQT-30 H-200K run.
+# Generate 150K mixed samples so each class contributes approximately 50K jets.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-eval-gqt30-lnet-h-200k-fpndfix}
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: eval
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              GIT_COMMIT="1a0d91842c6f455a8374ad4695f39d8a1af62706"
+              SOURCE_RUN="/mnt/data/output/2026-08-18_20-21-05--d01f7015-4fe7-49a3-926a-d8d239238bc4-gqt30-lnet-h-200k-r3"
+              CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt30-lnet-h-200k-fpndfix"
+              test -s "$CHECKPOINT"
+              test -s "$ENV_ARCHIVE"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf '%s\n' "$SOURCE_RUN" > "$OUT/source_run.txt"
+              printf '%s\n' "$CHECKPOINT" > "$OUT/checkpoint.txt"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" infer.py \
+                --config configs/infer-g30-mass-shell.yaml \
+                --set data.jet_types="[g,q,t]" \
+                --set paths.checkpoint_path="$CHECKPOINT" \
+                --set paths.output_path="$SOURCE_RUN" \
+                --set paths.out_dir="$OUT/eval" \
+                --set inference.n_samples=150000 \
+                --set inference.batch_size=128 \
+                --set inference.integration_steps=64 \
+                --set inference.prior_dist=axis_aligned_lognormal \
+                --set inference.use_ema_weights=true \
+                --set inference.skip_metrics=false
+              test -s "$OUT/eval/samples.pt"
+              test -s "$OUT/eval/prior_samples.pt"
+              test -s "$OUT/eval/replay_bundle.pt"
+              test -s "$OUT/eval/generation_diagnostics.json"
+              test -s "$OUT/eval/metrics.csv"
+              test -s "$OUT/eval/summary.json"
+              "$PYTHON" -c 'import json,sys; d=json.load(open(sys.argv[1])); m=d["metrics"]; assert d["stage_status"]["samples"]["status"]=="ok"; assert d["stage_status"]["metrics"]["status"]=="ok"; assert all(k in m for k in ("fpnd_g","fpnd_q","fpnd_t")); print({k:m[k] for k in ("fpnd_g","fpnd_q","fpnd_t")})' "$OUT/eval/summary.json"
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 32Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 32Gi}

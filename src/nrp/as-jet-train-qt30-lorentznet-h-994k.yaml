@@ -1,0 +1,79 @@
+# Fully trained Q/T specialist ceilings. The G specialist is the already-running
+# as-jet-train-g30-lnet-h-994k-r2 job.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-train-qt30-lnet-h-994k}
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 0
+  completions: 2
+  parallelism: 2
+  completionMode: Indexed
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        -
+          name: train
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: JOB_COMPLETION_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              case "$JOB_COMPLETION_INDEX" in
+                0) JET_TYPE=q ;;
+                1) JET_TYPE=t ;;
+                *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
+              esac
+              GIT_COMMIT="1a0d91842c6f455a8374ad4695f39d8a1af62706"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-${JET_TYPE}30-lnet-h-994k"
+              test -s "$ENV_ARCHIVE"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf '%s\n' "$JET_TYPE" > "$OUT/jet_type.txt"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" \
+                --cache-dir /mnt/data/caches/stage1 --jet-types "$JET_TYPE" \
+                --num-particles 30 --model-version v3
+              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+                --config configs/g30-lorentznet-h-rfm-logmap-tangentrefs-994k.yaml \
+                --set data.jet_types="[$JET_TYPE]" \
+                --set paths.output_path="$OUT" \
+                --set training.num_epochs=2200
+              test -s "$OUT/train/models/final_checkpoint.pth"
+              test -s "$OUT/train/metrics.csv"
+              test -s "$OUT/train/summary.json"
+              "$PYTHON" -c 'import json,sys,torch; p=sys.argv[1]; c=torch.load(p+"/models/final_checkpoint.pth",map_location="cpu",weights_only=False); s=json.load(open(p+"/summary.json")); assert c["global_optimizer_step"]==994000; assert s["global_optimizer_step"]==994000' "$OUT/train"
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 24Gi}
