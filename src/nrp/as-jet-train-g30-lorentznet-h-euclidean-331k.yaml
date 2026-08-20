@@ -1,0 +1,103 @@
+# Deadline campaign: parameter-matched Euclidean-compatible control for H-331K.
+# The checked-in config contract test freezes every non-geometric choice, including ICP.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-train-g30-lnet-h-euclidean-331k}
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              GIT_COMMIT="e1e05230638915874afd735b6b2466aa9365d17e"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-lnet-h-euclidean-331k"
+              test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
+              test -s "$ENV_ARCHIVE"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf '%s\n' "geometry_stack_ablation=euclidean" > "$OUT/treatment.txt"
+              printf '%s\n' "coupling_control=online_geodesic_icp" >> "$OUT/treatment.txt"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+
+              # Dependency-free preflight: validate the serialized treatment and verify
+              # that Euclidean H is exactly parameter matched to the RFM H model.
+              "$PYTHON" - <<'PY'
+              from config import TrainRunConfig, build_config
+              from models.factory import build_flow_model
+
+              e = build_config(
+                  TrainRunConfig, "configs/g30-lorentznet-h-euclidean-331k.yaml"
+              )
+              r = build_config(
+                  TrainRunConfig,
+                  "configs/g30-lorentznet-h-rfm-logmap-tangentrefs-994k.yaml",
+              )
+              assert e.model.flow_geometry == "euclidean"
+              assert e.training.coupling == r.training.coupling == "online_geodesic_icp"
+              assert e.training.prior_dist == r.training.prior_dist == "axis_aligned_lognormal"
+              assert e.training.max_optimizer_steps == 331000
+              assert e.training.lr_schedule == "monotonic_cosine"
+              assert e.training.lr_step_unit == "optimizer_step"
+              em = build_flow_model(e.model, 5)
+              rm = build_flow_model(r.model, 5)
+              assert list(em.state_dict()) == list(rm.state_dict())
+              assert all(a.shape == b.shape for a, b in zip(
+                  em.state_dict().values(), rm.state_dict().values()
+              ))
+              assert sum(p.numel() for p in em.parameters()) == sum(
+                  p.numel() for p in rm.parameters()
+              )
+              print("Validated Euclidean treatment, fixed ICP, and exact parameter parity")
+              PY
+
+              # Coupling implementation must retain exact CPU/CUDA assignment parity.
+              "$PYTHON" -c 'import torch; from util.geometry.online_coupling import online_geodesic_coupling as f; B,P=8,30; g=torch.Generator().manual_seed(23); x0=torch.randn(B,P,4,generator=g); x1=torch.randn(B,P,4,generator=g); mask=torch.ones(B,P); cpu=f(x0,x1,mask,0.1); gpu=f(x0.cuda(),x1.cuda(),mask.cuda(),0.1).cpu(); assert torch.equal(cpu,gpu); print("CUDA coupling parity: exact")'
+
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" \
+                --cache-dir /mnt/data/caches/stage1 --jet-types g \
+                --num-particles 30 --model-version v3
+              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+                --config configs/g30-lorentznet-h-euclidean-331k.yaml \
+                --set paths.output_path="$OUT"
+
+              test -s "$OUT/train/models/final_checkpoint.pth"
+              test -s "$OUT/train/models/latest_checkpoint.pth"
+              test -s "$OUT/train/metrics.csv"
+              test -s "$OUT/train/summary.json"
+              "$PYTHON" -c 'import csv,json,sys,torch; p=sys.argv[1]; c=torch.load(p+"/models/final_checkpoint.pth",map_location="cpu",weights_only=False); s=json.load(open(p+"/summary.json")); m={r["Metric"]:r["Value"] for r in csv.DictReader(open(p+"/metrics.csv"))}; cfg=c["full_config"]; assert c["global_optimizer_step"]==331000; assert s["global_optimizer_step"]==331000; assert cfg["model"]["flow_geometry"]=="euclidean"; assert cfg["training"]["coupling"]=="online_geodesic_icp"; assert "n_generated_invalid" in m and "frac_negative_energy" in m and "frac_spacelike" in m; print("Verified exact terminal step, treatment, ICP control, checkpoints, metrics, and physicality diagnostics")' "$OUT/train"
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 24Gi}
