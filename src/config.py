@@ -199,6 +199,10 @@ class InferenceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     n_samples: int = 50_000
+    # When set, generate exactly this many samples for each configured jet type
+    # rather than drawing types randomly.  This is the publication-evaluation
+    # mode: a GQT run with value 50_000 produces exactly 150_000 samples.
+    samples_per_jet_type: int | None = Field(default=None, ge=1)
     n_viz_samples: int = 1000
     integration_steps: int = 16
     integration_end_time: float = Field(default=0.99999, gt=0, le=1)

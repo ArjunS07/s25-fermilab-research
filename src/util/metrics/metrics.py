@@ -9,6 +9,7 @@ import jetnet.evaluation as jetnet_eval
 from util.metrics.eval_report import eval_report, physicality_isotropy_scalars
 from util.metrics.tail_diagnostics import endpoint_tail_diagnostics
 from util.data.fpnd_input import build_fpnd_input, iter_fpnd_class_subsets
+from util.data import jet_attributes
 
 # Fixed seed so the random jet-phi assignment (and hence the isotropy reference) is
 # reproducible across runs — the harness is a fixed yardstick (experiment plan 0.4).
@@ -166,8 +167,10 @@ def run_save_metrics(
         prior_polar_abs = prior_polar_abs.cpu()
         prior_polar_rel = prior_polar_rel.cpu()
 
-    # Test per-jet class index lives at X_test[:][1][:, 4] (JetNet layout).
-    test_jet_types = X_test[:][1][:, 4].long().cpu()
+    # The dataset retains fixed global labels (g=0, q=1, t=2...), whereas
+    # reporting panels use indices local to this run's configured jet_types.
+    test_global_jet_types = X_test[:][1][:, 4].long().cpu()
+    test_jet_types = jet_attributes.local_jet_type_indices(test_global_jet_types, jet_types)
     if gen_jet_types is None:
         gen_jet_types = torch.zeros(gen_samples.shape[0], dtype=torch.long)
     else:

@@ -75,7 +75,8 @@ def generate_samples(
         integration_end_time,
         n_samples,
         batch_size,
-        n_jet_types=3,
+        jet_types=("g", "q", "t"),
+        samples_per_jet_type=None,
         use_cfg=False,
         cfg_guidance_weight=2.0,
         use_hyperbolic=True,
@@ -91,6 +92,20 @@ def generate_samples(
 ):
     sampling_start = time.perf_counter()
 
+    if samples_per_jet_type is not None:
+        expected_samples = len(jet_types) * samples_per_jet_type
+        if n_samples != expected_samples:
+            raise ValueError(
+                "balanced generation requires n_samples == "
+                f"len(jet_types) * samples_per_jet_type; got {n_samples} != "
+                f"{len(jet_types)} * {samples_per_jet_type}"
+            )
+        balanced_global_types = torch.tensor(
+            jet_attributes.global_jet_type_indices(jet_types), dtype=torch.long
+        ).repeat_interleave(samples_per_jet_type)
+    else:
+        balanced_global_types = None
+
     if use_hyperbolic and hyperbolic_model == 'mass_shell' and sampler != 'euler':
         raise ValueError(
             f"mass-shell integration supports sampler='euler'; got {sampler!r}. "
@@ -104,7 +119,7 @@ def generate_samples(
     all_prior_samples = []
     all_pt_cond = []      # conditioning pT for each jet (physical GeV)
     all_gen_eta = []      # conditioning jet eta for each jet (for the canonical FPND axis)
-    all_jet_types = []    # per-jet class index (argmax of one-hot)
+    all_jet_types = []    # per-jet class index in configured local class order
     all_failure_steps = []
     all_explosion_steps = []
     all_generated_jet_attrs = []
@@ -148,9 +163,14 @@ def generate_samples(
             current_batch_size = min(batch_size, n_samples - start_idx)
 
             if replay_bundle is None:
+                one_hot_types = None
+                if balanced_global_types is not None:
+                    one_hot_types = jet_attributes.one_hot_enc_jet_type(
+                        balanced_global_types[start_idx:start_idx + current_batch_size].to(device)
+                    )
                 generated_jet_attrs, _ = jet_attributes.generate_jets(
-                    jet_attr_model, device, n_jet_types=n_jet_types,
-                    num_jets=current_batch_size
+                    jet_attr_model, device, jet_types=jet_types,
+                    num_jets=current_batch_size, one_hot_types=one_hot_types,
                 )
             else:
                 generated_jet_attrs = replay_bundle["generated_jet_attrs"][
@@ -366,7 +386,10 @@ def generate_samples(
             all_prior_samples.append((final_scale * prior_x).cpu())
             all_pt_cond.append(gen_pt.cpu())
             all_gen_eta.append(generated_jet_attrs[:, 5].cpu())
-            all_jet_types.append(jet_one_hot_enc.argmax(dim=-1).cpu())
+            global_types = jet_one_hot_enc.argmax(dim=-1)
+            all_jet_types.append(
+                jet_attributes.local_jet_type_indices(global_types, jet_types).cpu()
+            )
             all_generated_jet_attrs.append(generated_jet_attrs.cpu())
             all_jet_phi.append(jet_phi.cpu())
             all_masks.append(masks.cpu())
@@ -393,6 +416,7 @@ def generate_samples(
                 "use_hyperbolic": bool(use_hyperbolic),
                 "hyperbolic_model": hyperbolic_model,
                 "regulator_mass": float(regulator_mass),
+                "samples_per_jet_type": samples_per_jet_type,
             },
             "generated_jet_attrs": torch.cat(all_generated_jet_attrs),
             "jet_phi": torch.cat(all_jet_phi),

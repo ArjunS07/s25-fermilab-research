@@ -44,7 +44,7 @@ def plot_hist(X_test_samples, x_model, output_path, filename):
     plt.savefig(f"{output_path}/{filename}.png", bbox_inches='tight', dpi=300)
 
 
-def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, scale, n_jet_types, n_particles_per_jet, initial_dist_method='isotropic_com', n_features_per_particle=4, n_viz_samples=1000, zoom_in=True, save_videos=True, integration_steps=16, use_cfg=False, cfg_guidance_weight=1, use_hyperbolic=False, hyperbolic_c=1.0, use_reference_vectors=False):
+def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, scale, jet_types, n_particles_per_jet, initial_dist_method='isotropic_com', n_features_per_particle=4, n_viz_samples=1000, zoom_in=True, save_videos=True, integration_steps=16, use_cfg=False, cfg_guidance_weight=1, use_hyperbolic=False, hyperbolic_c=1.0, use_reference_vectors=False):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     output_path = f"{out_dir}"
     make_clear_folder(output_path)
@@ -65,7 +65,8 @@ def generate_model_vector_field(out_dir, final_model, jet_attr_model, X_test, sc
         final_model.eval()
         jet_attr_model.eval()
     
-        generated_jet_attrs, _ = jet_attributes.generate_jets(jet_attr_model, device, n_jet_types=n_jet_types, num_jets=n_viz_samples)
+        generated_jet_attrs, _ = jet_attributes.generate_jets(
+            jet_attr_model, device, jet_types=jet_types, num_jets=n_viz_samples)
         # Layout from generate_jets: [one_hot(5), eta, pt, mass, n_particles]
         jet_one_hot_enc = generated_jet_attrs[:, :5].to(device)
         gen_eta = generated_jet_attrs[:, 5].to(device)         # jet eta (raw generate_jets layout)

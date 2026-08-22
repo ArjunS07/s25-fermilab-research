@@ -2,6 +2,7 @@ import pickle
 import torch
 
 NUM_CLASSES = 5  # Number of jet types
+JET_TYPE_TO_INDEX = {name: i for i, name in enumerate(("g", "q", "t", "w", "z"))}
 MAX_N_PARTICLES = 150  # Maximum number of particles in a jet
 MIN_N_PARTICLES = 4  # Minimum number of particles in a jet
 
@@ -30,7 +31,40 @@ def one_hot_enc_jet_type(y, num_classes=NUM_CLASSES):
     one_hot_enc =  torch.nn.functional.one_hot(y, num_classes=num_classes).float()
     return one_hot_enc
 
-def generate_jets(model, device, n_jet_types, num_jets=1000, one_hot_types=None):
+def global_jet_type_indices(jet_types):
+    """Return the fixed five-class indices for configured JetNet type names."""
+    unknown = sorted(set(jet_types) - JET_TYPE_TO_INDEX.keys())
+    if unknown:
+        raise ValueError(f"unknown jet types: {unknown}")
+    if not jet_types:
+        raise ValueError("jet_types must not be empty")
+    return [JET_TYPE_TO_INDEX[jet_type] for jet_type in jet_types]
+
+
+def local_jet_type_indices(global_indices, jet_types):
+    """Map fixed five-class labels into the configured local class order.
+
+    Metrics and report panels use local labels (``0..len(jet_types)-1``), while
+    the Stage-1 and Stage-2 conditioning vectors always use the fixed global
+    five-class convention.  Keeping the two spaces explicit prevents a q-only
+    or t-only run from silently being sampled as a gluon run.
+    """
+    lookup = torch.full((NUM_CLASSES,), -1, dtype=torch.long,
+                        device=global_indices.device)
+    for local_index, global_index in enumerate(global_jet_type_indices(jet_types)):
+        lookup[global_index] = local_index
+    local_indices = lookup[global_indices.long()]
+    if (local_indices < 0).any():
+        unexpected = torch.unique(global_indices[local_indices < 0]).tolist()
+        raise ValueError(
+            f"encountered global jet classes {unexpected} outside configured "
+            f"jet_types={jet_types}"
+        )
+    return local_indices
+
+
+def generate_jets(model, device, jet_types=None, num_jets=1000, one_hot_types=None,
+                  n_jet_types=None):
     """
     Use a pretrained normalizing flow model to generate jets.
     Generates jets with features jet_types (in the form of 5 one-hot encoded slots), eta, p_t, mass, and number of particles.
@@ -38,12 +72,23 @@ def generate_jets(model, device, n_jet_types, num_jets=1000, one_hot_types=None)
     Args:
         model: Pretrained normalizing flow model.
         device: Device to run the model on (e.g., 'cpu' or 'cuda').
-        n_jet_types: Desired number of jet types for one-hot encoding (<= 5)
+        jet_types: Configured type names. These are mapped to the fixed global
+            five-class encoding [g, q, t, w, z] before sampling.
         num_jets: Number of jets to generate.
         one_hot_types: Optional one-hot encoded tensor of desired jet types. If None, random types
     """
     if one_hot_types is None:
-        sample_jet_types = torch.randint(0, n_jet_types, (num_jets,)).to(device)
+        if jet_types is None:
+            # Compatibility for old callers. New code must pass names because a
+            # count alone cannot distinguish q-only/t-only from g-only.
+            if n_jet_types is None:
+                raise ValueError("jet_types must be provided when one_hot_types is absent")
+            global_indices = torch.arange(n_jet_types, device=device)
+        else:
+            global_indices = torch.tensor(global_jet_type_indices(jet_types), device=device)
+        sample_jet_types = global_indices[
+            torch.randint(0, len(global_indices), (num_jets,), device=device)
+        ]
         one_hot_types = one_hot_enc_jet_type(sample_jet_types)
     jets, jet_logprobs = model.sample(num_jets, context=one_hot_types)
     jets[:, -1] = torch.round(jets[:, -1])

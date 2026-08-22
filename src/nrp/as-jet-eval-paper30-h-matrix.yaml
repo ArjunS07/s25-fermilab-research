@@ -1,0 +1,115 @@
+# Final paper-evaluation matrix for the LorentzNet-H 30-particle campaign.
+#
+# Eight endpoints, two A40s in flight at once:
+#   0..2  G/Q/T specialists at 331K (compute-matched controls)
+#   3..5  G/Q/T specialists at 994K (full-compute ceilings)
+#   6     GQT 994K, ordinary conditional sampling
+#   7     GQT 994K, CFG dropout training + CFG sampling (w=1)
+#
+# The source lookup is intentionally label- and step-validated.  Do not create
+# this Job until all two currently-running training endpoints have completed.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-eval-paper30-h-matrix}
+spec:
+  ttlSecondsAfterFinished: 259200
+  backoffLimit: 0
+  completions: 8
+  parallelism: 2
+  completionMode: Indexed
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: eval
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: JOB_COMPLETION_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              # Pinned after the type-conditioning repair is committed.
+              GIT_COMMIT="REPLACE_WITH_TYPE_CONDITIONING_FIX_COMMIT"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              case "$JOB_COMPLETION_INDEX" in
+                0) TAG="g331k";  SOURCE_LABEL="g30-lnet-h-331k";     TYPES="g";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
+                1) TAG="q331k";  SOURCE_LABEL="q30-lnet-h-331k";     TYPES="q";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
+                2) TAG="t331k";  SOURCE_LABEL="t30-lnet-h-331k";     TYPES="t";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
+                3) TAG="g994k";  SOURCE_LABEL="g30-lnet-h-994k-r2";  TYPES="g";     STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
+                4) TAG="q994k";  SOURCE_LABEL="q30-lnet-h-994k";     TYPES="q";     STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
+                5) TAG="t994k";  SOURCE_LABEL="t30-lnet-h-994k";     TYPES="t";     STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
+                6) TAG="gqt994k"; SOURCE_LABEL="gqt30-lnet-h-994k"; TYPES="g,q,t"; STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
+                7) TAG="gqt994k-cfg"; SOURCE_LABEL="gqt30-lnet-h-cfg-994k"; TYPES="g,q,t"; STEPS=994000; USE_CFG=true; GUIDANCE=1.0 ;;
+                *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
+              esac
+              test "$GIT_COMMIT" != "REPLACE_WITH_TYPE_CONDITIONING_FIX_COMMIT"
+              test -s "$ENV_ARCHIVE"
+              SOURCE_RUN=$(find /mnt/data/output -maxdepth 1 -type d -name "*-${SOURCE_LABEL}" -print | sort | tail -n 1)
+              test -n "$SOURCE_RUN"
+              CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
+              test -s "$CHECKPOINT"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-paper30-${TAG}-eval"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf '%s\n' "$SOURCE_RUN" > "$OUT/source_run.txt"
+              printf '%s\n' "$CHECKPOINT" > "$OUT/checkpoint.txt"
+              printf '%s\n' "$TYPES" > "$OUT/jet_types.txt"
+              printf '%s\n' "$STEPS" > "$OUT/expected_optimizer_steps.txt"
+              printf '%s\n' "$USE_CFG" > "$OUT/use_cfg.txt"
+              printf '%s\n' "$GUIDANCE" > "$OUT/cfg_guidance_weight.txt"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" -c 'import sys,torch; p,expected=sys.argv[1:]; c=torch.load(p,map_location="cpu",weights_only=False); assert c["global_optimizer_step"]==int(expected), (c["global_optimizer_step"],expected)' "$CHECKPOINT" "$STEPS"
+              if [ "$TYPES" = "g,q,t" ]; then N_SAMPLES=150000; PER_TYPE=50000; JTLIST="[g,q,t]"; else N_SAMPLES=50000; PER_TYPE=50000; JTLIST="[$TYPES]"; fi
+              "$PYTHON" infer.py \
+                --config configs/infer-g30-mass-shell.yaml \
+                --set data.jet_types="$JTLIST" \
+                --set paths.checkpoint_path="$CHECKPOINT" \
+                --set paths.output_path="$SOURCE_RUN" \
+                --set paths.out_dir="$OUT/eval" \
+                --set inference.n_samples="$N_SAMPLES" \
+                --set inference.samples_per_jet_type="$PER_TYPE" \
+                --set inference.batch_size=128 \
+                --set inference.integration_steps=64 \
+                --set inference.prior_dist=axis_aligned_lognormal \
+                --set inference.use_ema_weights=true \
+                --set inference.use_cfg="$USE_CFG" \
+                --set inference.cfg_guidance_weight="$GUIDANCE" \
+                --set inference.skip_metrics=false
+              test -s "$OUT/eval/samples.pt"
+              test -s "$OUT/eval/prior_samples.pt"
+              test -s "$OUT/eval/replay_bundle.pt"
+              test -s "$OUT/eval/generation_diagnostics.json"
+              test -s "$OUT/eval/metrics.csv"
+              test -s "$OUT/eval/summary.json"
+              "$PYTHON" -c 'import json,sys,torch; bundle,summary,types=sys.argv[1:]; attrs=torch.load(bundle,map_location="cpu",weights_only=False)["generated_jet_attrs"]; ids=attrs[:,:5].argmax(-1); want={"g":0,"q":1,"t":2}; names=types.split(","); assert attrs.shape[0]==50000*len(names); assert all(int((ids==want[n]).sum())==50000 for n in names), torch.bincount(ids,minlength=5).tolist(); d=json.load(open(summary)); assert d["stage_status"]["samples"]["status"]=="ok"; assert d["stage_status"]["metrics"]["status"]=="ok"; assert all(f"fpnd_{n}" in d["metrics"] for n in names); print({k:d["metrics"][k] for k in d["metrics"] if k.startswith("fpnd_")})' "$OUT/eval/replay_bundle.pt" "$OUT/eval/summary.json" "$TYPES"
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 32Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 32Gi}
