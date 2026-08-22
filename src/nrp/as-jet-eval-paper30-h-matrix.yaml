@@ -1,20 +1,22 @@
 # Final paper-evaluation matrix for the LorentzNet-H 30-particle campaign.
 #
-# Eight endpoints, two A40s in flight at once:
-#   0..2  G/Q/T specialists at 331K (compute-matched controls)
-#   3..5  G/Q/T specialists at 994K (full-compute ceilings)
-#   6     GQT 994K, ordinary conditional sampling
-#   7     GQT 994K, CFG dropout training + CFG sampling (w=1)
+# Six completed endpoints, two A40s in flight at once.  They are deliberately
+# ordered by current information value, not alphabetically:
+#   0     Q specialist 331K (invalid old evaluation; highest priority)
+#   1     T specialist 994K (invalid old evaluation; highest priority)
+#   2     T specialist 331K (invalid old evaluation)
+#   3     GQT 994K, ordinary conditional sampling
+#   4..5  G specialists at 994K and 331K
 #
-# The source lookup is intentionally label- and step-validated.  Do not create
-# this Job until all two currently-running training endpoints have completed.
+# Q-994K and GQT-CFG-994K have a separate pending manifest because their source
+# checkpoints do not yet exist. The source lookup is label- and step-validated.
 apiVersion: batch/v1
 kind: Job
 metadata: {name: as-jet-eval-paper30-h-matrix}
 spec:
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
-  completions: 8
+  completions: 6
   parallelism: 2
   completionMode: Indexed
   template:
@@ -50,21 +52,17 @@ spec:
           args:
             - |
               set -euo pipefail
-              # Pinned after the type-conditioning repair is committed.
-              GIT_COMMIT="REPLACE_WITH_TYPE_CONDITIONING_FIX_COMMIT"
+              GIT_COMMIT="c232473534c2614ddcc2d96ace74481947c28bdf"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
               case "$JOB_COMPLETION_INDEX" in
-                0) TAG="g331k";  SOURCE_LABEL="g30-lnet-h-331k";     TYPES="g";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
-                1) TAG="q331k";  SOURCE_LABEL="q30-lnet-h-331k";     TYPES="q";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
+                0) TAG="q331k";  SOURCE_LABEL="q30-lnet-h-331k";     TYPES="q";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
+                1) TAG="t994k";  SOURCE_LABEL="t30-lnet-h-994k";     TYPES="t";     STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
                 2) TAG="t331k";  SOURCE_LABEL="t30-lnet-h-331k";     TYPES="t";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
-                3) TAG="g994k";  SOURCE_LABEL="g30-lnet-h-994k-r2";  TYPES="g";     STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
-                4) TAG="q994k";  SOURCE_LABEL="q30-lnet-h-994k";     TYPES="q";     STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
-                5) TAG="t994k";  SOURCE_LABEL="t30-lnet-h-994k";     TYPES="t";     STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
-                6) TAG="gqt994k"; SOURCE_LABEL="gqt30-lnet-h-994k"; TYPES="g,q,t"; STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
-                7) TAG="gqt994k-cfg"; SOURCE_LABEL="gqt30-lnet-h-cfg-994k"; TYPES="g,q,t"; STEPS=994000; USE_CFG=true; GUIDANCE=1.0 ;;
+                3) TAG="gqt994k"; SOURCE_LABEL="gqt30-lnet-h-994k"; TYPES="g,q,t"; STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
+                4) TAG="g994k";  SOURCE_LABEL="g30-lnet-h-994k-r2";  TYPES="g";     STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
+                5) TAG="g331k";  SOURCE_LABEL="g30-lnet-h-331k";     TYPES="g";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
                 *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
               esac
-              test "$GIT_COMMIT" != "REPLACE_WITH_TYPE_CONDITIONING_FIX_COMMIT"
               test -s "$ENV_ARCHIVE"
               SOURCE_RUN=$(find /mnt/data/output -maxdepth 1 -type d -name "*-${SOURCE_LABEL}" -print | sort | tail -n 1)
               test -n "$SOURCE_RUN"
