@@ -2,10 +2,10 @@
 #
 # Six completed endpoints, two A40s in flight at once.  They are deliberately
 # ordered by current information value, not alphabetically:
-#   0     Q specialist 331K (invalid old evaluation; highest priority)
-#   1     T specialist 994K (invalid old evaluation; highest priority)
-#   2     T specialist 331K (invalid old evaluation)
-#   3     GQT 994K, ordinary conditional sampling
+#   0     GQT 994K, ordinary conditional sampling (per-class paper result)
+#   1     Q specialist 331K (invalid old evaluation; highest priority)
+#   2     T specialist 994K (invalid old evaluation; highest priority)
+#   3     T specialist 331K (invalid old evaluation)
 #   4..5  G specialists at 994K and 331K
 #
 # Q-994K and GQT-CFG-994K have a separate pending manifest because their source
@@ -55,10 +55,10 @@ spec:
               GIT_COMMIT="c232473534c2614ddcc2d96ace74481947c28bdf"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
               case "$JOB_COMPLETION_INDEX" in
-                0) TAG="q331k";  SOURCE_LABEL="q30-lnet-h-331k";     TYPES="q";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
-                1) TAG="t994k";  SOURCE_LABEL="t30-lnet-h-994k";     TYPES="t";     STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
-                2) TAG="t331k";  SOURCE_LABEL="t30-lnet-h-331k";     TYPES="t";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
-                3) TAG="gqt994k"; SOURCE_LABEL="gqt30-lnet-h-994k"; TYPES="g,q,t"; STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
+                0) TAG="gqt994k"; SOURCE_LABEL="gqt30-lnet-h-994k"; TYPES="g,q,t"; STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
+                1) TAG="q331k";  SOURCE_LABEL="q30-lnet-h-331k";     TYPES="q";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
+                2) TAG="t994k";  SOURCE_LABEL="t30-lnet-h-994k";     TYPES="t";     STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
+                3) TAG="t331k";  SOURCE_LABEL="t30-lnet-h-331k";     TYPES="t";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
                 4) TAG="g994k";  SOURCE_LABEL="g30-lnet-h-994k-r2";  TYPES="g";     STEPS=994000; USE_CFG=false; GUIDANCE=1.0 ;;
                 5) TAG="g331k";  SOURCE_LABEL="g30-lnet-h-331k";     TYPES="g";     STEPS=331000; USE_CFG=false; GUIDANCE=1.0 ;;
                 *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
