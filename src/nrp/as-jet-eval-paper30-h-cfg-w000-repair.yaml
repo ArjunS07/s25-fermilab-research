@@ -1,7 +1,7 @@
 # Metrics-only repair for the original w=0 arm. Reuses its saved 150K samples.
 apiVersion: batch/v1
 kind: Job
-metadata: {name: as-jet-eval-paper30-h-cfg-w000-repair}
+metadata: {name: as-jet-eval-paper30-h-cfg-w000-repair-r2}
 spec:
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
@@ -34,7 +34,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="79a335427818d56016b7fca87cdc0dbcc4fc22dc"
+              GIT_COMMIT="ba2991a9070e1b8e9b562a51a258699064480053"
               SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
               OLD_OUT="/mnt/data/output/2026-08-25_02-02-13--46b37f78-4a56-4b6d-bd1c-651dfaac0c27-paper30-gqt994k-cfg-w000-eval/eval"
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
