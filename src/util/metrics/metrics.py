@@ -41,6 +41,40 @@ def _compute_fpnd_by_jet_type(gen_fpnd_input, gen_jet_types, jet_types):
     return fpnd_by_type
 
 
+def _compute_stratified_metrics(gen_rel3, test_rel3, gen_jet_types,
+                                test_jet_types, jet_types):
+    """Compute the convention-robust metrics separately for each configured class."""
+    metrics = {}
+    for class_index, jet_type in enumerate(jet_types):
+        gen_mask = gen_jet_types == class_index
+        test_mask = test_jet_types == class_index
+        if not gen_mask.any() or not test_mask.any():
+            print(f"WARNING: cannot stratify metrics for {jet_type}: missing class samples")
+            continue
+        gen_class = gen_rel3[gen_mask]
+        test_class = test_rel3[test_mask]
+        try:
+            metrics[f"w1efp_{jet_type}"] = jetnet_eval.w1efp(
+                jets1=gen_class, jets2=test_class
+            )
+            metrics[f"w1m_{jet_type}"] = jetnet_eval.w1m(
+                jets1=gen_class, jets2=test_class
+            )
+            metrics[f"w1p_{jet_type}"] = jetnet_eval.w1p(
+                jets1=gen_class, jets2=test_class
+            )
+            metrics[f"fpd_{jet_type}"] = jetnet_eval.fpd(
+                real_features=jetnet_eval.get_fpd_kpd_jet_features(test_class),
+                gen_features=jetnet_eval.get_fpd_kpd_jet_features(gen_class),
+                seed=42,
+            )
+            print(f"Class-stratified {jet_type}: W1M={metrics[f'w1m_{jet_type}']}, "
+                  f"FPD={metrics[f'fpd_{jet_type}']}")
+        except Exception as exc:
+            print(f"Error computing class-stratified metrics for {jet_type}: {exc}")
+    return metrics
+
+
 def __x_test_to_abs(X_test, device='cpu'):
     """Assemble absolute (eta, phi, pt, E) per particle from the JetNet test set.
 
@@ -79,6 +113,7 @@ def run_save_metrics(
     gen_pt_cond=None,
     gen_jet_eta=None,
     prior_samples=None,
+    stratify_by_class=False,
 ):
     """Compute scalar metrics + call eval_report to write the 14 eval figures.
 
@@ -280,6 +315,10 @@ def run_save_metrics(
     eval_info.update(
         _compute_fpnd_by_jet_type(gen_fpnd_input, gen_jet_types, jet_types)
     )
+    if stratify_by_class:
+        eval_info.update(_compute_stratified_metrics(
+            gen_rel3, test_rel3, gen_jet_types, test_jet_types, jet_types
+        ))
 
     with open(f"{output_path}/metrics.csv", "w") as f:
         f.write("Metric,Value\n")

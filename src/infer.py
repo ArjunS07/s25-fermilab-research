@@ -251,6 +251,7 @@ def main():
                     gen_pt_cond=gen_pt_cond,
                     gen_jet_eta=gen_jet_eta,
                     prior_samples=prior_samples,
+                    stratify_by_class=cfg.inference.stratify_metrics_by_class,
                 )
                 print("Metrics done.")
                 stage_status["metrics"] = {"status": "ok"}

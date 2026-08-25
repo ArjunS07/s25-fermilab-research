@@ -229,6 +229,7 @@ class InferenceConfig(BaseModel):
     vf_mode: Literal["cfg", "nocfg", "both", "none"] = "none"
     skip_samples: bool = False
     skip_metrics: bool = False
+    stratify_metrics_by_class: bool = False
     prior_dist: Literal[
         "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned",
         "axis_aligned_per_jet", "axis_aligned_equal", "axis_aligned_lognormal"
