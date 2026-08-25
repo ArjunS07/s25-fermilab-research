@@ -29,7 +29,6 @@ import torch
 
 from models.factory import build_flow_model
 from util.data import jet_attributes
-from util.geometry.conditioning import scale_condition_pt
 from util.data.jet_attributes import NUM_CLASSES
 from models.stage1 import get_model_pth_path
 from util.infra.file_management import make_clear_folder
@@ -210,7 +209,9 @@ def main():
             attrs = bundle["generated_jet_attrs"]
             global_types = attrs[:, :5].argmax(dim=-1)
             gen_jet_types = jet_attributes.local_jet_type_indices(global_types, cfg.data.jet_types)
-            gen_pt_cond = scale_condition_pt(attrs[:, 6], final_scale)
+            # ``generated_jet_attrs[:, 6]`` is the physical jet pT retained by
+            # generate_samples; the network-only condition is its scaled view.
+            gen_pt_cond = attrs[:, 6]
             gen_jet_eta = attrs[:, 5]
             prior_path = cfg.paths.replay_prior_samples_path
             if prior_path and os.path.isfile(prior_path):
