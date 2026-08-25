@@ -29,6 +29,7 @@ import torch
 
 from models.factory import build_flow_model
 from util.data import jet_attributes
+from util.geometry.conditioning import scale_condition_pt
 from util.data.jet_attributes import NUM_CLASSES
 from models.stage1 import get_model_pth_path
 from util.infra.file_management import make_clear_folder
@@ -198,7 +199,29 @@ def main():
     gen_jet_types = None
     gen_pt_cond = None
     prior_samples = None
-    if not cfg.inference.skip_samples:
+    if cfg.inference.skip_samples and cfg.paths.replay_samples_path:
+        try:
+            print("\n=== Loading saved samples for metrics-only replay ===")
+            samples = torch.load(cfg.paths.replay_samples_path, map_location=device, weights_only=False)
+            bundle_path = cfg.paths.replay_bundle_path
+            if not bundle_path:
+                raise ValueError("replay_samples_path requires replay_bundle_path")
+            bundle = torch.load(bundle_path, map_location="cpu", weights_only=False)
+            attrs = bundle["generated_jet_attrs"]
+            global_types = attrs[:, :5].argmax(dim=-1)
+            gen_jet_types = jet_attributes.local_jet_type_indices(global_types, cfg.data.jet_types)
+            gen_pt_cond = scale_condition_pt(attrs[:, 6], final_scale)
+            gen_jet_eta = attrs[:, 5]
+            prior_path = cfg.paths.replay_prior_samples_path
+            if prior_path and os.path.isfile(prior_path):
+                prior_samples = torch.load(prior_path, map_location=device, weights_only=False)
+            stage_status["samples"] = {"status": "ok", "source": "replay"}
+            print(f"Loaded saved samples: {samples.shape}")
+        except Exception as e:
+            stage_status["samples"] = {"status": "failed", "error": str(e)}
+            print(f"\n[ERROR] Saved sample replay failed: {e}")
+            traceback.print_exc()
+    elif not cfg.inference.skip_samples:
         try:
             print("\n=== Sample generation ===")
             samples, gen_jet_types, gen_pt_cond, prior_samples, gen_jet_eta = generate_samples(

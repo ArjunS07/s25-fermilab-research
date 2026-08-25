@@ -254,6 +254,8 @@ class PathConfig(BaseModel):
     checkpoint_path: Optional[str] = None
     out_dir: Optional[str] = None
     replay_bundle_path: Optional[str] = None
+    replay_samples_path: Optional[str] = None
+    replay_prior_samples_path: Optional[str] = None
     cache_dir: str = "/mnt/data/caches"
 
 
