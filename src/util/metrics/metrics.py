@@ -255,7 +255,12 @@ def run_save_metrics(
     except Exception as e:
         print(f"Error computing cov_mmd: {e}")
 
-    test_polar_rel = test_polar_rel[:gen_polar_rel.shape[0]]
+    # Keep the reference labels aligned with the reference jets after matching
+    # the test batch length to generated jets.  Generated non-finite jets may
+    # have been removed earlier, so the original test label tensor can be longer.
+    n_metric_jets = gen_polar_rel.shape[0]
+    test_polar_rel = test_polar_rel[:n_metric_jets]
+    test_jet_types = test_jet_types[:n_metric_jets]
     assert test_polar_rel.shape == gen_polar_rel.shape
 
     # Jetnet W1 metrics expect 3-channel (eta_rel, phi_rel, pt_rel) jets
