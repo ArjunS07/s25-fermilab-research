@@ -3,7 +3,7 @@
 # aggregate metrics and class-stratified W1/FPD metrics for a matched comparison.
 apiVersion: batch/v1
 kind: Job
-metadata: {name: as-jet-eval-paper30-h-cfg-sweep}
+metadata: {name: as-jet-eval-paper30-h-cfg-sweep-r2}
 spec:
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
@@ -43,7 +43,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="b4eb1daf934f5a4ee270fb0b0ee59ac6e1c41295"
+              GIT_COMMIT="8b9bea8ef3085b2b99510e578f34e131329298d4"
               SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
