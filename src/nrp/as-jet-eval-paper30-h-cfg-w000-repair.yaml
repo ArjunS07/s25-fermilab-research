@@ -1,0 +1,71 @@
+# Metrics-only repair for the original w=0 arm. Reuses its saved 150K samples.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-eval-paper30-h-cfg-w000-repair}
+spec:
+  ttlSecondsAfterFinished: 259200
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: repair
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              GIT_COMMIT="79a335427818d56016b7fca87cdc0dbcc4fc22dc"
+              SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
+              OLD_OUT="/mnt/data/output/2026-08-25_02-02-13--46b37f78-4a56-4b6d-bd1c-651dfaac0c27-paper30-gqt994k-cfg-w000-eval/eval"
+              CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              test -s "$CHECKPOINT"; test -s "$ENV_ARCHIVE"
+              test -s "$OLD_OUT/samples.pt"; test -s "$OLD_OUT/replay_bundle.pt"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-paper30-gqt994k-cfg-w000-repaired"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf '%s\n' "$OLD_OUT" > "$OUT/replayed_eval.txt"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" infer.py \
+                --config configs/infer-g30-mass-shell.yaml \
+                --set data.jet_types="[g,q,t]" \
+                --set paths.checkpoint_path="$CHECKPOINT" \
+                --set paths.output_path="$SOURCE_RUN" \
+                --set paths.out_dir="$OUT/eval" \
+                --set paths.replay_samples_path="$OLD_OUT/samples.pt" \
+                --set paths.replay_prior_samples_path="$OLD_OUT/prior_samples.pt" \
+                --set paths.replay_bundle_path="$OLD_OUT/replay_bundle.pt" \
+                --set inference.skip_samples=true \
+                --set inference.stratify_metrics_by_class=true \
+                --set inference.skip_metrics=false
+              for artifact in metrics.csv summary.json; do test -s "$OUT/eval/$artifact"; done
+              "$PYTHON" -c 'import json,sys; d=json.load(open(sys.argv[1])); m=d["metrics"]; assert d["stage_status"]["metrics"]["status"]=="ok"; assert all(k in m for k in ("fpnd_g","fpnd_q","fpnd_t","w1m_g","w1m_q","w1m_t")); print({k:m[k] for k in m if k.startswith(("fpnd_","w1m_"))})' "$OUT/eval/summary.json"
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 32Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 32Gi}
