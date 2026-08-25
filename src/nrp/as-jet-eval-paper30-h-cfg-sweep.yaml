@@ -7,7 +7,7 @@ metadata: {name: as-jet-eval-paper30-h-cfg-sweep}
 spec:
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
-  completions: 6
+  completions: 7
   parallelism: 2
   completionMode: Indexed
   template:
@@ -43,17 +43,18 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="4bc1acdd36d5711891045658c09482d997072838"
+              GIT_COMMIT="b4eb1daf934f5a4ee270fb0b0ee59ac6e1c41295"
               SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
               case "$JOB_COMPLETION_INDEX" in
-                0) TAG="w025"; GUIDANCE="0.25" ;;
-                1) TAG="w050"; GUIDANCE="0.50" ;;
-                2) TAG="w075"; GUIDANCE="0.75" ;;
-                3) TAG="w100"; GUIDANCE="1.00" ;;
-                4) TAG="w200"; GUIDANCE="2.00" ;;
-                5) TAG="w300"; GUIDANCE="3.00" ;;
+                0) TAG="w000"; GUIDANCE="0.00" ;;
+                1) TAG="w025"; GUIDANCE="0.25" ;;
+                2) TAG="w050"; GUIDANCE="0.50" ;;
+                3) TAG="w075"; GUIDANCE="0.75" ;;
+                4) TAG="w100"; GUIDANCE="1.00" ;;
+                5) TAG="w200"; GUIDANCE="2.00" ;;
+                6) TAG="w300"; GUIDANCE="3.00" ;;
                 *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
               esac
               test -s "$CHECKPOINT"
