@@ -54,6 +54,9 @@ def _compute_stratified_metrics(gen_rel3, test_rel3, gen_jet_types,
         gen_class = gen_rel3[gen_mask]
         test_class = test_rel3[test_mask]
         try:
+            metrics[f"cov_mmd_{jet_type}"] = jetnet_eval.cov_mmd(
+                real_jets=test_class[:, :, :3], gen_jets=gen_class[:, :, :3]
+            )
             metrics[f"w1efp_{jet_type}"] = jetnet_eval.w1efp(
                 jets1=gen_class, jets2=test_class
             )
