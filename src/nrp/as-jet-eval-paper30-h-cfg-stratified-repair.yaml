@@ -1,0 +1,80 @@
+# Metrics-only repair: compute W1P, covariance, and MMD separately for G/Q/T
+# from every saved guidance-sweep endpoint. No new generation is performed.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-eval-paper30-h-cfg-stratified-repair}
+spec:
+  ttlSecondsAfterFinished: 259200
+  backoffLimit: 0
+  completions: 7
+  parallelism: 2
+  completionMode: Indexed
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: repair
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: JOB_COMPLETION_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              GIT_COMMIT="58881dab0ac101181b06b6e75f050027df922919"
+              SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              case "$JOB_COMPLETION_INDEX" in
+                0) TAG="w000"; OLD_OUT="/mnt/data/output/2026-08-26_05-10-21--ef9da51c-6ce0-4bb2-9d68-d88e8f0af41a-paper30-gqt994k-cfg-w000-repaired/eval" ;;
+                1) TAG="w025"; OLD_OUT="/mnt/data/output/2026-08-25_22-18-31--a31c196a-5009-42a1-82e9-a9696e6146ee-paper30-gqt994k-cfg-w025-eval/eval" ;;
+                2) TAG="w050"; OLD_OUT="/mnt/data/output/2026-08-25_20-59-00--3a48a5f7-5493-4335-be28-c301daee932c-paper30-gqt994k-cfg-w050-eval/eval" ;;
+                3) TAG="w075"; OLD_OUT="/mnt/data/output/2026-08-25_23-37-54--0ecc6c71-2a39-4c73-a06f-8209b8439363-paper30-gqt994k-cfg-w075-eval/eval" ;;
+                4) TAG="w100"; OLD_OUT="/mnt/data/output/2026-08-26_00-57-28--0fba2724-6417-4776-b21c-90730b5fca28-paper30-gqt994k-cfg-w100-eval/eval" ;;
+                5) TAG="w200"; OLD_OUT="/mnt/data/output/2026-08-26_03-49-38--85890744-d6b5-4783-968b-d0cd369be7d0-paper30-gqt994k-cfg-w200-eval/eval" ;;
+                6) TAG="w300"; OLD_OUT="/mnt/data/output/2026-08-26_02-17-00--f3049b1b-fd67-4cf7-98b2-91ba172f9b88-paper30-gqt994k-cfg-w300-eval/eval" ;;
+                *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
+              esac
+              CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
+              test -s "$CHECKPOINT"; test -s "$ENV_ARCHIVE"; test -s "$OLD_OUT/samples.pt"; test -s "$OLD_OUT/replay_bundle.pt"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-paper30-gqt994k-cfg-${TAG}-stratified-repair"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" infer.py --config configs/infer-g30-mass-shell.yaml \
+                --set data.jet_types="[g,q,t]" --set paths.checkpoint_path="$CHECKPOINT" \
+                --set paths.output_path="$SOURCE_RUN" --set paths.out_dir="$OUT/eval" \
+                --set paths.replay_samples_path="$OLD_OUT/samples.pt" \
+                --set paths.replay_prior_samples_path="$OLD_OUT/prior_samples.pt" \
+                --set paths.replay_bundle_path="$OLD_OUT/replay_bundle.pt" \
+                --set inference.skip_samples=true --set inference.stratify_metrics_by_class=true --set inference.skip_metrics=false
+              test -s "$OUT/eval/metrics.csv"; test -s "$OUT/eval/summary.json"
+              "$PYTHON" -c 'import json,sys; m=json.load(open(sys.argv[1]))["metrics"]; assert all(k in m for k in ("w1p_g","w1p_q","w1p_t","cov_mmd_g","cov_mmd_q","cov_mmd_t")); print({k:m[k] for k in m if k.startswith(("w1p_","cov_mmd_"))})' "$OUT/eval/summary.json"
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 32Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 32Gi}

@@ -1,0 +1,50 @@
+% Editable source for the JetNet-30 comparison table.
+% This file is intentionally independent from report/generated/.
+\documentclass[10pt]{article}
+\usepackage[margin=0.65in]{geometry}
+\usepackage{booktabs,pdflscape,multirow}
+\begin{document}
+\begin{landscape}
+\thispagestyle{empty}
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.0}
+% Edit this caption freely.
+\parbox{0.80\linewidth}{}
+\medskip
+\begin{tabular}{@{}clrrrrr@{}}
+\toprule
+Jet class & Method & FPND $\downarrow$ & W1M ($\times 10^{-4}$) $\downarrow$ & Mean W1P ($\times 10^{-4}$) $\downarrow$ & Cov. $\uparrow$ & MMD ($\times 10^{-2}$) $\downarrow$ \\
+\midrule
+\multirow{5}{*}{Gluon jets} & MPGAN & 0.1200 & 7.0000 & 9.0000 & \textbf{0.560} & 3.7000 \\
+ & PC-JeDi DDIM & 0.1200 & 9.0000 & 6.6000 & 0.540 & 3.6400 \\
+ & PC-JeDi EM & \textbf{0.1000} & \textbf{5.7000} & \textbf{5.8000} & 0.540 & 3.6200 \\
+\cmidrule(l){2-7}
+ & LorentzNet GQT-2000 epochs [g], no guidance$^\dagger$ & 0.1420 & 6.6284 & 9.9440 & 0.542 & 3.6597 \\
+ & LorentzNet GQT-2000 epochs [g], $w=0$ $^\dagger$ & 0.1420 & 6.6284 & 9.9440 & 0.542 & 3.6597 \\
+\midrule
+\multirow{3}{*}{Light-quark jets} & MPGAN & 0.3500 & \textbf{6.0000} & 49.0000 & 0.500 & 2.6000 \\
+\cmidrule(l){2-7}
+ & LorentzNet GQT-2000 epochs [q], no guidance$^\dagger$ & 0.2679 & 15.1337 & 9.9440 & 0.542 & 3.6597 \\
+ & LorentzNet GQT-2000 epochs [q], $w=0.25$ $^\dagger$ & \textbf{0.2137} & 12.2402 & 8.2676 & 0.566 & 3.6956 \\
+\midrule
+\multirow{5}{*}{Top jets} & MPGAN & 0.3600 & \textbf{6.4000} & 21.7000 & 0.580 & 7.1100 \\
+ & PC-JeDi DDIM & 0.2800 & 14.8000 & \textbf{10.1000} & \textbf{0.590} & 7.1300 \\
+ & PC-JeDi EM & \textbf{0.1500} & 13.6000 & 12.1000 & \textbf{0.590} & 7.1100 \\
+\cmidrule(l){2-7}
+ & LorentzNet GQT-2000 epochs [t], no guidance$^\dagger$ & 0.5244 & 7.1943 & 9.9440 & 0.542 & 3.6597 \\
+ & LorentzNet GQT-2000 epochs [t], $w=0.5$ $^\dagger$ & 0.2019 & 11.6026 & 6.3191 & 0.564 & 3.6094 \\
+\bottomrule
+\end{tabular}
+
+\parbox{0.96\linewidth}{\footnotesize $^\dagger$ FPND and W1M are class-stratified for the indicated jet class. W1P, covariance, and MMD are joint G/Q/T metrics for the corresponding run and are repeated on the class rows for compactness.}
+
+
+
+\end{center}
+\end{landscape}
+
+
+
+\end{document}
