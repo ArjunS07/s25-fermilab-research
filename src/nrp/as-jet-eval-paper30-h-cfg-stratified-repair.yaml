@@ -42,7 +42,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="58881dab0ac101181b06b6e75f050027df922919"
+      GIT_COMMIT="e94543d"
               SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
               case "$JOB_COMPLETION_INDEX" in
