@@ -56,7 +56,6 @@ spec:
                 *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
               esac
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
-              test -s "$CHECKPOINT"; test -s "$ENV_ARCHIVE"; test -s "$OLD_OUT/samples.pt"; test -s "$OLD_OUT/replay_bundle.pt"
               OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-paper30-gqt994k-cfg-${TAG}-stratified-repair"
               mkdir -p "$OUT" /tmp/runtime
               exec > >(tee "$OUT/run.log") 2>&1
