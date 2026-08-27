@@ -57,10 +57,21 @@ spec:
               esac
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               test -s "$CHECKPOINT"; test -s "$ENV_ARCHIVE"; test -s "$OLD_OUT/samples.pt"; test -s "$OLD_OUT/replay_bundle.pt"
-              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-paper30-gqt994k-cfg-${TAG}-stratified-repair"
-              mkdir -p "$OUT" /tmp/runtime
-              exec > >(tee "$OUT/run.log") 2>&1
-              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+      OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-paper30-gqt994k-cfg-${TAG}-stratified-repair"
+      mkdir -p "$OUT" /tmp/runtime
+      exec > >(tee "$OUT/run.log") 2>&1
+      echo "Preflight: index=$JOB_COMPLETION_INDEX tag=$TAG"
+      echo "Preflight checkpoint=$CHECKPOINT"
+      echo "Preflight old_out=$OLD_OUT"
+      for required in "$CHECKPOINT" "$ENV_ARCHIVE" "$OLD_OUT/samples.pt" "$OLD_OUT/prior_samples.pt" "$OLD_OUT/replay_bundle.pt"; do
+        if test -s "$required"; then
+          echo "Preflight OK: $required"
+        else
+          echo "Preflight MISSING: $required"
+          exit 1
+        fi
+      done
+      tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
               PYTHON=/tmp/runtime/python-env/bin/python
               "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
               mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
