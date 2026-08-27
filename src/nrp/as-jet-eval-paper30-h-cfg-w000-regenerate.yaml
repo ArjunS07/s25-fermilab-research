@@ -1,0 +1,58 @@
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-eval-paper30-h-cfg-w000-regenerate}
+spec:
+  ttlSecondsAfterFinished: 259200
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: generate
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              GIT_COMMIT="ba2991a9070e1b8e9b562a51a258699064480053"
+              SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
+              CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-paper30-gqt994k-cfg-w000-regenerated"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              for required in "$CHECKPOINT" "$ENV_ARCHIVE"; do test -s "$required"; done
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" infer.py --config configs/infer-g30-mass-shell.yaml \
+                --set data.jet_types="[g,q,t]" --set paths.checkpoint_path="$CHECKPOINT" \
+                --set paths.output_path="$SOURCE_RUN" --set paths.out_dir="$OUT/eval" \
+                --set inference.skip_samples=false --set inference.skip_metrics=false \
+                --set inference.stratify_metrics_by_class=true
+              for artifact in samples.pt prior_samples.pt replay_bundle.pt metrics.csv summary.json; do test -s "$OUT/eval/$artifact"; done
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 32Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 32Gi}
