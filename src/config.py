@@ -212,10 +212,6 @@ class InferenceConfig(BaseModel):
     seed: int = 42
     batch_size: int = 256
     sampler: Literal["euler", "heun"] = "euler"
-    # Optional Lorentz-invariant stability control for mass-shell Euler integration.
-    # Each nominal interval is subdivided until ||v||_g * dt / m is at most this value.
-    mass_shell_max_step_rapidity: float | None = Field(default=None, gt=0)
-    mass_shell_max_substeps: int = Field(default=64, ge=1)
     # Scientific qualification threshold. Exceeding it marks qualification failed.
     max_invalid_fraction: float | None = Field(default=None, ge=0, le=1)
     # Dedicated smoke/qualification jobs may opt into a nonzero exit. Ordinary training and
@@ -342,8 +338,6 @@ def generation_controls_from_config(cfg, prior_dist):
         "use_hyperbolic": cfg.model.flow_geometry == "mass_shell",
         "hyperbolic_model": "mass_shell",
         "sampler": cfg.inference.sampler,
-        "mass_shell_max_step_rapidity": cfg.inference.mass_shell_max_step_rapidity,
-        "mass_shell_max_substeps": cfg.inference.mass_shell_max_substeps,
         "integration_end_time": cfg.inference.integration_end_time,
         "prior_dist": prior_dist,
     }

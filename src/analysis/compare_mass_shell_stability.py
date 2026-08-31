@@ -1,11 +1,11 @@
-"""Summarize a fixed-step/adaptive mass-shell inference matrix."""
+"""Summarize a fixed-step mass-shell inference matrix."""
 
 import argparse
 import json
 from pathlib import Path
 
 
-LABELS = ("euler-64", "euler-128", "euler-256", "adaptive-64-r05")
+LABELS = ("euler-64", "euler-128", "euler-256")
 
 
 def collect(base: Path) -> dict:
@@ -29,9 +29,7 @@ def collect(base: Path) -> dict:
         })
     stable = [row for row in rows
               if row["n_nonfinite"] == 0 and row["n_finite_max_abs_gt_1e6"] == 0]
-    fixed = [row for row in stable if row["label"].startswith("euler-")]
-    recommendation = (fixed[0]["label"] if fixed else
-                      (stable[0]["label"] if stable else "none-stable"))
+    recommendation = stable[0]["label"] if stable else "none-stable"
     return {"rows": rows, "recommended_sampler": recommendation}
 
 

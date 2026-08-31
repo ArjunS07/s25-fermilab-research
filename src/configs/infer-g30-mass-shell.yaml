@@ -17,8 +17,6 @@ inference:
   integration_steps: 64
   prior_dist: axis_aligned_per_jet
   sampler: euler
-  mass_shell_max_step_rapidity: 0.5
-  mass_shell_max_substeps: 64
   use_cfg: false
   use_ema_weights: true
   warn_invalid_fraction: 0.0

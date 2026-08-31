@@ -8,7 +8,6 @@ def test_generation_controls_from_config():
     cfg = InferRunConfig(
         inference={
             "use_cfg": True, "cfg_guidance_weight": 0.5, "sampler": "euler",
-            "mass_shell_max_step_rapidity": 0.5, "mass_shell_max_substeps": 64,
             "integration_end_time": 0.99,
         },
         model={"regulator_mass": 0.3},
@@ -22,8 +21,6 @@ def test_generation_controls_from_config():
         "use_hyperbolic": True,
         "hyperbolic_model": "mass_shell",
         "sampler": "euler",
-        "mass_shell_max_step_rapidity": 0.5,
-        "mass_shell_max_substeps": 64,
         "integration_end_time": 0.99,
         "prior_dist": "axis_aligned",
     }

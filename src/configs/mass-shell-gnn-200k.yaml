@@ -2,7 +2,7 @@
 #
 # One base recipe frozen from the width-96 arm-a frontrunner (readout_only/no-pool, ~513k
 # params, FPND 0.529 @ 600k): fresh prior + online squared-geodesic ICP, monotonic-cosine
-# optimizer-step LR 6e-4, regulator mass 0.1, EMA, adaptive Euler sampler.
+# optimizer-step LR 6e-4, regulator mass 0.1, EMA, fixed-step Euler sampler.
 #
 # The manifest overrides only the per-run knobs via --set:
 #   data.jet_types            [g] | [q] | [t] | [g,q,t]
@@ -51,8 +51,6 @@ inference:
   integration_steps: 64
   prior_dist: axis_aligned_per_jet
   sampler: euler
-  mass_shell_max_step_rapidity: 0.5
-  mass_shell_max_substeps: 64
   use_cfg: false
   cfg_guidance_weight: 2.0
   warn_invalid_fraction: 0.0

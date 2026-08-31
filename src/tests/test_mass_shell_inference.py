@@ -6,10 +6,9 @@ without needing jetnet. Guards the properties the sampler must maintain over a f
 integration: stay on the shell (with re-projection preventing drift), stay finite, respect the
 mask (padding parked at the apex), and work with references + CFG on.
 """
-import pytest
 import torch
 
-from util.geometry.mass_shell import MassShellIntegrationError, project_to_shell
+from util.geometry.mass_shell import exp_map, project_to_shell
 from util.geometry.minkowski_utils import normsq4
 from tests.lorentz_test_utils import build_model, sample_inputs
 
@@ -98,73 +97,28 @@ def test_step_is_deterministic():
     assert torch.equal(a, b)
 
 
-def test_adaptive_step_matches_euler_when_no_subdivision_needed():
+def test_step_evaluates_velocity_once_per_nominal_interval(monkeypatch):
     model = build_model(seed=0)
     x, _, cond, mask, refs = sample_inputs(seed=3)
     y0 = project_to_shell(x * mask.unsqueeze(-1), M)
+    original = model._mass_shell_velocity
     t0 = torch.tensor(0.0, dtype=torch.float64)
     t1 = torch.tensor(0.01, dtype=torch.float64)
-    ordinary = model.step_hyperbolic(
-        y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M, ref_vectors=refs)
-    adaptive = model.step_hyperbolic(
-        y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M, ref_vectors=refs,
-        max_step_rapidity=1e6, max_substeps=4)
-    assert torch.equal(ordinary, adaptive)
-
-
-def test_adaptive_step_subdivides_large_field_and_stays_finite(monkeypatch):
-    model = build_model(seed=0)
-    x, _, cond, mask, refs = sample_inputs(seed=3)
-    y0 = project_to_shell(x * mask.unsqueeze(-1), M)
-
-    original = model._mass_shell_velocity
+    expected_velocity = original(y0, cond, mask, t0, False, 2.0, refs)
+    expected = project_to_shell(exp_map(y0, expected_velocity * 0.01, M), M)
     calls = 0
 
-    def amplified(*args, **kwargs):
+    def counted(*args, **kwargs):
         nonlocal calls
         calls += 1
-        return 2000.0 * original(*args, **kwargs)
+        return original(*args, **kwargs)
 
-    monkeypatch.setattr(model, "_mass_shell_velocity", amplified)
+    monkeypatch.setattr(model, "_mass_shell_velocity", counted)
     out = model.step_hyperbolic(
-        y0, cond, mask, torch.tensor(0.0, dtype=torch.float64),
-        torch.tensor(0.01, dtype=torch.float64), hyperbolic_model="mass_shell",
-        regulator_mass=M, ref_vectors=refs, max_step_rapidity=0.005, max_substeps=64)
-    assert calls > 1
+        y0, cond, mask, t0, t1, hyperbolic_model="mass_shell",
+        regulator_mass=M, ref_vectors=refs)
+    assert calls == 1
+    assert torch.equal(out, expected)
     assert torch.isfinite(out).all()
     real = mask > 0
     assert (normsq4(out)[real] - M * M).abs().max() < 1e-6
-
-
-def test_adaptive_step_fails_instead_of_publishing_unbounded_substeps(monkeypatch):
-    model = build_model(seed=0)
-    x, _, cond, mask, refs = sample_inputs(seed=3)
-    y0 = project_to_shell(x * mask.unsqueeze(-1), M)
-    original = model._mass_shell_velocity
-    monkeypatch.setattr(model, "_mass_shell_velocity",
-                        lambda *args, **kwargs: 100.0 * original(*args, **kwargs))
-    with pytest.raises(MassShellIntegrationError, match="exceeded 1 substeps") as caught:
-        model.step_hyperbolic(
-            y0, cond, mask, torch.tensor(0.0, dtype=torch.float64),
-            torch.tensor(0.1, dtype=torch.float64), hyperbolic_model="mass_shell",
-            regulator_mass=M, ref_vectors=refs, max_step_rapidity=0.01, max_substeps=1)
-    record = caught.value.as_dict()
-    assert record["reason"] == "substep_limit"
-    assert record["completed_substeps"] == 1
-    assert record["estimated_required_substeps"] > 1
-
-
-def test_adaptive_step_returns_structured_success_telemetry():
-    model = build_model(seed=0)
-    x, _, cond, mask, refs = sample_inputs(seed=3)
-    y0 = project_to_shell(x * mask.unsqueeze(-1), M)
-    out, telemetry = model.step_hyperbolic(
-        y0, cond, mask, torch.tensor(0.0, dtype=torch.float64),
-        torch.tensor(0.01, dtype=torch.float64), hyperbolic_model="mass_shell",
-        regulator_mass=M, ref_vectors=refs, max_step_rapidity=1e6, max_substeps=4,
-        return_diagnostics=True,
-    )
-    assert torch.isfinite(out).all()
-    assert telemetry["substeps"] == 1
-    assert telemetry["max_tangent_norm"] >= 0
-    assert telemetry["max_step_rapidity"] >= 0

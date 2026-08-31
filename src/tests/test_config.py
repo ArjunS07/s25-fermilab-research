@@ -84,13 +84,10 @@ def test_invalid_sampler_choice_rejected():
 
 
 @pytest.mark.parametrize("field,value", [
-    ("mass_shell_max_step_rapidity", 0),
-    ("mass_shell_max_step_rapidity", -0.5),
-    ("mass_shell_max_substeps", 0),
     ("integration_end_time", 0),
     ("integration_end_time", 1.1),
 ])
-def test_invalid_adaptive_mass_shell_limits_rejected(field, value):
+def test_invalid_integration_end_time_rejected(field, value):
     with pytest.raises(ValidationError):
         InferRunConfig(inference={field: value})
 

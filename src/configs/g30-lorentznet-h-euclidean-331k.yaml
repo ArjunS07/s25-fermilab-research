@@ -59,8 +59,6 @@ inference:
   use_ema_weights: true
   # Ignored by Euclidean integration, retained so the serialized control config
   # differs from H only where geometry mathematically requires it.
-  mass_shell_max_step_rapidity: 0.5
-  mass_shell_max_substeps: 64
   warn_invalid_fraction: 0.0
   max_invalid_fraction: 0.001
 paths: {cache_dir: /mnt/data/caches}

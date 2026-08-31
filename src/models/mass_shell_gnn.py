@@ -8,7 +8,6 @@ separate tangent-attention backbone, have been removed. Parameter names
 from __future__ import annotations
 from typing import NamedTuple
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -154,7 +153,7 @@ class MassShellGNNFlow(nn.Module):
 
     def _mass_shell_velocity(self, state, conditions, mask, t, use_cfg,
                              guidance_weight, references):
-        from util.geometry.mass_shell import MassShellIntegrationError, pushforward_to_tangent
+        from util.geometry.mass_shell import pushforward_to_tangent
 
         batch_t = t.unsqueeze(0).expand(state.shape[0])
         model_dtype = next(self.parameters()).dtype
@@ -163,9 +162,8 @@ class MassShellGNNFlow(nn.Module):
             state, batch_t.to(model_dtype), conditions.to(model_dtype), mask, model_refs
         )
         if not torch.isfinite(velocity).all():
-            raise MassShellIntegrationError(
-                "nonfinite_velocity", "mass-shell model produced a non-finite velocity",
-                current_t=float(t),
+            raise FloatingPointError(
+                f"mass-shell model produced a non-finite velocity at t={float(t)}"
             )
         if use_cfg:
             unconditional = self.forward(
@@ -174,90 +172,36 @@ class MassShellGNNFlow(nn.Module):
             )
             velocity = velocity + guidance_weight * (velocity - unconditional)
         if not torch.isfinite(velocity).all():
-            raise MassShellIntegrationError(
-                "nonfinite_velocity", "guided mass-shell velocity is non-finite",
-                current_t=float(t), use_cfg=bool(use_cfg),
+            raise FloatingPointError(
+                f"guided mass-shell velocity is non-finite at t={float(t)}"
             )
         return pushforward_to_tangent(state, velocity, self.regulator_mass) * mask.unsqueeze(-1)
 
     def step_hyperbolic(self, y_t, jet_conditions, mask, t_start, t_end,
-                        c=1.0, use_cfg=False, guidance_weight=2.0,
+                        use_cfg=False, guidance_weight=2.0,
                         ref_vectors=None, hyperbolic_model="mass_shell",
-                        regulator_mass=None, max_step_rapidity=None,
-                        max_substeps=64, return_diagnostics=False):
-        """Advance one nominal interval with optional rapidity-controlled substeps."""
-        del c
+                        regulator_mass=None):
+        """Advance one nominal Euler interval with a geodesic mass-shell update."""
         if hyperbolic_model != "mass_shell":
             raise ValueError("MassShellGNNFlow only supports mass-shell integration")
         if regulator_mass is not None and regulator_mass != self.regulator_mass:
             raise ValueError("sampler regulator mass differs from model regulator mass")
 
-        from util.geometry.mass_shell import (MassShellIntegrationError, exp_map,
-                                     project_to_shell, tangent_norm)
+        from util.geometry.mass_shell import exp_map, project_to_shell
 
-        current = y_t
-        current_t = float(t_start.detach().cpu())
-        end_t = float(t_end.detach().cpu())
-        substeps = 0
-        max_norm_seen = 0.0
-        max_rapidity_seen = 0.0
-        while current_t < end_t - 1e-15:
-            t = torch.as_tensor(current_t, device=y_t.device, dtype=t_start.dtype)
-            velocity = self._mass_shell_velocity(
-                current, jet_conditions, mask, t, use_cfg, guidance_weight, ref_vectors
-            )
-            real_norms = tangent_norm(velocity).squeeze(-1)[mask > 0]
-            if real_norms.numel() and not torch.isfinite(real_norms).all():
-                raise MassShellIntegrationError(
-                    "nonfinite_velocity", "tangent velocity contains non-finite values",
-                    current_t=current_t, completed_substeps=substeps,
-                )
-            max_norm = float(real_norms.max().detach().cpu()) if real_norms.numel() else 0.0
-            max_norm_seen = max(max_norm_seen, max_norm)
-            remaining = end_t - current_t
-            if max_step_rapidity is None or max_norm == 0.0:
-                allowed_dt = remaining
-            else:
-                if max_step_rapidity <= 0 or max_substeps < 1:
-                    raise ValueError("adaptive mass-shell limits must be positive")
-                allowed_dt = min(
-                    remaining, max_step_rapidity * self.regulator_mass / max_norm
-                )
-            if not allowed_dt > 0 or not np.isfinite(allowed_dt):
-                raise MassShellIntegrationError(
-                    "invalid_step_size", "adaptive sampler produced an invalid step size",
-                    current_t=current_t, allowed_dt=float(allowed_dt),
-                )
-            substeps += 1
-            if substeps > max_substeps:
-                estimated_required = (substeps - 1) + int(np.ceil(remaining / allowed_dt))
-                raise MassShellIntegrationError(
-                    "substep_limit",
-                    f"adaptive sampler exceeded {max_substeps} substeps",
-                    current_t=current_t, completed_substeps=substeps - 1,
-                    max_tangent_norm=max_norm_seen,
-                    estimated_required_substeps=estimated_required,
-                )
-            max_rapidity_seen = max(
-                max_rapidity_seen,
-                max_norm * allowed_dt / self.regulator_mass,
-            )
-            current = project_to_shell(exp_map(current, velocity * allowed_dt,
-                                               self.regulator_mass), self.regulator_mass)
-            if not torch.isfinite(current).all():
-                raise MassShellIntegrationError(
-                    "nonfinite_state", "mass-shell step produced a non-finite state",
-                    current_t=current_t, completed_substeps=substeps,
-                )
-            current_t = min(end_t, current_t + allowed_dt)
-
-        if return_diagnostics:
-            return current, {
-                "substeps": substeps,
-                "max_tangent_norm": max_norm_seen,
-                "max_step_rapidity": max_rapidity_seen,
-            }
-        return current
+        start_time = float(t_start.detach().cpu())
+        end_time = float(t_end.detach().cpu())
+        t = torch.as_tensor(start_time, device=y_t.device, dtype=t_start.dtype)
+        velocity = self._mass_shell_velocity(
+            y_t, jet_conditions, mask, t, use_cfg, guidance_weight, ref_vectors
+        )
+        stepped = project_to_shell(
+            exp_map(y_t, velocity * (end_time - start_time), self.regulator_mass),
+            self.regulator_mass,
+        )
+        if not torch.isfinite(stepped).all():
+            raise FloatingPointError("mass-shell Euler step produced a non-finite state")
+        return stepped
 
 
 def LEFTJeN(max_num_jet_types, num_layers=6, hidden_dim=128, include_pt=False,

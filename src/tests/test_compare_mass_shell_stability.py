@@ -24,8 +24,7 @@ def test_compare_prefers_lowest_cost_stable_fixed_sampler(tmp_path):
     assert report["recommended_sampler"] == "euler-128"
 
 
-def test_compare_falls_back_to_adaptive(tmp_path):
+def test_compare_reports_no_stable_fixed_step_when_all_are_unstable(tmp_path):
     for label in LABELS:
-        adaptive = label.startswith("adaptive")
-        _write_result(tmp_path, label, 0 if adaptive else 1, 0 if adaptive else 1, 1.0)
-    assert collect(tmp_path)["recommended_sampler"] == "adaptive-64-r05"
+        _write_result(tmp_path, label, 1, 1, 1.0)
+    assert collect(tmp_path)["recommended_sampler"] == "none-stable"

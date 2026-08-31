@@ -400,9 +400,6 @@ if __name__ == "__main__":
                     "invalid_fraction": n_unstable / max(int(diagnostics["n_total"]), 1),
                     "n_crossed_max_abs_1e6": int(diagnostics["n_crossed_max_abs_1e6"]),
                     "failure_reason_counts": diagnostics.get("failure_reason_counts", {}),
-                    "integration_telemetry_quantiles": diagnostics.get(
-                        "integration_telemetry_quantiles", {}
-                    ),
                 }
                 with open(f"{probe_dir}/probe_summary.json", "w") as handle:
                     json.dump(summary, handle, indent=2)

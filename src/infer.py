@@ -327,8 +327,6 @@ def main():
             "integration_steps": cfg.inference.integration_steps,
             "integration_end_time": cfg.inference.integration_end_time,
             "sampler": cfg.inference.sampler,
-            "mass_shell_max_step_rapidity": cfg.inference.mass_shell_max_step_rapidity,
-            "mass_shell_max_substeps": cfg.inference.mass_shell_max_substeps,
             "replay_bundle_path": cfg.paths.replay_bundle_path,
             "sampling_seconds": generation_diagnostics.get("sampling_seconds"),
             "sampler_failures": generation_diagnostics.get("n_failed"),

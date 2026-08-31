@@ -20,50 +20,6 @@ sns.set_style("whitegrid")
 features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 
 
-def _resilient_mass_shell_step(model, state, cond, masks, t_start, t_end, **kwargs):
-    """Integrate a batch while isolating trajectories that exceed adaptive safety limits."""
-    try:
-        stepped, telemetry = model.step_hyperbolic(
-            y_t=state, jet_conditions=cond, mask=masks, t_start=t_start, t_end=t_end,
-            hyperbolic_model='mass_shell', return_diagnostics=True, **kwargs)
-        if torch.isfinite(stepped).all():
-            return (
-                stepped,
-                torch.zeros(state.shape[0], dtype=torch.bool, device=state.device),
-                [dict(telemetry) for _ in range(state.shape[0])],
-                [None] * state.shape[0],
-            )
-        raise FloatingPointError("mass-shell step returned non-finite state")
-    except FloatingPointError as exc:
-        from util.geometry.mass_shell import MassShellIntegrationError
-        failure_record = (
-            exc.as_dict() if isinstance(exc, MassShellIntegrationError)
-            else {"reason": "floating_point_error", "message": str(exc)}
-        )
-        if state.shape[0] == 1:
-            failed = torch.full_like(state, float('nan'))
-            return (
-                failed,
-                torch.ones(1, dtype=torch.bool, device=state.device),
-                [None],
-                [failure_record],
-            )
-        middle = state.shape[0] // 2
-        outputs, failures, telemetry_records, failure_records = [], [], [], []
-        for slc in (slice(0, middle), slice(middle, state.shape[0])):
-            refs = kwargs.get("ref_vectors")
-            child_kwargs = dict(kwargs)
-            if refs is not None:
-                child_kwargs["ref_vectors"] = refs[slc]
-            child, child_failed, child_telemetry, child_failures = _resilient_mass_shell_step(
-                model, state[slc], cond[slc], masks[slc], t_start, t_end, **child_kwargs)
-            outputs.append(child)
-            failures.append(child_failed)
-            telemetry_records.extend(child_telemetry)
-            failure_records.extend(child_failures)
-        return (torch.cat(outputs), torch.cat(failures), telemetry_records, failure_records)
-
-
 def generate_samples(
         model: LEFTJeN,
         jet_attr_model,
@@ -86,8 +42,6 @@ def generate_samples(
         include_mass_condition=False,
         sampler='euler',
         prior_dist='isotropic_com',
-        mass_shell_max_step_rapidity=None,
-        mass_shell_max_substeps=64,
         replay_bundle_path=None,
 ):
     sampling_start = time.perf_counter()
@@ -109,7 +63,7 @@ def generate_samples(
     if use_hyperbolic and hyperbolic_model == 'mass_shell' and sampler != 'euler':
         raise ValueError(
             f"mass-shell integration supports sampler='euler'; got {sampler!r}. "
-            "Use mass_shell_max_step_rapidity for adaptive Euler integration."
+            "Use sampler='euler'."
         )
 
     # make folder
@@ -127,7 +81,6 @@ def generate_samples(
     all_masks = []
     all_internal_prior = []
     all_failure_records = []
-    all_step_telemetry = []
 
     replay_bundle = None
     if replay_bundle_path:
@@ -256,80 +209,39 @@ def generate_samples(
                     (current_batch_size,), -1, dtype=torch.int64, device=device)
                 explosion_step = torch.full_like(failure_step, -1)
                 failure_records = [None] * current_batch_size
-                step_telemetry = [[] for _ in range(current_batch_size)]
-                full_batch_active = True
                 for i in range(integration_steps):
-                    used_full_batch = full_batch_active
-                    if used_full_batch:
-                        active = None
-                        active_y = y
-                        active_cond = cond
-                        active_masks = masks
-                        refs_active = ref_vectors
-                        active_indices = None
-                    else:
-                        active = failure_step < 0
-                        if not active.any():
-                            break
-                        active_y = y[active]
-                        active_cond = cond[active]
-                        active_masks = masks[active]
-                        refs_active = ref_vectors[active] if ref_vectors is not None else None
-                        active_indices = active.nonzero(as_tuple=False).flatten()
-                    stepped, failed, telemetry_records, step_failure_records = _resilient_mass_shell_step(
-                        model, active_y, active_cond, active_masks, times[i], times[i + 1],
+                    active = failure_step < 0
+                    if not active.any():
+                        break
+                    refs_active = ref_vectors[active] if ref_vectors is not None else None
+                    stepped = model.step_hyperbolic(
+                        y_t=y[active], jet_conditions=cond[active], mask=masks[active],
+                        t_start=times[i], t_end=times[i + 1],
+                        hyperbolic_model='mass_shell',
                         regulator_mass=regulator_mass,
                         use_cfg=use_cfg,
                         guidance_weight=cfg_guidance_weight,
                         ref_vectors=refs_active,
-                        max_step_rapidity=mass_shell_max_step_rapidity,
-                        max_substeps=mass_shell_max_substeps,
                     )
-                    if used_full_batch:
-                        y = stepped
-                    else:
-                        y = y.clone()
-                        y[active] = stepped
-                    for local_idx, telemetry in enumerate(telemetry_records):
-                        global_idx = (
-                            local_idx if used_full_batch
-                            else int(active_indices[local_idx])
-                        )
-                        if telemetry is not None:
-                            step_telemetry[global_idx].append({
-                                "integration_step": i,
-                                **telemetry,
-                            })
-                    if failed.any():
-                        failed_local = failed.nonzero(as_tuple=False).flatten().tolist()
-                        if used_full_batch:
-                            failure_step[failed] = i
-                        else:
-                            failure_step[active_indices[failed]] = i
-                        for local_idx in failed_local:
-                            global_idx = (
-                                local_idx if used_full_batch
-                                else int(active_indices[local_idx])
-                            )
+                    active_indices = active.nonzero(as_tuple=False).flatten()
+                    finite = torch.isfinite(stepped).all(dim=(1, 2))
+                    y = y.clone()
+                    y[active_indices[finite]] = stepped[finite]
+                    if (~finite).any():
+                        failed_indices = active_indices[~finite]
+                        y[failed_indices] = float("nan")
+                        failure_step[failed_indices] = i
+                        for global_idx in failed_indices.tolist():
                             failure_records[global_idx] = {
                                 "integration_step": i,
-                                **(step_failure_records[local_idx] or {
-                                    "reason": "unknown", "message": "missing failure record"
-                                }),
+                                "reason": "nonfinite_state",
+                                "message": "mass-shell Euler step produced a non-finite state",
                             }
-                        full_batch_active = False
-                    finite = torch.isfinite(stepped).all(dim=(1, 2))
                     max_abs = stepped.abs().amax(dim=(1, 2))
                     new_explosive = finite & (max_abs > 1e6)
-                    unset = (
-                        explosion_step < 0 if used_full_batch
-                        else explosion_step[active_indices] < 0
-                    )
+                    unset = explosion_step[active_indices] < 0
                     if (new_explosive & unset).any():
-                        if used_full_batch:
-                            explosion_step[new_explosive & unset] = i
-                        else:
-                            explosion_step[active_indices[new_explosive & unset]] = i
+                        explosion_step[active_indices[new_explosive & unset]] = i
                 x = y
             else:
                 # Vanilla ambient ODE integration.  Do not project, repair energies, or
@@ -340,7 +252,6 @@ def generate_samples(
                 )
                 explosion_step = torch.full_like(failure_step, -1)
                 failure_records = [None] * current_batch_size
-                step_telemetry = [[] for _ in range(current_batch_size)]
                 for i in range(integration_steps):
                     active = failure_step < 0
                     if not active.any():
@@ -397,7 +308,6 @@ def generate_samples(
             all_failure_steps.append(failure_step.cpu())
             all_explosion_steps.append(explosion_step.cpu())
             all_failure_records.extend(failure_records)
-            all_step_telemetry.extend(step_telemetry)
 
     all_samples_cat   = torch.cat(all_samples, dim=0)
     all_prior_samples_cat = torch.cat(all_prior_samples, dim=0)
@@ -438,16 +348,6 @@ def generate_samples(
             return {name: float(value) for name, value in zip(
                 ("p50", "p90", "p99", "p999", "max"),
                 torch.quantile(values.to(torch.float64), q))}
-        def telemetry_quantiles(field):
-            values = [
-                float(record[field])
-                for trajectory in all_step_telemetry
-                for record in trajectory
-                if record.get(field) is not None
-            ]
-            if not values:
-                return {name: None for name in ("p50", "p90", "p99", "p999", "max")}
-            return quantiles(torch.tensor(values, dtype=torch.float64))
         trajectory_records = []
         for idx in noteworthy.nonzero(as_tuple=False).flatten().tolist():
             attrs = generated_attrs[idx]
@@ -463,7 +363,6 @@ def generate_samples(
                 "prior_max_abs": float(prior_max_abs[idx]),
                 "endpoint_max_abs": float(endpoint_max_abs[idx]),
                 "failure": all_failure_records[idx],
-                "step_telemetry": all_step_telemetry[idx],
             })
         failure_reason_counts = {}
         for record in all_failure_records:
@@ -484,18 +383,11 @@ def generate_samples(
                 for step in torch.unique(explosions[explosions >= 0]).tolist()
             },
             "failure_reason_counts": failure_reason_counts,
-            "integration_telemetry_quantiles": {
-                "substeps": telemetry_quantiles("substeps"),
-                "max_tangent_norm": telemetry_quantiles("max_tangent_norm"),
-                "max_step_rapidity": telemetry_quantiles("max_step_rapidity"),
-            },
             "integration_steps": int(integration_steps),
             "integration_end_time": float(integration_end_time),
             "flow_geometry": "mass_shell" if use_hyperbolic else "euclidean",
             "sampler": sampler,
             "sampling_seconds": time.perf_counter() - sampling_start,
-            "max_step_rapidity": mass_shell_max_step_rapidity,
-            "max_substeps": int(mass_shell_max_substeps),
             "all_trajectory_quantiles": {
                 "abs_eta": quantiles(generated_attrs[:, 5].abs()),
                 "pt_condition": quantiles(generated_attrs[:, 6]),
