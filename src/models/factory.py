@@ -10,7 +10,6 @@ def build_flow_model(model_config, max_num_jet_types: int):
         num_layers=model_config.n_layers,
         hidden_dim=model_config.n_hidden,
         include_pt=True,
-        include_mass_condition=model_config.include_mass_condition,
         regulator_mass=model_config.regulator_mass,
     )
     if model_config.architecture == "mass_shell_gnn":

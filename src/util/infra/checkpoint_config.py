@@ -8,7 +8,7 @@ Shared by training (``build_checkpoint``/``build_run_config``) and inference
 # fields the mass-shell GNN actually consumes; extra keys in older checkpoints are ignored.
 ARCH_KEYS = (
     "n_hidden", "n_layers", "regulator_mass",
-    "use_reference_vectors", "include_mass_condition",
+    "use_reference_vectors",
     "architecture", "flow_geometry", "reference_mode", "scalar_init_mode",
     "particle_readout_mode", "geometry_mode", "field_degree_normalization",
     "inject_condition_time_each_block",
@@ -38,7 +38,6 @@ def build_run_config(cfg, final_scale):
         "n_hidden": cfg.model.n_hidden,
         "include_pt": True,
         "use_reference_vectors": cfg.model.use_reference_vectors,
-        "include_mass_condition": cfg.model.include_mass_condition,
         "regulator_mass": cfg.model.regulator_mass,
         "backbone": cfg.model.architecture,
         "architecture": cfg.model.architecture,

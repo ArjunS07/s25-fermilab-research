@@ -498,7 +498,6 @@ def build_lorentznet(
     num_layers: int = 6,
     hidden_dim: int = 96,
     include_pt: bool = True,
-    include_mass_condition: bool = True,
     regulator_mass: float = 0.1,
     flow_geometry: str = "euclidean",
     reference_mode: str = "none",
@@ -508,9 +507,7 @@ def build_lorentznet(
     field_degree_normalization: str = "none",
     inject_condition_time_each_block: bool = False,
 ) -> LorentzNetFlow:
-    condition_dim = (
-        max_num_jet_types + 1 + int(include_pt) + int(include_mass_condition)
-    )
+    condition_dim = max_num_jet_types + 2 + int(include_pt)
     return LorentzNetFlow(
         condition_dim=condition_dim,
         n_particle_types=max_num_jet_types,

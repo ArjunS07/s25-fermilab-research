@@ -2,10 +2,7 @@
 """
 Standalone LEFTJeN inference script.
 
-Loads a trained checkpoint and runs any combination of:
-  1. Vector field visualisation  (--vf_mode cfg | nocfg | both | none)
-  2. Sample generation           (skip with --skip_samples)
-  3. Metric calculation          (skip with --skip_metrics)
+Loads a trained checkpoint, generates samples, and calculates metrics.
 
 Each stage is wrapped in try/except.  Samples are always saved as samples.pt
 before metrics are attempted.
@@ -31,8 +28,6 @@ from models.factory import build_flow_model
 from util.data import jet_attributes
 from util.data.jet_attributes import NUM_CLASSES
 from models.stage1 import get_model_pth_path
-from util.infra.file_management import make_clear_folder
-from util.viz import generate_model_vector_field
 from util.metrics.metrics import run_save_metrics
 from generate_samples import generate_samples
 from data import get_data_path
@@ -41,7 +36,6 @@ from config import (InferRunConfig, build_config, parse_config_cli,
 from util.infra.checkpoint_config import resolve_architecture
 
 MAX_N_PARTICLES = 150
-NUM_PARTICLE_FEATURES = 4
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
@@ -133,67 +127,8 @@ def main():
 
     model = _load_main_model(cfg, device, preloaded_ckpt=ckpt)
 
-    # ── Stage 1: Vector field visualisation ───────────────────────────────────
-    run_cfg   = cfg.inference.vf_mode in ("cfg",   "both")
-    run_nocfg = cfg.inference.vf_mode in ("nocfg", "both")
-
     stage_status = {}
-    if run_cfg:
-        try:
-            vf_cfg_dir = os.path.join(out_dir, "vf_viz_cfg")
-            make_clear_folder(vf_cfg_dir)
-            print("\n=== Vector field (CFG) ===")
-            generate_model_vector_field(
-                out_dir=vf_cfg_dir,
-                final_model=model,
-                jet_attr_model=jet_attr_model,
-                X_test=X_test,
-                scale=final_scale,
-                jet_types=cfg.data.jet_types,
-                n_particles_per_jet=cfg.data.num_particles,
-                n_features_per_particle=NUM_PARTICLE_FEATURES,
-                n_viz_samples=cfg.inference.n_viz_samples,
-                integration_steps=cfg.inference.integration_steps,
-                use_cfg=True,
-                cfg_guidance_weight=cfg.inference.cfg_guidance_weight,
-                use_hyperbolic=cfg.model.flow_geometry == "mass_shell",
-                use_reference_vectors=cfg.model.use_reference_vectors,
-            )
-            print("CFG vector field done.")
-            stage_status["vector_field_cfg"] = {"status": "ok"}
-        except Exception as e:
-            stage_status["vector_field_cfg"] = {"status": "warning", "error": str(e)}
-            print(f"\n[ERROR] CFG vector field failed: {e}")
-            traceback.print_exc()
-
-    if run_nocfg:
-        try:
-            vf_nocfg_dir = os.path.join(out_dir, "vf_viz_nocfg")
-            make_clear_folder(vf_nocfg_dir)
-            print("\n=== Vector field (no CFG) ===")
-            generate_model_vector_field(
-                out_dir=vf_nocfg_dir,
-                final_model=model,
-                jet_attr_model=jet_attr_model,
-                X_test=X_test,
-                scale=final_scale,
-                jet_types=cfg.data.jet_types,
-                n_particles_per_jet=cfg.data.num_particles,
-                n_features_per_particle=NUM_PARTICLE_FEATURES,
-                n_viz_samples=cfg.inference.n_viz_samples,
-                integration_steps=cfg.inference.integration_steps,
-                use_cfg=False,
-                use_hyperbolic=cfg.model.flow_geometry == "mass_shell",
-                use_reference_vectors=cfg.model.use_reference_vectors,
-            )
-            print("No-CFG vector field done.")
-            stage_status["vector_field_nocfg"] = {"status": "ok"}
-        except Exception as e:
-            stage_status["vector_field_nocfg"] = {"status": "warning", "error": str(e)}
-            print(f"\n[ERROR] No-CFG vector field failed: {e}")
-            traceback.print_exc()
-
-    # ── Stage 2: Sample generation ─────────────────────────────────────────────
+    # ── Stage 1: Sample generation ─────────────────────────────────────────────
     samples = None
     gen_jet_types = None
     gen_pt_cond = None
@@ -256,7 +191,7 @@ def main():
             print(f"\n[ERROR] Sample generation failed: {e}")
             traceback.print_exc()
 
-    # ── Stage 3: Metric calculation ────────────────────────────────────────────
+    # ── Stage 2: Metric calculation ────────────────────────────────────────────
     eval_info = None
     if not cfg.inference.skip_metrics:
         if samples is None:
@@ -284,7 +219,7 @@ def main():
                 print(f"\n[ERROR] Metric calculation failed: {e}")
                 traceback.print_exc()
 
-    # ── Stage 4: Write summary.json ───────────────────────────────────────────
+    # ── Stage 3: Write summary.json ───────────────────────────────────────────
     try:
         git_commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
@@ -326,7 +261,6 @@ def main():
             "cfg_guidance_weight": cfg.inference.cfg_guidance_weight,
             "integration_steps": cfg.inference.integration_steps,
             "integration_end_time": cfg.inference.integration_end_time,
-            "sampler": cfg.inference.sampler,
             "replay_bundle_path": cfg.paths.replay_bundle_path,
             "sampling_seconds": generation_diagnostics.get("sampling_seconds"),
             "sampler_failures": generation_diagnostics.get("n_failed"),

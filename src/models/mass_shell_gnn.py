@@ -21,17 +21,11 @@ def _small_normal(layer):
 
 class Geometry(NamedTuple):
     """Per-forward, layer-invariant context shared by every block (nothing here evolves)."""
-    x: torch.Tensor                # (B,N,4) shell positions, float64
     cond: torch.Tensor             # (B,width) conditioning + time embedding
     mask: torch.Tensor             # (B,N) float
     edge: torch.Tensor             # (B,N,N,3) invariant edge features, model dtype
-    direction: torch.Tensor        # (B,N,N,4) normalized geodesic directions, float64
-    projected_refs: torch.Tensor   # (B,N,2,4) refs pushed to each tangent space, float64
-    typed_refs: torch.Tensor       # (B,2,width) role-tagged reference tokens
     support: torch.Tensor          # (B,N,N) bool adjacency (no self, real-real)
-    count: torch.Tensor            # (B,N) sqrt(degree), float64
     count_model: torch.Tensor      # (B,N) sqrt(degree), model dtype
-    mass: float
 
 
 def _geometry(x, mass, dtype):
@@ -106,9 +100,8 @@ class MassShellGNNBackbone(nn.Module):
         projected = projected / (self.mass + ref_norm).unsqueeze(-1)
         projected = projected * mask[:, :, None, None].to(torch.float64)
         typed_refs = cond[:, None, :] + self.ref_roles[None]
-        g = Geometry(x=x64, cond=cond, mask=mask, edge=edge, direction=direction,
-                     projected_refs=projected, typed_refs=typed_refs, support=support,
-                     count=count, count_model=count_model, mass=self.mass)
+        g = Geometry(cond=cond, mask=mask, edge=edge, support=support,
+                     count_model=count_model)
         for block in self.blocks:
             h = block(h, g)
         hi = h.unsqueeze(2).expand(-1, -1, n, -1); hj = h.unsqueeze(1).expand(-1, n, -1, -1)
@@ -179,14 +172,8 @@ class MassShellGNNFlow(nn.Module):
 
     def step_hyperbolic(self, y_t, jet_conditions, mask, t_start, t_end,
                         use_cfg=False, guidance_weight=2.0,
-                        ref_vectors=None, hyperbolic_model="mass_shell",
-                        regulator_mass=None):
+                        ref_vectors=None):
         """Advance one nominal Euler interval with a geodesic mass-shell update."""
-        if hyperbolic_model != "mass_shell":
-            raise ValueError("MassShellGNNFlow only supports mass-shell integration")
-        if regulator_mass is not None and regulator_mass != self.regulator_mass:
-            raise ValueError("sampler regulator mass differs from model regulator mass")
-
         from util.geometry.mass_shell import exp_map, project_to_shell
 
         start_time = float(t_start.detach().cpu())
@@ -205,7 +192,7 @@ class MassShellGNNFlow(nn.Module):
 
 
 def LEFTJeN(max_num_jet_types, num_layers=6, hidden_dim=128, include_pt=False,
-            include_mass_condition=False, regulator_mass=0.5,
+            regulator_mass=0.5,
             use_reference_vectors=True, **_ignored_legacy):
     """Build the mass-shell GNN from high-level jet-attribute knobs.
 
@@ -215,7 +202,7 @@ def LEFTJeN(max_num_jet_types, num_layers=6, hidden_dim=128, include_pt=False,
     """
     if not use_reference_vectors:
         raise ValueError("mass_shell_gnn requires typed reference vectors")
-    condition_dim = max_num_jet_types + 1 + int(include_pt) + int(include_mass_condition)
+    condition_dim = max_num_jet_types + 2 + int(include_pt)
     return MassShellGNNFlow(condition_dim, max_num_jet_types, hidden_dim, num_layers,
                             regulator_mass)
 

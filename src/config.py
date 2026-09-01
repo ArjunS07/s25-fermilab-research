@@ -49,10 +49,8 @@ class ModelConfig(BaseModel):
     # Shell mass in normalised units (momenta are O(1) after final_scale). The mass-shell
     # regulator: smaller = more massless/relativistic but numerically stiffer. Runs use 0.1.
     regulator_mass: float = 0.5
-    # Both are structural requirements of the mass-shell GNN (they shape the conditioning
-    # layout). Kept as explicit fields; the validator enforces they stay on.
+    # Reference vectors are a structural requirement of the mass-shell GNN.
     use_reference_vectors: bool = True
-    include_mass_condition: bool = True
 
     @model_validator(mode="after")
     def _require_reference_contract(self):
@@ -62,10 +60,6 @@ class ModelConfig(BaseModel):
             if not self.use_reference_vectors:
                 raise ValueError(
                     "model.use_reference_vectors must be true (mass-shell GNN contract)"
-                )
-            if not self.include_mass_condition:
-                raise ValueError(
-                    "model.include_mass_condition must be true (mass-shell GNN contract)"
                 )
             if self.scalar_init_mode != "normsq":
                 raise ValueError(
@@ -203,7 +197,6 @@ class InferenceConfig(BaseModel):
     # rather than drawing types randomly.  This is the publication-evaluation
     # mode: a GQT run with value 50_000 produces exactly 150_000 samples.
     samples_per_jet_type: int | None = Field(default=None, ge=1)
-    n_viz_samples: int = 1000
     integration_steps: int = 16
     integration_end_time: float = Field(default=0.99999, gt=0, le=1)
     cfg_guidance_weight: float = 2.0
@@ -211,7 +204,6 @@ class InferenceConfig(BaseModel):
     use_ema_weights: bool = False
     seed: int = 42
     batch_size: int = 256
-    sampler: Literal["euler", "heun"] = "euler"
     # Scientific qualification threshold. Exceeding it marks qualification failed.
     max_invalid_fraction: float | None = Field(default=None, ge=0, le=1)
     # Dedicated smoke/qualification jobs may opt into a nonzero exit. Ordinary training and
@@ -222,7 +214,6 @@ class InferenceConfig(BaseModel):
     warn_invalid_fraction: float | None = Field(default=None, ge=0, le=1)
     stability_probe_samples: int = Field(default=64, ge=1)
     stability_probe_integration_steps: int = Field(default=8, ge=1)
-    vf_mode: Literal["cfg", "nocfg", "both", "none"] = "none"
     skip_samples: bool = False
     skip_metrics: bool = False
     stratify_metrics_by_class: bool = False
@@ -334,10 +325,7 @@ def generation_controls_from_config(cfg, prior_dist):
         "cfg_guidance_weight": cfg.inference.cfg_guidance_weight,
         "regulator_mass": cfg.model.regulator_mass,
         "use_reference_vectors": cfg.model.use_reference_vectors,
-        "include_mass_condition": cfg.model.include_mass_condition,
         "use_hyperbolic": cfg.model.flow_geometry == "mass_shell",
-        "hyperbolic_model": "mass_shell",
-        "sampler": cfg.inference.sampler,
         "integration_end_time": cfg.inference.integration_end_time,
         "prior_dist": prior_dist,
     }

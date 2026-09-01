@@ -7,7 +7,6 @@ model:
   n_hidden: 64
   n_layers: 6
   use_reference_vectors: true
-  include_mass_condition: true
   regulator_mass: 0.1
 
 training:
@@ -41,7 +40,6 @@ inference:
   batch_size: 128
   integration_steps: 64
   prior_dist: axis_aligned_per_jet
-  sampler: euler
   warn_invalid_fraction: 0.0
   max_invalid_fraction: 0.001
   stability_probe_samples: 64

@@ -7,7 +7,6 @@ model:
   use_reference_vectors: false
   n_hidden: 96
   n_layers: 6
-  include_mass_condition: true
   regulator_mass: 0.1
 training:
   n_train_samples: 1000000
@@ -43,7 +42,6 @@ inference:
   integration_steps: 64
   integration_end_time: 0.99999
   prior_dist: axis_aligned_equal
-  sampler: euler
   seed: 42
   use_cfg: false
   use_ema_weights: true

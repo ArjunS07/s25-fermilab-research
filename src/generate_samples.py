@@ -36,11 +36,8 @@ def generate_samples(
         use_cfg=False,
         cfg_guidance_weight=2.0,
         use_hyperbolic=True,
-        hyperbolic_model='mass_shell',
         regulator_mass=0.5,
         use_reference_vectors=False,
-        include_mass_condition=False,
-        sampler='euler',
         prior_dist='isotropic_com',
         replay_bundle_path=None,
 ):
@@ -59,12 +56,6 @@ def generate_samples(
         ).repeat_interleave(samples_per_jet_type)
     else:
         balanced_global_types = None
-
-    if use_hyperbolic and hyperbolic_model == 'mass_shell' and sampler != 'euler':
-        raise ValueError(
-            f"mass-shell integration supports sampler='euler'; got {sampler!r}. "
-            "Use sampler='euler'."
-        )
 
     # make folder
     make_clear_folder(f"{root_output_path}/samples")
@@ -95,7 +86,6 @@ def generate_samples(
             "prior_dist": prior_dist,
             "final_scale": float(final_scale),
             "use_hyperbolic": bool(use_hyperbolic),
-            "hyperbolic_model": hyperbolic_model,
             "regulator_mass": float(regulator_mass),
         }
         mismatches = {
@@ -176,7 +166,7 @@ def generate_samples(
             # Preserve the exact integration start, including sampled attributes,
             # multiplicity mask, orientation, and any geometry-specific projection.
             prior_x = x * masks.unsqueeze(-1)
-            if use_hyperbolic and hyperbolic_model == 'mass_shell':
+            if use_hyperbolic:
                 from util.geometry.mass_shell import project_to_shell
                 if replay_bundle is None:
                     prior_x = project_to_shell(prior_x, regulator_mass) * masks.unsqueeze(-1)
@@ -188,19 +178,19 @@ def generate_samples(
                 gen_n_particles.unsqueeze(-1).float(),
                 cond_pt.unsqueeze(-1),
             ]
-            if include_mass_condition:
-                condition_parts.append((gen_mass / final_scale).unsqueeze(-1))
+            condition_parts.append((gen_mass / final_scale).unsqueeze(-1))
             cond = torch.cat(condition_parts, dim=-1).to(device)
 
             # Reference virtual particles, reconstructed from the sampled jet attributes.
             ref_vectors = None
             if use_reference_vectors:
                 gen_eta = generated_jet_attrs[:, 5].to(device)  # jet eta (layout: [onehot(5), eta, pt, mass, n])
-                ref_vectors = build_reference_vectors(gen_eta, gen_pt, final_scale, device,
-                                                      jet_phi=jet_phi,
-                                                      jet_mass=(gen_mass if include_mass_condition else None))
+                ref_vectors = build_reference_vectors(
+                    gen_eta, gen_pt, final_scale, device, jet_phi=jet_phi,
+                    jet_mass=gen_mass,
+                )
 
-            if use_hyperbolic and hyperbolic_model == 'mass_shell':
+            if use_hyperbolic:
                 # Integrate the ODE geodesically on the mass shell. The state stays on H_m
                 # (Cartesian on-shell 4-vectors), so the final x is used directly.
                 from util.geometry.mass_shell import project_to_shell
@@ -217,8 +207,6 @@ def generate_samples(
                     stepped = model.step_hyperbolic(
                         y_t=y[active], jet_conditions=cond[active], mask=masks[active],
                         t_start=times[i], t_end=times[i + 1],
-                        hyperbolic_model='mass_shell',
-                        regulator_mass=regulator_mass,
                         use_cfg=use_cfg,
                         guidance_weight=cfg_guidance_weight,
                         ref_vectors=refs_active,
@@ -259,7 +247,7 @@ def generate_samples(
                     refs_active = ref_vectors[active] if ref_vectors is not None else None
                     stepped = euclidean_ode_step(
                         model, y[active], cond[active], masks[active], times[i], times[i + 1],
-                        references=refs_active, sampler=sampler, use_cfg=use_cfg,
+                        references=refs_active, use_cfg=use_cfg,
                         guidance_weight=cfg_guidance_weight,
                     )
                     active_indices = active.nonzero(as_tuple=False).flatten()
@@ -283,7 +271,7 @@ def generate_samples(
                         explosion_step[active_indices[explosive & unset]] = i
                 x = y
 
-            if use_hyperbolic and hyperbolic_model == 'mass_shell':
+            if use_hyperbolic:
                 from util.geometry.mass_shell import massless_energy_view
                 # H_m is only the regularized transport manifold.  Publish the physical
                 # massless endpoint while preserving the integrated spatial momentum.
@@ -324,7 +312,6 @@ def generate_samples(
                 "prior_dist": prior_dist,
                 "final_scale": float(final_scale),
                 "use_hyperbolic": bool(use_hyperbolic),
-                "hyperbolic_model": hyperbolic_model,
                 "regulator_mass": float(regulator_mass),
                 "samples_per_jet_type": samples_per_jet_type,
             },
@@ -386,7 +373,6 @@ def generate_samples(
             "integration_steps": int(integration_steps),
             "integration_end_time": float(integration_end_time),
             "flow_geometry": "mass_shell" if use_hyperbolic else "euclidean",
-            "sampler": sampler,
             "sampling_seconds": time.perf_counter() - sampling_start,
             "all_trajectory_quantiles": {
                 "abs_eta": quantiles(generated_attrs[:, 5].abs()),

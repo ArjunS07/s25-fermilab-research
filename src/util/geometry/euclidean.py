@@ -21,24 +21,13 @@ def _euclidean_velocity(model, state, conditions, masks, t, references,
 
 
 def euclidean_ode_step(model, state, conditions, masks, t_start, t_end, *,
-                       references=None, sampler="euler", use_cfg=False,
-                       guidance_weight=2.0):
-    """One ordinary ambient-space Euler or Heun step, with no physical projection."""
+                       references=None, use_cfg=False, guidance_weight=2.0):
+    """One ordinary ambient-space Euler step, with no physical projection."""
     dt = (t_end - t_start).to(state.dtype)
     v0 = _euclidean_velocity(
         model, state, conditions, masks, t_start, references, use_cfg, guidance_weight
     ).to(state.dtype)
-    if sampler == "euler":
-        out = state + dt * v0
-    elif sampler == "heun":
-        predictor = state + dt * v0
-        v1 = _euclidean_velocity(
-            model, predictor, conditions, masks, t_end, references,
-            use_cfg, guidance_weight,
-        ).to(state.dtype)
-        out = state + dt * (v0 + v1) / 2
-    else:
-        raise ValueError(f"unknown Euclidean sampler: {sampler!r}")
+    out = state + dt * v0
     return out * masks.unsqueeze(-1).to(out.dtype)
 
 

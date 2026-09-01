@@ -25,7 +25,6 @@ from util.geometry.coordinates import (deterministic_jet_phi,
 from util.geometry.conditioning import scale_condition_pt
 from util.infra.ema import ModelEMA
 from util.infra.file_management import make_clear_folder
-from util.viz import generate_model_vector_field
 from util.metrics.metrics import run_save_metrics
 from generate_samples import generate_samples
 from data import get_data_path
@@ -198,7 +197,7 @@ if __name__ == "__main__":
                               "particle_readout_mode", "geometry_mode",
                               "field_degree_normalization",
                               "inject_condition_time_each_block",
-                              "use_reference_vectors", "include_mass_condition",
+                              "use_reference_vectors",
                               "regulator_mass")
                     if prev.get(k) != run_config.get(k)}
             if mism:
@@ -500,8 +499,7 @@ if __name__ == "__main__":
                 batch_jet_n_particles.unsqueeze(-1),
                 cond_pt.unsqueeze(-1),
             ]
-            if cfg.model.include_mass_condition:
-                condition_parts.append((batch_jet_mass / final_scale).unsqueeze(-1))
+            condition_parts.append((batch_jet_mass / final_scale).unsqueeze(-1))
             batch_jet_info_cropped = torch.cat(condition_parts, dim=-1)
 
             # Per-sample CFG dropout: each sample independently drops jet type + pT
@@ -551,8 +549,7 @@ if __name__ == "__main__":
                 ref_vectors = build_reference_vectors(batch_jet_info[:, 0], batch_jet_info[:, 1],
                                                       final_scale, device,
                                                       jet_phi=batch_jet_phi,
-                                                      jet_mass=(batch_jet_info[:, 2]
-                                                                if cfg.model.include_mass_condition else None))
+                                                      jet_mass=batch_jet_info[:, 2])
 
             with keyed_torch_rng(cfg.training.time_seed, epoch, i, rank, device):
                 t = _sample_t(x_0.shape[0])
@@ -747,53 +744,6 @@ if __name__ == "__main__":
             else jet_attributes.load_model(model_path=get_model_pth_path(cfg.paths.output_path)).to(device)
         )
 
-        # Vector-field visualization is opt-in (cfg.inference.vf_mode). Default "none"
-        # since the frames only show E vs p_x (2 of 4 features) and are rarely opened.
-        run_cfg_vf   = cfg.inference.vf_mode in ("cfg", "both")
-        run_nocfg_vf = cfg.inference.vf_mode in ("nocfg", "both")
-        if run_cfg_vf or run_nocfg_vf:
-            try:
-                vf_n_viz = cfg.inference.n_viz_samples if cfg.data.num_particles < MAX_N_PARTICLES else 100
-                if run_cfg_vf:
-                    make_clear_folder(f"{model_output_path}/vf_viz_cfg")
-                    generate_model_vector_field(
-                        out_dir=f"{model_output_path}/vf_viz_cfg",
-                        final_model=raw_model,
-                        jet_attr_model=jet_attr_model_loaded,
-                        X_test=X_test,
-                        scale=final_scale,
-                        jet_types=cfg.data.jet_types,
-                        n_particles_per_jet=cfg.data.num_particles,
-                        n_features_per_particle=NUM_PARTICLE_FEATURES,
-                        n_viz_samples=vf_n_viz,
-                        integration_steps=cfg.inference.integration_steps,
-                        use_cfg=True,
-                        cfg_guidance_weight=2.0,
-                        use_hyperbolic=cfg.model.flow_geometry == "mass_shell",
-                        use_reference_vectors=cfg.model.use_reference_vectors,
-                    )
-                if run_nocfg_vf:
-                    make_clear_folder(f"{model_output_path}/vf_viz_nocfg")
-                    generate_model_vector_field(
-                        out_dir=f"{model_output_path}/vf_viz_nocfg",
-                        final_model=raw_model,
-                        jet_attr_model=jet_attr_model_loaded,
-                        X_test=X_test,
-                        scale=final_scale,
-                        jet_types=cfg.data.jet_types,
-                        n_particles_per_jet=cfg.data.num_particles,
-                        n_features_per_particle=NUM_PARTICLE_FEATURES,
-                        n_viz_samples=vf_n_viz,
-                        integration_steps=cfg.inference.integration_steps,
-                        use_cfg=False,
-                        use_hyperbolic=cfg.model.flow_geometry == "mass_shell",
-                        use_reference_vectors=cfg.model.use_reference_vectors,
-                    )
-            except Exception as e:
-                print(f"Error occurred while generating model vector field: {e}")
-                with open(f"{model_output_path}/error_log.txt", "a") as f:
-                    f.write(f"Error occurred while generating model vector field: {e}\n")
-
         gen_jet_types = None
         gen_pt_cond = None
         try:
@@ -952,9 +902,6 @@ if __name__ == "__main__":
                 "n_parameters": sum(p.numel() for p in raw_model.parameters()),
                 "train_seconds": training_seconds,
                 "flow_geometry": cfg.model.flow_geometry,
-                "hyperbolic_model": (
-                    "mass_shell" if cfg.model.flow_geometry == "mass_shell" else None
-                ),
                 "regulator_mass": (
                     cfg.model.regulator_mass if cfg.model.flow_geometry == "mass_shell" else None
                 ),
