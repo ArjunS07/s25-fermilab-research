@@ -97,11 +97,6 @@ def _tangent_norm(u64: torch.Tensor) -> torch.Tensor:
     return torch.sqrt(nsq).unsqueeze(-1)
 
 
-def tangent_norm(u: torch.Tensor) -> torch.Tensor:
-    """Public float64 induced norm for tangent vectors, with shape ``(..., 1)``."""
-    return _tangent_norm(u.to(torch.float64))
-
-
 def exp_map(p: torch.Tensor, u: torch.Tensor, m: float) -> torch.Tensor:
     """Exponential map exp_p(u): travel geodesic arc length ||u|| from p in direction u.
 
@@ -214,50 +209,3 @@ def mass_shell_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor
     sq = raw_sq.clamp(min=0.0)
     n_real = mask64.sum().clamp(min=1.0)
     return (sq * mask64).sum() / n_real
-
-
-def tangent_error_diagnostics(p: torch.Tensor, pred: torch.Tensor, target: torch.Tensor,
-                              mask: torch.Tensor, m: float, dt: float = 1.0) -> dict:
-    """Summarize numerical health of tangent prediction and one geodesic Euler step."""
-    p64, pred64, target64, mask64 = _to_f64(p, pred, target, mask)
-    real = mask64 > 0
-    diff = pred64 - target64
-    raw_sq = -normsq4(diff)
-    pred_norm = torch.sqrt((-normsq4(pred64)).clamp(min=0.0))
-    target_norm = torch.sqrt((-normsq4(target64)).clamp(min=0.0))
-    alignment = (-dotsq4(pred64, target64) /
-                 (pred_norm * target_norm).clamp(min=_EPS))
-    step_rapidity = pred_norm * abs(float(dt)) / float(m)
-    p_dot_pred = dotsq4(p64, pred64).abs()
-    euclid_scale = torch.linalg.vector_norm(p64, dim=-1) * torch.linalg.vector_norm(pred64, dim=-1)
-    tangent_residual = p_dot_pred / euclid_scale.clamp(min=_EPS)
-
-    def fraction(condition):
-        return float(condition[real].to(torch.float64).mean().item()) if real.any() else 0.0
-
-    def quantiles(values):
-        selected = values[real]
-        selected = selected[torch.isfinite(selected)]
-        if selected.numel() == 0:
-            return [0.0, 0.0, 0.0, 0.0]
-        return [float(v) for v in torch.quantile(
-            selected, torch.tensor([0.5, 0.9, 0.99, 0.999], dtype=torch.float64,
-                                   device=selected.device)
-        ).cpu()]
-
-    return {
-        "n_real": int(real.sum().item()),
-        "nonfinite_fraction": fraction(~torch.isfinite(p64).all(dim=-1)
-                                       | ~torch.isfinite(pred64).all(dim=-1)
-                                       | ~torch.isfinite(target64).all(dim=-1)),
-        "raw_loss_negative_fraction": fraction(raw_sq < 0.0),
-        "loss_zero_fraction": fraction(raw_sq <= 0.0),
-        "tangency_residual_quantiles": quantiles(tangent_residual),
-        "pred_tangent_norm_quantiles": quantiles(pred_norm),
-        "target_tangent_norm_quantiles": quantiles(target_norm),
-        "pred_target_alignment_quantiles": quantiles(alignment),
-        "step_rapidity_quantiles": quantiles(step_rapidity),
-        "step_rapidity_max": (float(step_rapidity[real & torch.isfinite(step_rapidity)].max())
-                               if (real & torch.isfinite(step_rapidity)).any() else 0.0),
-        "step_clamp_fraction": fraction(step_rapidity > _S_MAX),
-    }
