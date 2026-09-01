@@ -6,35 +6,30 @@ import logging
 import math
 
 import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
 import torch
 import random
 from torch.utils.data import DataLoader
 
 from models.lorentznet_flow import build_lorentznet
-from util.data import jet_attributes
 from util.data.jet_attributes import NUM_CLASSES
-from models.stage1 import get_model_pth_path
 from util.data.distributions import gen_initial_distribution, time_dist
 from util.geometry.coordinates import (deterministic_jet_phi,
                               transform_rel_particle_coordinates_to_cartesian)
 from util.geometry.conditioning import scale_condition_pt
 from util.infra.ema import ModelEMA
 from util.infra.file_management import make_clear_folder
-from util.metrics.metrics import run_save_metrics
-from generate_samples import generate_samples
 from data import get_data_path
 from util.geometry.coordinates import build_reference_vectors
 from util.geometry.online_coupling import online_geodesic_coupling
-from util.metrics.qualification import loss_improvement_summary, optimizer_limit_reached
+from util.metrics.qualification import optimizer_limit_reached
 from util.infra.rng import capture_rng_state, keyed_seed, keyed_torch_rng, restore_rng_state
 from util.infra.checkpoint_config import build_run_config, build_checkpoint
 from util.infra.grad_stats import collect_gradient_stats
 from util.infra.lr_schedule import build_step_scheduler
 from training import flow_matching_loss
-from config import (TrainRunConfig, build_config, parse_config_cli,
-                    generation_controls_from_config)
+from training.stability_probe import run_stability_probe
+from config import TrainRunConfig, build_config, parse_config_cli
+from training.final_reporting import finalize_training
 
 RANDOM_SEED = 42
 MAX_N_PARTICLES = 150
@@ -235,99 +230,14 @@ if __name__ == "__main__":
     probe_steps = set(cfg.training.stability_probe_steps)
     probe_jet_attr_model = None
 
-    def run_stability_probe(optimizer_step: int, epoch: int | None = None,
-                            minibatch: int | None = None) -> None:
-        """Run a deterministic EMA sampler probe without perturbing training state."""
-        global probe_jet_attr_model
-        if optimizer_step not in probe_steps:
-            return
-        probe_dir = f"{model_output_path}/stability_probes/step_{optimizer_step:06d}"
-        os.makedirs(probe_dir, exist_ok=True)
-        python_rng = random.getstate()
-        numpy_rng = np.random.get_state()
-        torch_rng = torch.get_rng_state()
-        cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
-        raw_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
-        was_training = model.training
-        try:
-            if cfg.training.stability_probe_save_checkpoints:
-                probe_at_epoch_end = (minibatch is not None
-                                      and minibatch + 1 >= len(train_loader))
-                probe_ckpt = {
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "losses": losses,
-                    "global_optimizer_step": optimizer_step,
-                    "config": run_config,
-                    "full_config": full_config,
-                    "rng_state": capture_rng_state(),
-                    "schedule_definition": schedule_definition,
-                    "resume_epoch": max(0, (epoch + 1 if probe_at_epoch_end else epoch)
-                                        if epoch is not None else 0),
-                    "resume_minibatch": (0 if probe_at_epoch_end else
-                                         minibatch + 1 if minibatch is not None else 0),
-                }
-                if cfg.training.use_cosine_lr:
-                    probe_ckpt["scheduler_state_dict"] = scheduler.state_dict()
-                if ema is not None:
-                    probe_ckpt["ema_state_dict"] = ema.state_dict()
-                torch.save(probe_ckpt, f"{probe_dir}/checkpoint.pth")
-            if ema is not None:
-                ema.copy_to(model)
-            random.seed(cfg.inference.seed)
-            np.random.seed(cfg.inference.seed)
-            torch.manual_seed(cfg.inference.seed)
-            if torch.cuda.is_available():
-                torch.cuda.manual_seed_all(cfg.inference.seed)
-            if probe_jet_attr_model is None:
-                probe_jet_attr_model = jet_attributes.load_model(
-                    model_path=get_model_pth_path(cfg.paths.output_path)
-                ).to(device)
-            probe_outputs = generate_samples(
-                model=model,
-                jet_attr_model=probe_jet_attr_model,
-                root_output_path=probe_dir,
-                max_particles_per_jet=cfg.data.num_particles,
-                final_scale=final_scale,
-                integration_steps=cfg.inference.stability_probe_integration_steps,
-                n_samples=cfg.inference.stability_probe_samples,
-                jet_types=cfg.data.jet_types,
-                samples_per_jet_type=None,
-                device=device,
-                batch_size=min(cfg.training.batch_size, cfg.inference.stability_probe_samples),
-                **generation_controls_from_config(cfg, cfg.training.prior_dist),
-            )
-            del probe_outputs
-            diagnostics_path = f"{probe_dir}/generation_diagnostics.json"
-            with open(diagnostics_path) as handle:
-                diagnostics = json.load(handle)
-            n_unstable = int(diagnostics.get("n_unstable", diagnostics["n_failed"]))
-            summary = {
-                "optimizer_step": optimizer_step,
-                "n_total": int(diagnostics["n_total"]),
-                "n_unstable": n_unstable,
-                "invalid_fraction": n_unstable / max(int(diagnostics["n_total"]), 1),
-                "n_crossed_max_abs_1e6": int(diagnostics["n_crossed_max_abs_1e6"]),
-                "failure_reason_counts": diagnostics.get("failure_reason_counts", {}),
-            }
-            with open(f"{probe_dir}/probe_summary.json", "w") as handle:
-                json.dump(summary, handle, indent=2)
-            print(
-                f"Stability probe step={optimizer_step}: "
-                f"unstable={n_unstable}/{summary['n_total']} "
-                f"reasons={summary['failure_reason_counts']}"
-            )
-        finally:
-            model.load_state_dict(raw_state, strict=True)
-            model.train(was_training)
-            random.setstate(python_rng)
-            np.random.set_state(numpy_rng)
-            torch.set_rng_state(torch_rng)
-            if cuda_rng is not None:
-                torch.cuda.set_rng_state_all(cuda_rng)
-
-    run_stability_probe(global_optimizer_step, start_epoch - 1)
+    probe_jet_attr_model = run_stability_probe(
+        optimizer_step=global_optimizer_step, epoch=start_epoch - 1, minibatch=None,
+        probe_steps=probe_steps, model=model, optimizer=optimizer, scheduler=scheduler,
+        ema=ema, losses=losses, cfg=cfg, device=device, model_output_path=model_output_path,
+        train_loader=None, run_config=run_config, full_config=full_config,
+        schedule_definition=schedule_definition, final_scale=final_scale,
+        jet_attr_model=probe_jet_attr_model,
+    )
 
     
     total_epochs = start_epoch + cfg.training.num_epochs
@@ -554,7 +464,15 @@ if __name__ == "__main__":
                 if optimizer_limit_reached(global_optimizer_step, cfg.training.max_optimizer_steps):
                     reached_optimizer_limit = True
 
-                run_stability_probe(global_optimizer_step, epoch, i)
+                probe_jet_attr_model = run_stability_probe(
+                    optimizer_step=global_optimizer_step, epoch=epoch, minibatch=i,
+                    probe_steps=probe_steps, model=model, optimizer=optimizer, scheduler=scheduler,
+                    ema=ema, losses=losses, cfg=cfg, device=device,
+                    model_output_path=model_output_path, train_loader=train_loader,
+                    run_config=run_config, full_config=full_config,
+                    schedule_definition=schedule_definition, final_scale=final_scale,
+                    jet_attr_model=probe_jet_attr_model,
+                )
                 
             del x_1, x_0, t, loss
             if reached_optimizer_limit:
@@ -594,240 +512,13 @@ if __name__ == "__main__":
         for epoch_i, loss_val in enumerate(losses[start_epoch:], start=start_epoch):
             f.write(f"{epoch_i},{loss_val}\n")
 
-    torch.save(model.state_dict(), f"{model_output_path}/models/final_model.pth")
-
-    # Complete resume point: everything needed to continue training from the final model
-    # (raw weights, optimizer, scheduler, EMA shadow, epoch, losses, self-describing config).
-    final_ckpt = build_checkpoint(
-        model_state=model.state_dict(), epoch=last_completed_epoch,
-        global_optimizer_step=global_optimizer_step, losses=losses,
-        run_config=run_config, full_config=full_config,
-        optimizer_state=optimizer.state_dict(), rng_state=capture_rng_state(),
-        scheduler_state=scheduler.state_dict() if cfg.training.use_cosine_lr else None,
-        ema_state=ema.state_dict() if ema is not None else None,
-        extra={"schedule_definition": schedule_definition,
-               "resume_epoch": next_resume_epoch,
-               "resume_minibatch": next_resume_minibatch},
+    finalize_training(
+        cfg=cfg, model=model, optimizer=optimizer, scheduler=scheduler, ema=ema,
+        losses=losses, last_completed_epoch=last_completed_epoch,
+        global_optimizer_step=global_optimizer_step, run_config=run_config,
+        full_config=full_config, schedule_definition=schedule_definition,
+        next_resume_epoch=next_resume_epoch, next_resume_minibatch=next_resume_minibatch,
+        model_output_path=model_output_path, final_scale=final_scale,
+        training_seconds=training_seconds, x_test=X_test, device=device,
+        max_n_particles=MAX_N_PARTICLES, jet_attr_model=probe_jet_attr_model,
     )
-    torch.save(final_ckpt, f"{model_output_path}/models/final_checkpoint.pth")
-
-    # If EMA is active, save the shadow and use it for all downstream sampling/metrics.
-    if ema is not None:
-        ema.copy_to(model)
-        torch.save(model.state_dict(), f"{model_output_path}/models/ema_model.pth")
-        print("Using EMA weights for sample generation and metrics.")
-
-    jet_attr_model_loaded = (
-        probe_jet_attr_model if probe_jet_attr_model is not None
-        else jet_attributes.load_model(model_path=get_model_pth_path(cfg.paths.output_path)).to(device)
-    )
-
-    gen_jet_types = None
-    gen_pt_cond = None
-    try:
-        random.seed(cfg.inference.seed)
-        np.random.seed(cfg.inference.seed)
-        torch.manual_seed(cfg.inference.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(cfg.inference.seed)
-        samples, gen_jet_types, gen_pt_cond, prior_samples, gen_jet_eta = generate_samples(
-            model=model,
-            jet_attr_model=jet_attr_model_loaded,
-            root_output_path=model_output_path,
-            max_particles_per_jet=cfg.data.num_particles,
-            final_scale=final_scale,
-            integration_steps=cfg.inference.integration_steps,
-            n_samples=cfg.inference.n_samples,
-            jet_types=cfg.data.jet_types,
-            samples_per_jet_type=cfg.inference.samples_per_jet_type,
-            device=device,
-            batch_size=cfg.training.batch_size if cfg.data.num_particles < MAX_N_PARTICLES else 16,
-            **generation_controls_from_config(cfg, cfg.training.prior_dist),
-        )
-    except Exception as e:
-        print(f"Error occurred while generating samples: {e}")
-        with open(f"{model_output_path}/error_log.txt", "a") as f:
-            f.write(f"Error occurred while generating samples: {e}\n")
-        exit(1)
-
-    # Persist a small sample subset so plots/metrics can be regenerated without re-running.
-    try:
-        torch.save(samples[:10000].cpu(), f"{model_output_path}/samples_subset.pt")
-        torch.save(prior_samples[:10000].cpu(), f"{model_output_path}/prior_samples_subset.pt")
-    except Exception as e:
-        print(f"Error saving sample subset: {e}")
-
-    generation_diagnostics = None
-    invalid_fraction = None
-    if (cfg.inference.max_invalid_fraction is not None
-            or cfg.inference.warn_invalid_fraction is not None
-            or cfg.training.qualification_min_loss_improvement is not None):
-        diagnostics_path = f"{model_output_path}/generation_diagnostics.json"
-        if not os.path.isfile(diagnostics_path):
-            raise RuntimeError(
-                "inference.max_invalid_fraction requires generation diagnostics"
-            )
-        with open(diagnostics_path) as handle:
-            generation_diagnostics = json.load(handle)
-        n_total = int(generation_diagnostics["n_total"])
-        n_unstable = int(generation_diagnostics.get(
-            "n_unstable", generation_diagnostics["n_failed"]
-        ))
-        invalid_fraction = n_unstable / max(n_total, 1)
-
-    qualification_errors = []
-    qualification_warnings = []
-    qualification_summary = None
-    if cfg.training.max_optimizer_steps is not None:
-        optimizer_log = f"{model_output_path}/optimizer_steps.csv"
-        optimizer_frame = pd.read_csv(optimizer_log)
-        loss_summary = loss_improvement_summary(optimizer_frame["loss"].to_numpy())
-        window = loss_summary["loss_window"]
-        first_median = loss_summary["first_loss_median"]
-        final_median = loss_summary["final_loss_median"]
-        loss_improvement = loss_summary["loss_improvement_fraction"]
-        losses_finite = loss_summary["losses_finite"]
-        gradients_finite = bool(optimizer_frame["gradients_finite"].astype(bool).all())
-        completed_required_steps = global_optimizer_step == cfg.training.max_optimizer_steps
-        no_explosions = bool(
-            generation_diagnostics is not None
-            and int(generation_diagnostics["n_crossed_max_abs_1e6"]) == 0
-        )
-        qualification_summary = {
-            "global_optimizer_step": global_optimizer_step,
-            "required_optimizer_steps": cfg.training.max_optimizer_steps,
-            "completed_required_steps": completed_required_steps,
-            "loss_window": window,
-            "first_loss_median": first_median,
-            "final_loss_median": final_median,
-            "loss_improvement_fraction": loss_improvement,
-            "minimum_loss_improvement_fraction": cfg.training.qualification_min_loss_improvement,
-            "losses_finite": losses_finite,
-            "gradients_finite": gradients_finite,
-            "invalid_fraction": invalid_fraction,
-            "warn_invalid_fraction": cfg.inference.warn_invalid_fraction,
-            "max_invalid_fraction": cfg.inference.max_invalid_fraction,
-            "no_explosions": no_explosions,
-        }
-        if not completed_required_steps:
-            qualification_errors.append("did not reach required optimizer-step budget")
-        if not losses_finite:
-            qualification_errors.append("optimizer loss contains non-finite values")
-        if not gradients_finite:
-            qualification_errors.append("gradient norm contains non-finite values")
-        if (cfg.training.qualification_min_loss_improvement is not None
-                and loss_improvement < cfg.training.qualification_min_loss_improvement):
-            qualification_errors.append(
-                f"loss improvement {loss_improvement:.6f} is below "
-                f"{cfg.training.qualification_min_loss_improvement:.6f}"
-            )
-        if not no_explosions:
-            qualification_errors.append("one or more trajectories crossed |x| > 1e6")
-
-    if (cfg.inference.max_invalid_fraction is not None and invalid_fraction is not None
-            and invalid_fraction > cfg.inference.max_invalid_fraction):
-        qualification_errors.append(
-            f"invalid_fraction={invalid_fraction:.6f} exceeds "
-            f"max_invalid_fraction={cfg.inference.max_invalid_fraction:.6f}"
-        )
-    if (cfg.inference.warn_invalid_fraction is not None and invalid_fraction is not None
-            and invalid_fraction > cfg.inference.warn_invalid_fraction):
-        warning = (
-            f"invalid_fraction={invalid_fraction:.6f} exceeds warning threshold "
-            f"{cfg.inference.warn_invalid_fraction:.6f}"
-        )
-        qualification_warnings.append(warning)
-        print(f"WARNING: {warning}; continuing to physics metrics")
-    if qualification_summary is not None:
-        qualification_summary["passed"] = not qualification_errors
-        qualification_summary["errors"] = qualification_errors
-        qualification_summary["warnings"] = qualification_warnings
-        with open(f"{model_output_path}/qualification_summary.json", "w") as handle:
-            json.dump(qualification_summary, handle, indent=2)
-    eval_info = {}
-    if not cfg.inference.skip_metrics:
-        try:
-            eval_info = run_save_metrics(
-                X_test=X_test,
-                jet_types=cfg.data.jet_types,
-                gen_samples=samples,
-                output_path=model_output_path,
-                device=device,
-                gen_jet_types=gen_jet_types,
-                gen_pt_cond=gen_pt_cond,
-                gen_jet_eta=gen_jet_eta,
-                prior_samples=prior_samples,
-            ) or {}
-        except Exception as e:
-            print(f"Error occurred while running/saving metrics: {e}")
-            with open(f"{model_output_path}/error_log.txt", "a") as f:
-                f.write(f"Error occurred while running/saving metrics: {e}\n")
-
-    # Compact run summary for at-a-glance comparison across runs.
-    try:
-        git_commit = None
-        git_commit_path = f"{cfg.paths.output_path}/git_commit.txt"
-        if os.path.exists(git_commit_path):
-            with open(git_commit_path) as gf:
-                git_commit = gf.read().strip()
-        summary = {
-            "final_loss": losses[-1] if losses else None,
-            "num_epochs": len(losses),
-            "global_optimizer_step": global_optimizer_step,
-            "qualification": qualification_summary,
-            "git_commit": git_commit,
-            # Provenance/scale knobs useful when comparing runs at a glance.
-            "n_parameters": sum(p.numel() for p in model.parameters()),
-            "train_seconds": training_seconds,
-                "flow_geometry": "mass_shell",
-                "regulator_mass": cfg.model.regulator_mass,
-            "effective_prior_dist": cfg.training.prior_dist,
-            "effective_coupling": {
-                "coupling": cfg.training.coupling,
-                "fresh_noise_per_step": True,
-                    "regulator_mass": cfg.model.regulator_mass,
-            },
-            "generation": {
-                "seed": cfg.inference.seed,
-                "use_cfg": bool(cfg.inference.use_cfg),
-                "cfg_guidance_weight": cfg.inference.cfg_guidance_weight,
-                "integration_steps": cfg.inference.integration_steps,
-                "sampling_seconds": (
-                    generation_diagnostics.get("sampling_seconds")
-                    if generation_diagnostics is not None else None
-                ),
-                "sampler_failures": (
-                    generation_diagnostics.get("n_failed")
-                    if generation_diagnostics is not None else None
-                ),
-            },
-            "config": run_config,
-            "full_config": full_config,
-            "metrics": {k: eval_info.get(k) for k in (
-                "w1m", "w1p", "w1efp", "fpd", "cov_mmd",
-                "frac_negative_energy", "frac_spacelike", "msq_median",
-                "n_generated_invalid", "frac_generated_invalid",
-                "n_generated_finite_max_abs_gt_1e6",
-                "isotropy_ks_costheta", "isotropy_ks_costheta_p",
-                "isotropy_ks_phi", "isotropy_ks_phi_p",
-                # FPND is stored per jet type under fpnd_{jet_type} (e.g. fpnd_g).
-                *(f"fpnd_{jt}" for jt in cfg.data.jet_types),
-            )},
-        }
-
-        def _json_default(o):
-            # numpy arrays (e.g. w1p, w1efp) aren't JSON-native and float() raises on them.
-            if isinstance(o, np.ndarray):
-                return o.tolist()
-            if hasattr(o, "item"):        # numpy/torch scalar
-                return o.item()
-            if hasattr(o, "__float__"):
-                return float(o)
-            return str(o)
-
-        with open(f"{model_output_path}/summary.json", "w") as f:
-            json.dump(summary, f, indent=2, default=_json_default)
-    except Exception as e:
-        print(f"Error writing summary.json: {e}")
-    if qualification_errors and cfg.inference.fail_on_qualification_error:
-        raise RuntimeError("qualification gate failed: " + "; ".join(qualification_errors))
