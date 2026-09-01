@@ -86,7 +86,7 @@ spec:
               "$PYTHON" -c 'import sys,torch; p,expected=sys.argv[1:]; c=torch.load(p,map_location="cpu",weights_only=False); assert c["global_optimizer_step"]==int(expected), (c["global_optimizer_step"],expected)' "$CHECKPOINT" "$STEPS"
               if [ "$TYPES" = "g,q,t" ]; then N_SAMPLES=150000; PER_TYPE=50000; JTLIST="[g,q,t]"; else N_SAMPLES=50000; PER_TYPE=50000; JTLIST="[$TYPES]"; fi
               "$PYTHON" infer.py \
-                --config configs/infer-g30-mass-shell.yaml \
+                --config configs/infer-h.yaml \
                 --set data.jet_types="$JTLIST" \
                 --set paths.checkpoint_path="$CHECKPOINT" \
                 --set paths.output_path="$SOURCE_RUN" \

@@ -2,12 +2,10 @@ data:
   jet_types: ["g"]
   num_particles: 30
 
-# Architecture is normally reconstructed from the checkpoint. These values make
-# the standalone config self-consistent and provide an explicit fallback.
+# Checkpoints carry the H width, depth, and regulator; these are standalone defaults.
 model:
-  n_hidden: 64
+  n_hidden: 96
   n_layers: 6
-  use_reference_vectors: true
   regulator_mass: 0.1
 
 inference:
