@@ -135,9 +135,8 @@ class TrainingConfig(BaseModel):
     ema_decay: float = 0.999
 
     prior_dist: Literal[
-        "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned",
         "axis_aligned_per_jet", "axis_aligned_equal", "axis_aligned_lognormal"
-    ] = "isotropic_com"
+    ] = "axis_aligned_per_jet"
 
     # Fresh-noise coupling applied online each step (no frozen cache → no path
     # memorization; see discussions/22). "online_geodesic_icp" recomputes the squared-
@@ -205,9 +204,8 @@ class InferenceConfig(BaseModel):
     skip_metrics: bool = False
     stratify_metrics_by_class: bool = False
     prior_dist: Literal[
-        "isotropic_com", "isotropic_lognorm", "jet_ref_frame", "axis_aligned",
         "axis_aligned_per_jet", "axis_aligned_equal", "axis_aligned_lognormal"
-    ] = "isotropic_com"
+    ] = "axis_aligned_per_jet"
 
     @model_validator(mode="after")
     def validate_invalid_fraction_thresholds(self):

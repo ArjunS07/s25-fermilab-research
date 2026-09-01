@@ -9,7 +9,7 @@ from jetnet.utils import EtaPhiPtE_to_cartesian
 from models.mass_shell_gnn import LEFTJeN
 from util.data import jet_attributes
 from util.infra.file_management import make_clear_folder
-from util.data.distributions import JET_FEATURE_PRIORS, gen_initial_distribution
+from util.data.distributions import gen_initial_distribution
 from util.geometry.coordinates import build_reference_vectors
 from util.geometry.conditioning import scale_condition_pt
 from util.geometry.euclidean import euclidean_ode_step
@@ -38,7 +38,7 @@ def generate_samples(
         use_hyperbolic=True,
         regulator_mass=0.5,
         use_reference_vectors=False,
-        prior_dist='isotropic_com',
+        prior_dist='axis_aligned_per_jet',
         replay_bundle_path=None,
 ):
     sampling_start = time.perf_counter()
@@ -131,17 +131,14 @@ def generate_samples(
                 device=device,
             )
 
-            # Build jet_features for priors that need jet-axis info.
-            jet_features = None
+            # All supported priors are conditioned on the sampled jet axis.
             jet_phi = (
                 (2 * torch.pi) * torch.rand(current_batch_size, device=device)
                 if replay_bundle is None else
                 replay_bundle["jet_phi"][start_idx:start_idx + current_batch_size].to(device)
             )
-            if prior_dist in JET_FEATURE_PRIORS:
-                gen_eta = generated_jet_attrs[:, 5].to(device)
-                gen_pt_prior = gen_pt
-                jet_features = torch.stack([gen_eta, gen_pt_prior], dim=-1)
+            gen_eta = generated_jet_attrs[:, 5].to(device)
+            jet_features = torch.stack([gen_eta, gen_pt], dim=-1)
 
             if replay_bundle is None:
                 x = gen_initial_distribution(
