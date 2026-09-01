@@ -4,14 +4,10 @@ Shared by training (``build_checkpoint``/``build_run_config``) and inference
 (``resolve_architecture``).
 """
 
-# Architecture keys reconstructed from a checkpoint's embedded full_config. Only the
-# fields the mass-shell GNN actually consumes; extra keys in older checkpoints are ignored.
+# Architecture keys reconstructed from a checkpoint's embedded full_config. Extra keys in
+# older checkpoints are deliberately ignored after the H-only cleanup.
 ARCH_KEYS = (
     "n_hidden", "n_layers", "regulator_mass",
-    "use_reference_vectors",
-    "architecture", "flow_geometry", "reference_mode", "scalar_init_mode",
-    "particle_readout_mode", "geometry_mode", "field_degree_normalization",
-    "inject_condition_time_each_block",
 )
 
 
@@ -37,17 +33,8 @@ def build_run_config(cfg, final_scale):
         "n_layers": cfg.model.n_layers,
         "n_hidden": cfg.model.n_hidden,
         "include_pt": True,
-        "use_reference_vectors": cfg.model.use_reference_vectors,
         "regulator_mass": cfg.model.regulator_mass,
-        "backbone": cfg.model.architecture,
-        "architecture": cfg.model.architecture,
-        "flow_geometry": cfg.model.flow_geometry,
-        "reference_mode": cfg.model.reference_mode,
-        "scalar_init_mode": cfg.model.scalar_init_mode,
-        "particle_readout_mode": cfg.model.particle_readout_mode,
-        "geometry_mode": cfg.model.geometry_mode,
-        "field_degree_normalization": cfg.model.field_degree_normalization,
-        "inject_condition_time_each_block": cfg.model.inject_condition_time_each_block,
+        "backbone": "lorentznet_h",
         "jet_types": cfg.data.jet_types,
         "final_scale": float(final_scale),
     }

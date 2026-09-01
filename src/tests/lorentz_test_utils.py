@@ -8,7 +8,7 @@ import math
 
 import torch
 
-from models.mass_shell_gnn import LEFTJeN
+from models.lorentznet_flow import build_lorentznet
 from util.geometry.mass_shell import project_to_shell
 
 
@@ -62,21 +62,13 @@ def apply_transform(vecs: torch.Tensor, Lambda: torch.Tensor) -> torch.Tensor:
 MASS = 1.0  # shared regulator mass for test models/inputs (well-conditioned shell)
 
 
-def build_model(use_reference_vectors=True, seed=0, hidden_dim=16, num_layers=2,
-                regulator_mass=MASS, **_ignored):
-    """Small double-precision mass-shell GNN in eval mode for deterministic checks.
-
-    The mass-shell GNN is the single architecture; it always uses typed references and the
-    mass condition. Legacy kwargs (use_node_scalars/use_adaln/use_attention) are accepted
-    and ignored so historical call sites keep working.
-    """
+def build_model(seed=0, hidden_dim=16, num_layers=2, regulator_mass=MASS, **_ignored):
+    """Small double-precision H LorentzNet in eval mode for deterministic checks."""
     torch.manual_seed(seed)
-    model = LEFTJeN(
-        max_num_jet_types=5,
+    model = build_lorentznet(
+        5,
         num_layers=num_layers,
         hidden_dim=hidden_dim,
-        include_pt=True,
-        use_reference_vectors=use_reference_vectors,
         regulator_mass=regulator_mass,
     )
     return model.double().eval()
@@ -84,7 +76,7 @@ def build_model(use_reference_vectors=True, seed=0, hidden_dim=16, num_layers=2,
 
 def sample_inputs(batch=2, n_real=6, max_particles=8, jet_axis="z", seed=1, dtype=torch.float64,
                   mass=MASS):
-    """Build a small on-shell physical batch for the mass-shell GNN.
+    """Build a small on-shell physical batch for H LorentzNet.
 
     Returns x (on the mass shell), t, jet_conditions (8-dim, incl. mass), mask, ref_vectors.
     The jet-momentum reference is aligned with ``jet_axis`` (residual-SO(2) test). One batch

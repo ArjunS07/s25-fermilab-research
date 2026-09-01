@@ -6,13 +6,11 @@ import time
 
 from jetnet.utils import EtaPhiPtE_to_cartesian
 
-from models.mass_shell_gnn import LEFTJeN
 from util.data import jet_attributes
 from util.infra.file_management import make_clear_folder
 from util.data.distributions import gen_initial_distribution
 from util.geometry.coordinates import build_reference_vectors
 from util.geometry.conditioning import scale_condition_pt
-from util.geometry.euclidean import euclidean_ode_step
 
 plt.rc("mathtext", fontset="cm")
 sns.set_style("whitegrid")
@@ -21,7 +19,7 @@ features = [r"e_c", r"$p_x$", r"$p_y$", r"$p_z$"]
 
 
 def generate_samples(
-        model: LEFTJeN,
+        model,
         jet_attr_model,
         device,
         root_output_path,
@@ -35,9 +33,7 @@ def generate_samples(
         samples_per_jet_type=None,
         use_cfg=False,
         cfg_guidance_weight=2.0,
-        use_hyperbolic=True,
         regulator_mass=0.5,
-        use_reference_vectors=False,
         prior_dist='axis_aligned_per_jet',
         replay_bundle_path=None,
 ):
@@ -85,7 +81,6 @@ def generate_samples(
             "num_particles": int(max_particles_per_jet),
             "prior_dist": prior_dist,
             "final_scale": float(final_scale),
-            "use_hyperbolic": bool(use_hyperbolic),
             "regulator_mass": float(regulator_mass),
         }
         mismatches = {
@@ -161,14 +156,13 @@ def generate_samples(
                     start_idx:start_idx + current_batch_size
                 ].to(device)
             # Preserve the exact integration start, including sampled attributes,
-            # multiplicity mask, orientation, and any geometry-specific projection.
+            # multiplicity mask, and orientation.
             prior_x = x * masks.unsqueeze(-1)
-            if use_hyperbolic:
-                from util.geometry.mass_shell import project_to_shell
-                if replay_bundle is None:
-                    prior_x = project_to_shell(prior_x, regulator_mass) * masks.unsqueeze(-1)
-                else:
-                    prior_x = x * masks.unsqueeze(-1)
+            from util.geometry.mass_shell import project_to_shell
+            if replay_bundle is None:
+                prior_x = project_to_shell(prior_x, regulator_mass) * masks.unsqueeze(-1)
+            else:
+                prior_x = x * masks.unsqueeze(-1)
             cond_pt = scale_condition_pt(gen_pt, final_scale)
             condition_parts = [
                 jet_one_hot_enc,
@@ -178,103 +172,49 @@ def generate_samples(
             condition_parts.append((gen_mass / final_scale).unsqueeze(-1))
             cond = torch.cat(condition_parts, dim=-1).to(device)
 
-            # Reference virtual particles, reconstructed from the sampled jet attributes.
-            ref_vectors = None
-            if use_reference_vectors:
-                gen_eta = generated_jet_attrs[:, 5].to(device)  # jet eta (layout: [onehot(5), eta, pt, mass, n])
-                ref_vectors = build_reference_vectors(
-                    gen_eta, gen_pt, final_scale, device, jet_phi=jet_phi,
-                    jet_mass=gen_mass,
-                )
+            # H uses typed virtual references reconstructed from sampled jet attributes.
+            ref_vectors = build_reference_vectors(
+                gen_eta, gen_pt, final_scale, device, jet_phi=jet_phi, jet_mass=gen_mass,
+            )
 
-            if use_hyperbolic:
-                # Integrate the ODE geodesically on the mass shell. The state stays on H_m
-                # (Cartesian on-shell 4-vectors), so the final x is used directly.
-                from util.geometry.mass_shell import project_to_shell
-                y = project_to_shell(x * masks.unsqueeze(-1), regulator_mass)
-                failure_step = torch.full(
-                    (current_batch_size,), -1, dtype=torch.int64, device=device)
-                explosion_step = torch.full_like(failure_step, -1)
-                failure_records = [None] * current_batch_size
-                for i in range(integration_steps):
-                    active = failure_step < 0
-                    if not active.any():
-                        break
-                    refs_active = ref_vectors[active] if ref_vectors is not None else None
-                    stepped = model.step_hyperbolic(
-                        y_t=y[active], jet_conditions=cond[active], mask=masks[active],
-                        t_start=times[i], t_end=times[i + 1],
-                        use_cfg=use_cfg,
-                        guidance_weight=cfg_guidance_weight,
-                        ref_vectors=refs_active,
-                    )
-                    active_indices = active.nonzero(as_tuple=False).flatten()
-                    finite = torch.isfinite(stepped).all(dim=(1, 2))
-                    y = y.clone()
-                    y[active_indices[finite]] = stepped[finite]
-                    if (~finite).any():
-                        failed_indices = active_indices[~finite]
-                        y[failed_indices] = float("nan")
-                        failure_step[failed_indices] = i
-                        for global_idx in failed_indices.tolist():
-                            failure_records[global_idx] = {
-                                "integration_step": i,
-                                "reason": "nonfinite_state",
-                                "message": "mass-shell Euler step produced a non-finite state",
-                            }
-                    max_abs = stepped.abs().amax(dim=(1, 2))
-                    new_explosive = finite & (max_abs > 1e6)
-                    unset = explosion_step[active_indices] < 0
-                    if (new_explosive & unset).any():
-                        explosion_step[active_indices[new_explosive & unset]] = i
-                x = y
-            else:
-                # Vanilla ambient ODE integration.  Do not project, repair energies, or
-                # clamp components: physical invalidity is part of the Euclidean control.
-                y = x * masks.unsqueeze(-1)
-                failure_step = torch.full(
-                    (current_batch_size,), -1, dtype=torch.int64, device=device
+            # Integrate geodesically on the mass shell; the transport state remains on H_m.
+            y = project_to_shell(x * masks.unsqueeze(-1), regulator_mass)
+            failure_step = torch.full(
+                (current_batch_size,), -1, dtype=torch.int64, device=device)
+            explosion_step = torch.full_like(failure_step, -1)
+            failure_records = [None] * current_batch_size
+            for i in range(integration_steps):
+                active = failure_step < 0
+                if not active.any():
+                    break
+                stepped = model.step_hyperbolic(
+                    y_t=y[active], jet_conditions=cond[active], mask=masks[active],
+                    t_start=times[i], t_end=times[i + 1], use_cfg=use_cfg,
+                    guidance_weight=cfg_guidance_weight, ref_vectors=ref_vectors[active],
                 )
-                explosion_step = torch.full_like(failure_step, -1)
-                failure_records = [None] * current_batch_size
-                for i in range(integration_steps):
-                    active = failure_step < 0
-                    if not active.any():
-                        break
-                    refs_active = ref_vectors[active] if ref_vectors is not None else None
-                    stepped = euclidean_ode_step(
-                        model, y[active], cond[active], masks[active], times[i], times[i + 1],
-                        references=refs_active, use_cfg=use_cfg,
-                        guidance_weight=cfg_guidance_weight,
-                    )
-                    active_indices = active.nonzero(as_tuple=False).flatten()
-                    finite = torch.isfinite(stepped).all(dim=(1, 2))
-                    y = y.clone()
-                    y[active_indices[finite]] = stepped[finite]
-                    if (~finite).any():
-                        failed_indices = active_indices[~finite]
-                        y[failed_indices] = float("nan")
-                        failure_step[failed_indices] = i
-                        for global_idx in failed_indices.tolist():
-                            failure_records[global_idx] = {
-                                "integration_step": i,
-                                "reason": "nonfinite_state",
-                                "message": "Euclidean ODE step produced a non-finite state",
-                            }
-                    max_abs = stepped.abs().amax(dim=(1, 2))
-                    explosive = finite & (max_abs > 1e6)
-                    unset = explosion_step[active_indices] < 0
-                    if (explosive & unset).any():
-                        explosion_step[active_indices[explosive & unset]] = i
-                x = y
-
-            if use_hyperbolic:
-                from util.geometry.mass_shell import massless_energy_view
-                # H_m is only the regularized transport manifold.  Publish the physical
-                # massless endpoint while preserving the integrated spatial momentum.
-                shell_x = project_to_shell(x, regulator_mass)
-                x = massless_energy_view(shell_x, masks)
-                prior_x = massless_energy_view(prior_x, masks)
+                active_indices = active.nonzero(as_tuple=False).flatten()
+                finite = torch.isfinite(stepped).all(dim=(1, 2))
+                y = y.clone()
+                y[active_indices[finite]] = stepped[finite]
+                if (~finite).any():
+                    failed_indices = active_indices[~finite]
+                    y[failed_indices] = float("nan")
+                    failure_step[failed_indices] = i
+                    for global_idx in failed_indices.tolist():
+                        failure_records[global_idx] = {
+                            "integration_step": i,
+                            "reason": "nonfinite_state",
+                            "message": "mass-shell Euler step produced a non-finite state",
+                        }
+                max_abs = stepped.abs().amax(dim=(1, 2))
+                new_explosive = finite & (max_abs > 1e6)
+                unset = explosion_step[active_indices] < 0
+                if (new_explosive & unset).any():
+                    explosion_step[active_indices[new_explosive & unset]] = i
+            from util.geometry.mass_shell import massless_energy_view
+            shell_x = project_to_shell(y, regulator_mass)
+            x = massless_energy_view(shell_x, masks)
+            prior_x = massless_energy_view(prior_x, masks)
             scaled_x = final_scale * x * masks.unsqueeze(-1)
             # torch.save(scaled_x, f"{root_output_path}/samples/batch_{start_idx//batch_size:04d}.pt")
 
@@ -308,7 +248,6 @@ def generate_samples(
                 "num_particles": int(max_particles_per_jet),
                 "prior_dist": prior_dist,
                 "final_scale": float(final_scale),
-                "use_hyperbolic": bool(use_hyperbolic),
                 "regulator_mass": float(regulator_mass),
                 "samples_per_jet_type": samples_per_jet_type,
             },
@@ -369,7 +308,7 @@ def generate_samples(
             "failure_reason_counts": failure_reason_counts,
             "integration_steps": int(integration_steps),
             "integration_end_time": float(integration_end_time),
-            "flow_geometry": "mass_shell" if use_hyperbolic else "euclidean",
+            "flow_geometry": "mass_shell",
             "sampling_seconds": time.perf_counter() - sampling_start,
             "all_trajectory_quantiles": {
                 "abs_eta": quantiles(generated_attrs[:, 5].abs()),

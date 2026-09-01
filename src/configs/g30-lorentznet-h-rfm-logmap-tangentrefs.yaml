@@ -1,14 +1,6 @@
 # H: G plus normalized tangent reference readout.
 data: {jet_types: [g], num_particles: 30}
 model:
-  architecture: lorentznet
-  flow_geometry: mass_shell
-  reference_mode: normalized_tangent_readout
-  scalar_init_mode: reference_contractions
-  particle_readout_mode: normalized_logmap
-  geometry_mode: evolving_auxiliary
-  field_degree_normalization: sqrt
-  use_reference_vectors: true
   n_hidden: 96
   n_layers: 6
   regulator_mass: 0.1

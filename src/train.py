@@ -12,7 +12,7 @@ import torch
 import random
 from torch.utils.data import DataLoader
 
-from models.factory import build_flow_model
+from models.lorentznet_flow import build_lorentznet
 from util.data import jet_attributes
 from util.data.jet_attributes import NUM_CLASSES
 from models.stage1 import get_model_pth_path
@@ -114,7 +114,12 @@ if __name__ == "__main__":
     torch.manual_seed(cfg.training.model_seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(cfg.training.model_seed)
-    model = build_flow_model(cfg.model, NUM_CLASSES).to(device)
+    model = build_lorentznet(
+        NUM_CLASSES,
+        num_layers=cfg.model.n_layers,
+        hidden_dim=cfg.model.n_hidden,
+        regulator_mass=cfg.model.regulator_mass,
+    ).to(device)
     
     start_epoch = 0
     resume_minibatch = 0
@@ -150,14 +155,7 @@ if __name__ == "__main__":
         prev = checkpoint.get("config")
         if prev is not None:
             mism = {k: (prev.get(k), run_config.get(k))
-                    for k in ("n_layers", "n_hidden", "num_particles", "architecture",
-                              "flow_geometry", "reference_mode",
-                              "scalar_init_mode",
-                              "particle_readout_mode", "geometry_mode",
-                              "field_degree_normalization",
-                              "inject_condition_time_each_block",
-                              "use_reference_vectors",
-                              "regulator_mass")
+                    for k in ("n_layers", "n_hidden", "num_particles", "regulator_mass")
                     if prev.get(k) != run_config.get(k)}
             if mism:
                 print(f"WARNING: resume architecture flags differ from checkpoint: {mism}. "
@@ -445,12 +443,10 @@ if __name__ == "__main__":
 
             # External physical massless conditioning jet.  This is reproducible from the
             # same attributes at inference and never leaks the target constituent sum.
-            ref_vectors = None
-            if cfg.model.use_reference_vectors:
-                ref_vectors = build_reference_vectors(batch_jet_info[:, 0], batch_jet_info[:, 1],
-                                                      final_scale, device,
-                                                      jet_phi=batch_jet_phi,
-                                                      jet_mass=batch_jet_info[:, 2])
+            ref_vectors = build_reference_vectors(
+                batch_jet_info[:, 0], batch_jet_info[:, 1], final_scale, device,
+                jet_phi=batch_jet_phi, jet_mass=batch_jet_info[:, 2],
+            )
 
             with keyed_torch_rng(cfg.training.time_seed, epoch, i, device):
                 t = _sample_t(x_0.shape[0])
@@ -783,18 +779,13 @@ if __name__ == "__main__":
             # Provenance/scale knobs useful when comparing runs at a glance.
             "n_parameters": sum(p.numel() for p in model.parameters()),
             "train_seconds": training_seconds,
-            "flow_geometry": cfg.model.flow_geometry,
-            "regulator_mass": (
-                cfg.model.regulator_mass if cfg.model.flow_geometry == "mass_shell" else None
-            ),
+                "flow_geometry": "mass_shell",
+                "regulator_mass": cfg.model.regulator_mass,
             "effective_prior_dist": cfg.training.prior_dist,
             "effective_coupling": {
                 "coupling": cfg.training.coupling,
                 "fresh_noise_per_step": True,
-                "regulator_mass": (
-                    cfg.model.regulator_mass
-                    if cfg.model.flow_geometry == "mass_shell" else None
-                ),
+                    "regulator_mass": cfg.model.regulator_mass,
             },
             "generation": {
                 "seed": cfg.inference.seed,

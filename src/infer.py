@@ -24,7 +24,7 @@ import hashlib
 import numpy as np
 import torch
 
-from models.factory import build_flow_model
+from models.lorentznet_flow import build_lorentznet
 from util.data import jet_attributes
 from util.data.jet_attributes import NUM_CLASSES
 from models.stage1 import get_model_pth_path
@@ -66,7 +66,12 @@ def _resolve_architecture(cfg, ckpt):
 
 
 def _load_main_model(cfg, device, preloaded_ckpt=None):
-    model = build_flow_model(cfg.model, NUM_CLASSES).to(device)
+    model = build_lorentznet(
+        NUM_CLASSES,
+        num_layers=cfg.model.n_layers,
+        hidden_dim=cfg.model.n_hidden,
+        regulator_mass=cfg.model.regulator_mass,
+    ).to(device)
 
     ckpt = (preloaded_ckpt if preloaded_ckpt is not None else
             torch.load(cfg.paths.checkpoint_path, map_location=device, weights_only=False))

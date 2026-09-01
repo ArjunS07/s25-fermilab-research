@@ -1,15 +1,6 @@
 # Joint g/q/t size-150 pipeline run using H with a memory-safe minibatch.
 data: {jet_types: [g, q, t], num_particles: 150}
 model:
-  architecture: lorentznet
-  flow_geometry: mass_shell
-  reference_mode: normalized_tangent_readout
-  scalar_init_mode: reference_contractions
-  particle_readout_mode: normalized_logmap
-  geometry_mode: evolving_auxiliary
-  field_degree_normalization: sqrt
-  inject_condition_time_each_block: false
-  use_reference_vectors: true
   n_hidden: 96
   n_layers: 6
   regulator_mass: 0.1
