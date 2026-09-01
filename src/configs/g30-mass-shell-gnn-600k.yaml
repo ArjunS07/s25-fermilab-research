@@ -1,6 +1,6 @@
 # 600k reference grid for the mass-shell GNN 2x2 (geometric_state x global_pooling).
 # Identical recipe to the width-128 msgnn-d 600k run (fresh prior + online squared-geodesic
-# ICP, monotonic-cosine optimizer-step LR at 6e-4, warmup 10, eta_min 0.03) EXCEPT the width
+# ICP, monotonic-cosine optimizer-step LR at 6e-4, 40k-step warmup, eta_min 0.03) EXCEPT the width
 # is dropped to 96 so the leanest cell (readout_only/no-pool) is ~513k params, below L-GATr's
 # ~540k generator. The manifest overrides geometric_state / use_global_pooling per arm.
 data: {jet_types: [g], num_particles: 30}
@@ -21,16 +21,13 @@ training:
   qualification_min_loss_improvement: null
   time_sampling: uniform
   use_time_sampling: false
-  use_curriculum: false
   prior_dist: axis_aligned_per_jet
   coupling: online_geodesic_icp
   use_ema: true
   ema_decay: 0.999
   lr: 0.0006
   use_cosine_lr: true
-  lr_schedule: monotonic_cosine
-  lr_step_unit: optimizer_step
-  lr_warmup_epochs: 10
+  lr_warmup_steps: 40000
   eta_min_factor: 0.03
 inference:
   n_samples: 50000

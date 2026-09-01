@@ -23,7 +23,6 @@ training:
   qualification_min_loss_improvement: 0.1
   time_sampling: uniform
   use_time_sampling: false
-  use_curriculum: false
   prior_dist: axis_aligned_per_jet
   # Fresh prior noise every step + online squared-geodesic ICP coupling (no frozen cache;
   # prevents path memorization — see discussions/22).
@@ -31,8 +30,7 @@ training:
   use_ema: true
   ema_decay: 0.999
   use_cosine_lr: true
-  lr_schedule: monotonic_cosine
-  lr_warmup_epochs: 10
+  lr_warmup_steps: 40000
   eta_min_factor: 0.03
 
 inference:

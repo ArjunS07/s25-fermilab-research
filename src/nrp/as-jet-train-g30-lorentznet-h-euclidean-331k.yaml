@@ -68,8 +68,6 @@ spec:
               assert e.training.coupling == r.training.coupling == "online_geodesic_icp"
               assert e.training.prior_dist == r.training.prior_dist == "axis_aligned_lognormal"
               assert e.training.max_optimizer_steps == 331000
-              assert e.training.lr_schedule == "monotonic_cosine"
-              assert e.training.lr_step_unit == "optimizer_step"
               em = build_flow_model(e.model, 5)
               rm = build_flow_model(r.model, 5)
               assert list(em.state_dict()) == list(rm.state_dict())

@@ -17,7 +17,6 @@ training:
   qualification_min_loss_improvement: null
   time_sampling: uniform
   use_time_sampling: false
-  use_curriculum: false
   prior_dist: axis_aligned_per_jet
   # Fresh prior noise every step + online squared-geodesic ICP coupling, and the same
   # monotonic-cosine optimizer-step LR contract as the fresh+online-ICP reference run,
@@ -27,9 +26,7 @@ training:
   ema_decay: 0.999
   lr: 0.0006
   use_cosine_lr: true
-  lr_schedule: monotonic_cosine
-  lr_step_unit: optimizer_step
-  lr_warmup_epochs: 10
+  lr_warmup_steps: 40000
   eta_min_factor: 0.03
 inference:
   n_samples: 50000

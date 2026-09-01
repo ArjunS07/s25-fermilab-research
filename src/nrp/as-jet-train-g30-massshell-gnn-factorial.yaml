@@ -26,7 +26,6 @@ items:
                   set -euo pipefail
                   GIT_COMMIT="f6a10d3ade7895bcf9561e478d4e01cb5c088758"
                   LR="0.0003"
-                  LR_STEP_UNIT="optimizer_step"
                   case "$ARM" in
                     a) GEOM=readout_only; POOL=false;; b) GEOM=tangent_channels; POOL=false;;
                     c) GEOM=readout_only; POOL=true;; d) GEOM=tangent_channels; POOL=true;;
@@ -44,7 +43,7 @@ items:
                   "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
                     --config configs/g30-mass-shell-gnn.yaml --set paths.output_path="$OUT" \
                     --set model.geometric_state="$GEOM" --set model.use_global_pooling="$POOL" \
-                    --set training.lr="$LR" --set training.lr_step_unit="$LR_STEP_UNIT"
+                    --set training.lr="$LR"
               volumeMounts: &mounts [{name: data, mountPath: /mnt/data}]
               resources: &resources
                 requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}

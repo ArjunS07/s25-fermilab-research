@@ -19,7 +19,6 @@ training:
   stability_probe_save_checkpoints: true
   time_sampling: uniform
   use_time_sampling: false
-  use_curriculum: false
   prior_dist: axis_aligned_equal
   coupling: none
   use_ema: true
@@ -27,8 +26,6 @@ training:
   lr: 0.0006
   weight_decay: 0.000001
   use_cosine_lr: true
-  lr_schedule: monotonic_cosine
-  lr_step_unit: optimizer_step
   lr_warmup_steps: 2000
   eta_min_factor: 0.03
   model_seed: 42

@@ -34,9 +34,8 @@ from util.metrics.qualification import loss_improvement_summary, optimizer_limit
 from util.infra.rng import capture_rng_state, keyed_seed, keyed_torch_rng, restore_rng_state
 from util.infra.checkpoint_config import build_run_config, build_checkpoint
 from util.infra.grad_stats import collect_gradient_stats
-from util.infra.lr_schedule import build_epoch_scheduler, build_step_scheduler
+from util.infra.lr_schedule import build_step_scheduler
 from training import flow_matching_loss
-from training.curriculum import CurriculumSampler
 from config import (TrainRunConfig, build_config, parse_config_cli,
                     generation_controls_from_config)
 
@@ -218,16 +217,6 @@ if __name__ == "__main__":
         train_jet_info[:, 3] = train_jet_info[:, 3].clamp(max=cfg.data.num_particles)
     train_jet_info = train_jet_info[:cfg.training.n_train_samples]
 
-    # ── Curriculum: pre-compute bucket assignment for every training sample ───
-    # Bucket k ∈ {0, …, N-1}, k=0 sparsest, k=N-1 densest.
-    # P(bucket k) ∝ (k+1)^α; high α oversamples dense jets.
-    # α decays linearly from curriculum_alpha_start to 0 over num_epochs.
-    curriculum = CurriculumSampler(train_jet_info[:, 3], cfg.training.n_curriculum_buckets,
-                                   cfg.training.curriculum_alpha_start)
-    if is_rank0:
-        print(f"Curriculum: {curriculum.n_buckets} buckets, {curriculum.n_nonempty} non-empty, "
-              f"alpha_start={cfg.training.curriculum_alpha_start:.2f}")
-
     # ── Coupling ────────────────────────────────────────────────────────────────
     # The frozen ICP cache has been removed (a fixed per-jet prior/pairing reused every epoch
     # let the field specialise to a finite bundle of paths; see discussions/22). Training draws
@@ -266,21 +255,10 @@ if __name__ == "__main__":
         if cfg.training.max_optimizer_steps is not None
         else cfg.training.num_epochs * optimizer_steps_per_epoch
     )
-    resolved_warmup_steps = (
-        cfg.training.lr_warmup_steps
-        if cfg.training.lr_warmup_steps is not None
-        else cfg.training.lr_warmup_epochs * optimizer_steps_per_epoch
-    )
     schedule_definition = {
-        "lr_step_unit": cfg.training.lr_step_unit,
         "planned_optimizer_steps": planned_optimizer_steps,
-        "optimizer_steps_per_epoch": optimizer_steps_per_epoch,
-        "warmup_epochs": cfg.training.lr_warmup_epochs,
-        "warmup_steps": (resolved_warmup_steps
-                         if cfg.training.lr_step_unit == "optimizer_step" else None),
+        "warmup_steps": cfg.training.lr_warmup_steps,
         "eta_min_factor": cfg.training.eta_min_factor,
-        "schedule": cfg.training.lr_schedule,
-        "restart_epoch": cfg.training.lr_t0,
     }
     if cfg.paths.resume_weights and checkpoint.get("schedule_definition") is not None:
         previous_schedule = checkpoint["schedule_definition"]
@@ -291,26 +269,12 @@ if __name__ == "__main__":
             )
 
     if cfg.training.use_cosine_lr:
-        if cfg.training.lr_step_unit == "optimizer_step":
-            scheduler = build_step_scheduler(
-                optimizer,
-                total_steps=planned_optimizer_steps,
-                steps_per_epoch=optimizer_steps_per_epoch,
-                warmup_epochs=cfg.training.lr_warmup_epochs,
-                eta_min_factor=cfg.training.eta_min_factor,
-                schedule=cfg.training.lr_schedule,
-                restart_epoch=cfg.training.lr_t0,
-                warmup_steps=resolved_warmup_steps,
-            )
-        else:
-            scheduler = build_epoch_scheduler(
-                optimizer,
-                total_epochs=cfg.training.num_epochs,
-                warmup_epochs=cfg.training.lr_warmup_epochs,
-                eta_min_factor=cfg.training.eta_min_factor,
-                schedule=cfg.training.lr_schedule,
-                restart_epoch=cfg.training.lr_t0,
-            )
+        scheduler = build_step_scheduler(
+            optimizer,
+            total_steps=planned_optimizer_steps,
+            warmup_steps=cfg.training.lr_warmup_steps,
+            eta_min_factor=cfg.training.eta_min_factor,
+        )
 
     if cfg.paths.resume_weights:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -435,19 +399,15 @@ if __name__ == "__main__":
         epoch_loss = 0
         epoch_optimizer_steps = 0
 
-        # ── Sample epoch indices (uniform or curriculum) ─────────────────────
+        # ── Sample epoch indices ──────────────────────────────────────────────
         # All ranks produce the same indices via a deterministic seed, then each
         # takes its own contiguous slice so every rank sees a diverse bucket mix.
         selection_generator = torch.Generator(device="cpu")
         selection_generator.manual_seed(keyed_seed(cfg.training.data_order_seed, epoch, 0, 0))
 
-        if cfg.training.use_curriculum:
-            epoch_indices = curriculum.sample(epoch, total_epochs, samples_per_epoch,
-                                              selection_generator)
-        else:
-            epoch_indices = torch.randperm(
-                len(X_train_particle_transformed), generator=selection_generator,
-            )[:samples_per_epoch]
+        epoch_indices = torch.randperm(
+            len(X_train_particle_transformed), generator=selection_generator,
+        )[:samples_per_epoch]
 
         if cfg.training.distributed:
             shard_size = len(epoch_indices) // world_size
@@ -591,7 +551,7 @@ if __name__ == "__main__":
                 
                 unclipped_grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
                 optimizer.step()
-                if cfg.training.use_cosine_lr and cfg.training.lr_step_unit == "optimizer_step":
+                if cfg.training.use_cosine_lr:
                     scheduler.step()
                 optimizer.zero_grad()
                 if ema is not None:
@@ -678,11 +638,6 @@ if __name__ == "__main__":
             epoch_mean_loss = epoch_loss / epoch_optimizer_steps
         losses.append(epoch_mean_loss)
         last_completed_epoch = epoch
-
-        # Advance epoch-stepped schedules before serializing so the checkpoint is the exact
-        # state observed at the start of the next epoch.
-        if epoch_completed and cfg.training.use_cosine_lr and cfg.training.lr_step_unit == "epoch":
-            scheduler.step()
 
         # Overwrite latest checkpoint so training can be resumed at any point.
         if is_rank0:
