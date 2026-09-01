@@ -1,4 +1,4 @@
-"""Blocking equivariance / symmetry-breaking gate (plan 0.2) for the mass-shell GNN.
+"""Blocking equivariance / symmetry-breaking gate (plan 0.2) for H LorentzNet.
 
 No Phase >=1 run is valid until these pass. They encode:
   1. Joint Lorentz equivariance  f(Lx, L refs) = L f(x, refs)  under rotations AND boosts.
