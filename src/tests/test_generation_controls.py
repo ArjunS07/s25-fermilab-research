@@ -7,7 +7,7 @@ from util.geometry.conditioning import scale_condition_pt
 def test_generation_controls_from_config():
     cfg = InferRunConfig(
         inference={
-            "use_cfg": True, "cfg_guidance_weight": 0.5, "sampler": "euler",
+            "use_cfg": True, "cfg_guidance_weight": 0.5,
             "integration_end_time": 0.99,
         },
         model={"regulator_mass": 0.3},
@@ -19,8 +19,6 @@ def test_generation_controls_from_config():
         "use_reference_vectors": True,
         "include_mass_condition": True,
         "use_hyperbolic": True,
-        "hyperbolic_model": "mass_shell",
-        "sampler": "euler",
         "integration_end_time": 0.99,
         "prior_dist": "axis_aligned",
     }
@@ -35,7 +33,6 @@ def test_euclidean_generation_controls_disable_shell_integration():
     })
     controls = generation_controls_from_config(cfg, "axis_aligned_per_jet")
     assert controls["use_hyperbolic"] is False
-    assert controls["hyperbolic_model"] == "mass_shell"
     assert controls["use_reference_vectors"] is False
 
 

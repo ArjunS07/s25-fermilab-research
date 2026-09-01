@@ -34,7 +34,7 @@ def _batch():
 def test_mass_shell_geometry_dispatch_is_finite_and_differentiable():
     model = ConstantField()
     config = SimpleNamespace(
-        use_hyperbolic=True, hyperbolic_model="mass_shell",
+        use_hyperbolic=True,
         regulator_mass=0.3, backbone="tangent_attention",
         train_space="cartesian", sigma_min=1e-4,
     )
@@ -47,7 +47,7 @@ def test_mass_shell_geometry_dispatch_is_finite_and_differentiable():
 def test_mass_shell_gnn_preserves_float64_model_boundary():
     model = ConstantField()
     config = SimpleNamespace(
-        use_hyperbolic=True, hyperbolic_model="mass_shell", regulator_mass=0.1,
+        use_hyperbolic=True, regulator_mass=0.1,
         backbone="mass_shell_gnn", train_space="cartesian", sigma_min=1e-4,
     )
     loss = flow_matching_loss(model=model, raw_model=model, config=config, **_batch())

@@ -403,7 +403,6 @@ def test_condition_time_injection_factorial_is_equivariant_finite_and_on_shell()
         torch.tensor(0.0, dtype=torch.float64),
         torch.tensor(0.05, dtype=torch.float64),
         ref_vectors=refs,
-        hyperbolic_model="mass_shell", regulator_mass=MASS,
     )
     residual = dotsq4(stepped, stepped) - MASS**2
     assert torch.isfinite(stepped).all()
@@ -461,7 +460,7 @@ def test_euclidean_sampling_smoke_has_no_projection_or_repair():
     times = torch.linspace(0, 1, 5, dtype=torch.float64)
     for start, end in zip(times[:-1], times[1:]):
         state = euclidean_ode_step(
-            model, state, conditions, mask, start, end, sampler="euler"
+            model, state, conditions, mask, start, end
         )
     assert torch.isfinite(state).all()
     assert torch.equal(state[mask == 0], torch.zeros_like(state[mask == 0]))
@@ -477,7 +476,6 @@ def test_mass_shell_sampling_smoke_stays_on_shell():
         state, conditions, mask,
         torch.tensor(0.0, dtype=torch.float64),
         torch.tensor(0.1, dtype=torch.float64),
-        hyperbolic_model="mass_shell", regulator_mass=MASS,
     )
     residual = dotsq4(stepped, stepped) - MASS**2
     assert torch.isfinite(stepped).all()
@@ -519,8 +517,6 @@ def test_reference_contraction_rfm_forward_backward_and_sampling(references):
         torch.tensor(0.0, dtype=torch.float64),
         torch.tensor(0.1, dtype=torch.float64),
         ref_vectors=refs,
-        hyperbolic_model="mass_shell",
-        regulator_mass=MASS,
     )
     residual = dotsq4(stepped, stepped) - MASS**2
     assert torch.isfinite(stepped).all()
@@ -571,8 +567,6 @@ def test_logmap_factorial_is_equivariant_finite_and_samples_on_shell(
         torch.tensor(0.0, dtype=torch.float64),
         torch.tensor(0.05, dtype=torch.float64),
         ref_vectors=refs,
-        hyperbolic_model="mass_shell",
-        regulator_mass=MASS,
     )
     residual = dotsq4(stepped, stepped) - MASS**2
     assert torch.isfinite(stepped).all()

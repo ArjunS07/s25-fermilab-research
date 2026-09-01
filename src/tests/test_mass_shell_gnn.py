@@ -55,12 +55,9 @@ def test_signed_sum_is_not_softmax_or_convex_average():
     handle = block.node_mlp.register_forward_pre_hook(hook)
     support = ~torch.eye(3, dtype=torch.bool).unsqueeze(0)
     count = support.sum(-1).clamp_min(1).to(torch.float64).sqrt()
-    g = Geometry(x=torch.ones(1, 3, 4, dtype=torch.float64), cond=torch.zeros(1, 4),
-                 mask=torch.ones(1, 3), edge=torch.zeros(1, 3, 3, 3),
-                 direction=torch.zeros(1, 3, 3, 4, dtype=torch.float64),
-                 projected_refs=torch.zeros(1, 3, 2, 4, dtype=torch.float64),
-                 typed_refs=torch.zeros(1, 2, 4), support=support, count=count,
-                 count_model=count.to(torch.float32), mass=.1)
+    g = Geometry(cond=torch.zeros(1, 4), mask=torch.ones(1, 3),
+                 edge=torch.zeros(1, 3, 3, 3), support=support,
+                 count_model=count.to(torch.float32))
     block(torch.zeros(1, 3, 4), g)
     handle.remove()
     # 2 neighbours × (-2) / sqrt(2) = -2*sqrt(2): a signed sum, below the min single message (-2).

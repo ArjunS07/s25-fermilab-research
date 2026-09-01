@@ -64,10 +64,8 @@ def test_infer_defaults():
     assert cfg.inference.integration_steps == 16
     assert cfg.inference.batch_size == 256
     assert cfg.inference.use_cfg is False
-    assert cfg.inference.sampler == "euler"
     assert cfg.model.use_reference_vectors is True
     assert cfg.model.include_mass_condition is True
-    assert cfg.inference.vf_mode == "none"
     assert cfg.inference.use_ema_weights is False
 
 
@@ -76,11 +74,6 @@ def test_infer_defaults():
 def test_invalid_prior_dist_choice_rejected():
     with pytest.raises(ValidationError):
         TrainRunConfig(training={"prior_dist": "nonexistent"})
-
-
-def test_invalid_sampler_choice_rejected():
-    with pytest.raises(ValidationError):
-        InferRunConfig(inference={"sampler": "rk4"})
 
 
 @pytest.mark.parametrize("field,value", [

@@ -1,7 +1,7 @@
 """Mass-shell inference/sampling path (experiment plan Phase 4).
 
 Exercises the integrator that generate_samples() drives for a mass_shell run — project the
-prior onto H_m, then repeatedly call model.step_hyperbolic(hyperbolic_model='mass_shell') —
+prior onto H_m, then repeatedly call model.step_hyperbolic() —
 without needing jetnet. Guards the properties the sampler must maintain over a full
 integration: stay on the shell (with re-projection preventing drift), stay finite, respect the
 mask (padding parked at the apex), and work with references + CFG on.
@@ -28,7 +28,6 @@ def _integrate(model, y0, cond, mask, steps, ref_vectors=None, use_cfg=False):
         y = model.step_hyperbolic(
             y_t=y, jet_conditions=cond, mask=mask,
             t_start=times[i], t_end=times[i + 1],
-            hyperbolic_model="mass_shell", regulator_mass=M,
             use_cfg=use_cfg, guidance_weight=2.0, ref_vectors=ref_vectors,
         )
         assert torch.isfinite(y).all()
@@ -92,8 +91,8 @@ def test_step_is_deterministic():
     y0 = project_to_shell(x * mask.unsqueeze(-1), M)
     t0 = torch.tensor(0.0, dtype=torch.float64)
     t1 = torch.tensor(0.1, dtype=torch.float64)
-    a = model.step_hyperbolic(y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M, ref_vectors=refs)
-    b = model.step_hyperbolic(y0, cond, mask, t0, t1, hyperbolic_model="mass_shell", regulator_mass=M, ref_vectors=refs)
+    a = model.step_hyperbolic(y0, cond, mask, t0, t1, ref_vectors=refs)
+    b = model.step_hyperbolic(y0, cond, mask, t0, t1, ref_vectors=refs)
     assert torch.equal(a, b)
 
 
@@ -115,8 +114,8 @@ def test_step_evaluates_velocity_once_per_nominal_interval(monkeypatch):
 
     monkeypatch.setattr(model, "_mass_shell_velocity", counted)
     out = model.step_hyperbolic(
-        y0, cond, mask, t0, t1, hyperbolic_model="mass_shell",
-        regulator_mass=M, ref_vectors=refs)
+        y0, cond, mask, t0, t1,
+        ref_vectors=refs)
     assert calls == 1
     assert torch.equal(out, expected)
     assert torch.isfinite(out).all()
