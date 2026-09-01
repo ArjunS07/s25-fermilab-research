@@ -76,7 +76,6 @@ def build_model(use_reference_vectors=True, seed=0, hidden_dim=16, num_layers=2,
         num_layers=num_layers,
         hidden_dim=hidden_dim,
         include_pt=True,
-        include_mass_condition=True,
         use_reference_vectors=use_reference_vectors,
         regulator_mass=regulator_mass,
     )
