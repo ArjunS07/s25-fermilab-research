@@ -76,7 +76,7 @@ def deterministic_jet_phi(n_jets: int, seed: int = 42) -> torch.Tensor:
 
     Exact paired-prior caches are only meaningful when cache construction and
     training rotate each dataset row by the same azimuth.  A private CPU
-    generator makes that contract independent of CUDA/DDP initialization and
+    generator makes that contract independent of CUDA initialization and
     any random draws performed earlier in either process.
     """
     generator = torch.Generator(device="cpu")

@@ -29,17 +29,17 @@ def restore_rng_state(state):
     if state.get("cuda") is not None and torch.cuda.is_available():
         torch.cuda.set_rng_state_all([_cpu_byte_tensor(item) for item in state["cuda"]])
 
-def keyed_seed(base_seed: int, epoch: int, minibatch: int = 0, rank: int = 0) -> int:
+def keyed_seed(base_seed: int, epoch: int, minibatch: int = 0) -> int:
     """Stable non-overlapping key for a named stochastic stream."""
-    return int(base_seed + 1_000_003 * epoch + 10_007 * minibatch + 97 * rank)
+    return int(base_seed + 1_000_003 * epoch + 10_007 * minibatch)
 
 @contextmanager
-def keyed_torch_rng(base_seed: int, epoch: int, minibatch: int, rank: int, device):
+def keyed_torch_rng(base_seed: int, epoch: int, minibatch: int, device):
     """Run random tensor creation without consuming any other Torch RNG stream."""
     cuda_devices = ([device.index if device.index is not None else torch.cuda.current_device()]
                     if torch.device(device).type == "cuda" else [])
     with torch.random.fork_rng(devices=cuda_devices):
-        seed = keyed_seed(base_seed, epoch, minibatch, rank)
+        seed = keyed_seed(base_seed, epoch, minibatch)
         torch.manual_seed(seed)
         if cuda_devices:
             torch.cuda.manual_seed(seed)

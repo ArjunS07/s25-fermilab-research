@@ -51,7 +51,7 @@ spec:
               "$PYTHON" prepare_stage1.py --output-path "$OUT" \
                 --cache-dir /mnt/data/caches/stage1 --jet-types g q t \
                 --num-particles 30 --model-version v3
-              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+              "$PYTHON" train.py \
                 --config configs/gqt30-lorentznet-h-rfm-logmap-200k.yaml \
                 --set paths.output_path="$OUT" \
                 --set training.num_epochs=2000 \

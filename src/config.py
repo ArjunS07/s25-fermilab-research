@@ -144,7 +144,6 @@ class TrainingConfig(BaseModel):
     # OT-CFM); "none" pairs fresh noise in identity order (for future ICP-vs-none ablation).
     coupling: Literal["online_geodesic_icp", "none"] = "online_geodesic_icp"
 
-    distributed: bool = False
     model_seed: int = 42
     data_order_seed: int = 1042
     time_seed: int = 2042

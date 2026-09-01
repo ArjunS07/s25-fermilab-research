@@ -36,7 +36,7 @@ spec:
               cd /tmp/repo/src
               "$PYTHON" -c 'import torch; print(f"CPU thread pools: intra_op={torch.get_num_threads()} inter_op={torch.get_num_interop_threads()}")'
               "$PYTHON" prepare_stage1.py --output-path "$OUT" --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 --model-version v3
-              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+              "$PYTHON" train.py \
                 --config "$CONFIG" --set paths.output_path="$OUT" \
                 --set training.num_epochs=2 --set training.max_optimizer_steps=500 \
                 --set training.stability_probe_steps="[0,500]" \
@@ -87,7 +87,7 @@ spec:
               cd /tmp/repo/src
               "$PYTHON" -c 'import torch; print(f"CPU thread pools: intra_op={torch.get_num_threads()} inter_op={torch.get_num_interop_threads()}")'
               "$PYTHON" prepare_stage1.py --output-path "$OUT" --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 --model-version v3
-              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+              "$PYTHON" train.py \
                 --config "$CONFIG" --set paths.output_path="$OUT" \
                 --set training.num_epochs=2 --set training.max_optimizer_steps=500 \
                 --set training.stability_probe_steps="[0,500]" \
@@ -146,7 +146,7 @@ spec:
               cd /tmp/repo/src
               "$PYTHON" -c 'import torch; from util.geometry.online_coupling import online_geodesic_coupling as f; B,P=8,30; g=torch.Generator().manual_seed(23); x0=torch.randn(B,P,4,generator=g); x1=torch.randn(B,P,4,generator=g); mask=torch.zeros(B,P); ns=[30,27,24,20,12,6,1,0]; [mask.__setitem__((b,slice(None,n)),1) for b,n in enumerate(ns)]; cpu=f(x0,x1,mask,0.1); gpu=f(x0.cuda(),x1.cuda(),mask.cuda(),0.1).cpu(); print("CUDA coupling parity:",torch.equal(cpu,gpu)); assert torch.equal(cpu,gpu)'
               "$PYTHON" prepare_stage1.py --output-path "$OUT" --cache-dir /mnt/data/caches/stage1 --jet-types g --num-particles 30 --model-version v3
-              "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+              "$PYTHON" train.py \
                 --config "$CONFIG" --set paths.output_path="$OUT" \
                 --set training.num_epochs=2 --set training.max_optimizer_steps=500 \
                 --set training.lr_warmup_steps=50 \

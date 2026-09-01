@@ -51,7 +51,7 @@ items:
                   mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
                   cd /tmp/repo/src
                   "$PYTHON" prepare_stage1.py --output-path "$OUT" --cache-dir /mnt/data/caches/stage1 --jet-types $JT --num-particles $NP --model-version v3
-                  "$PYTHON" -m torch.distributed.run --standalone --nproc_per_node=1 train.py \
+                  "$PYTHON" train.py \
                     --config configs/mass-shell-gnn-200k.yaml --set paths.output_path="$OUT" \
                     --set data.jet_types="$JTLIST" --set data.num_particles=$NP \
                     --set training.cfg_null_dropout_rate=$DROP --set inference.use_cfg=$USECFG
