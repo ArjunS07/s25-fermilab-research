@@ -11,6 +11,7 @@ import random
 from torch.utils.data import DataLoader
 
 from models.lorentznet_flow import build_lorentznet
+from util.data import jet_attributes
 from util.data.jet_attributes import NUM_CLASSES
 from util.data.distributions import gen_initial_distribution, time_dist
 from util.geometry.coordinates import (deterministic_jet_phi,
