@@ -40,7 +40,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="1edf138f331c58fdb1a7e6ce4178505985666724"
+              GIT_COMMIT="7241b30e9c2487d562a5ec5e1a1ac2ffd3c6fe05"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
               OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-lnet-h-noicp-994k"
               test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
