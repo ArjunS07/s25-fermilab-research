@@ -64,9 +64,13 @@ class LorentzNetLGEB(nn.Module):
 class LorentzNetBackbone(nn.Module):
     """H's invariant-scalar/equivariant-vector backbone and field head."""
 
-    def __init__(self, condition_dim: int, width: int, num_layers: int, regulator_mass: float):
+    def __init__(self, condition_dim: int, width: int, num_layers: int, regulator_mass: float,
+                 particle_direction_mode: str):
         super().__init__()
         self.regulator_mass = float(regulator_mass)
+        if particle_direction_mode not in {"physical_logmap", "latent_displacement"}:
+            raise ValueError(f"unsupported particle direction mode: {particle_direction_mode}")
+        self.particle_direction_mode = particle_direction_mode
         self.condition_embed = nn.Sequential(
             nn.Linear(condition_dim, width), nn.SiLU(), nn.Linear(width, width)
         )
@@ -111,10 +115,15 @@ class LorentzNetBackbone(nn.Module):
         diff_sq, dot = _pair_invariants(y)
         edge = torch.stack((diff_sq, dot), dim=-1).to(dtype)
         coefficients = self.field_mlp(torch.cat((hi, hj, edge), dim=-1)).squeeze(-1)
-        relative, distance = log_map(
-            x64.unsqueeze(2), x64.unsqueeze(1), self.regulator_mass, return_distance=True
-        )
-        direction = relative / (self.regulator_mass + distance)
+        if self.particle_direction_mode == "physical_logmap":
+            relative, distance = log_map(
+                x64.unsqueeze(2), x64.unsqueeze(1), self.regulator_mass, return_distance=True
+            )
+            direction = relative / (self.regulator_mass + distance)
+        else:
+            # The auxiliary workspace ablation intentionally forms both the
+            # particle coefficients and directions from the final latent state.
+            direction = y.unsqueeze(1) - y.unsqueeze(2)
         raw = torch.einsum("bij,bijf->bif", coefficients.to(torch.float64) * support, direction)
         raw = raw / support.sum(dim=2).clamp_min(1).to(torch.float64).sqrt().unsqueeze(-1)
 
@@ -135,14 +144,17 @@ class LorentzNetFlow(nn.Module):
     """H: LorentzNet with mass-shell Riemannian flow matching."""
 
     def __init__(self, condition_dim: int, n_particle_types: int, width: int = 96,
-                 num_layers: int = 6, regulator_mass: float = 0.1):
+                 num_layers: int = 6, regulator_mass: float = 0.1,
+                 particle_direction_mode: str = "physical_logmap",
+                 final_tangent_projection: bool = True):
         super().__init__()
         self.cond_dim = condition_dim
         self.n_particles_idx = n_particle_types
         self.regulator_mass = float(regulator_mass)
+        self.final_tangent_projection = bool(final_tangent_projection)
         self.null_cond = nn.Parameter(torch.zeros(condition_dim))
         self.lorentznet_backbone = LorentzNetBackbone(
-            condition_dim, width, num_layers, regulator_mass
+            condition_dim, width, num_layers, regulator_mass, particle_direction_mode
         )
 
     def make_null_cond(self, conditions: torch.Tensor) -> torch.Tensor:
@@ -157,9 +169,11 @@ class LorentzNetFlow(nn.Module):
                 f"LorentzNetFlow expected {self.cond_dim} conditions, got {jet_conditions.shape[-1]}"
             )
         raw = self.lorentznet_backbone(x, t, jet_conditions, mask, ref_vectors)
-        return pushforward_to_tangent(
-            x.to(torch.float64), raw.to(torch.float64), self.regulator_mass
-        ) * mask.unsqueeze(-1).to(raw.dtype)
+        if self.final_tangent_projection:
+            raw = pushforward_to_tangent(
+                x.to(torch.float64), raw.to(torch.float64), self.regulator_mass
+            )
+        return raw * mask.unsqueeze(-1).to(raw.dtype)
 
     def _mass_shell_velocity(self, state, conditions, mask, t, use_cfg,
                              guidance_weight, references):
@@ -191,13 +205,17 @@ class LorentzNetFlow(nn.Module):
 
 
 def build_lorentznet(max_num_jet_types: int, *, num_layers: int = 6,
-                     hidden_dim: int = 96, regulator_mass: float = 0.1) -> LorentzNetFlow:
+                     hidden_dim: int = 96, regulator_mass: float = 0.1,
+                     particle_direction_mode: str = "physical_logmap",
+                     final_tangent_projection: bool = True) -> LorentzNetFlow:
     return LorentzNetFlow(
         condition_dim=max_num_jet_types + 3,
         n_particle_types=max_num_jet_types,
         width=hidden_dim,
         num_layers=num_layers,
         regulator_mass=regulator_mass,
+        particle_direction_mode=particle_direction_mode,
+        final_tangent_projection=final_tangent_projection,
     )
 
 

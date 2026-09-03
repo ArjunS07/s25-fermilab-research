@@ -62,7 +62,9 @@ def apply_transform(vecs: torch.Tensor, Lambda: torch.Tensor) -> torch.Tensor:
 MASS = 1.0  # shared regulator mass for test models/inputs (well-conditioned shell)
 
 
-def build_model(seed=0, hidden_dim=16, num_layers=2, regulator_mass=MASS, **_ignored):
+def build_model(seed=0, hidden_dim=16, num_layers=2, regulator_mass=MASS,
+                particle_direction_mode="physical_logmap", final_tangent_projection=True,
+                **_ignored):
     """Small double-precision H LorentzNet in eval mode for deterministic checks."""
     torch.manual_seed(seed)
     model = build_lorentznet(
@@ -70,6 +72,8 @@ def build_model(seed=0, hidden_dim=16, num_layers=2, regulator_mass=MASS, **_ign
         num_layers=num_layers,
         hidden_dim=hidden_dim,
         regulator_mass=regulator_mass,
+        particle_direction_mode=particle_direction_mode,
+        final_tangent_projection=final_tangent_projection,
     )
     return model.double().eval()
 

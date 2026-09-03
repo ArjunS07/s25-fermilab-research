@@ -115,6 +115,8 @@ if __name__ == "__main__":
         num_layers=cfg.model.n_layers,
         hidden_dim=cfg.model.n_hidden,
         regulator_mass=cfg.model.regulator_mass,
+        particle_direction_mode=cfg.model.particle_direction_mode,
+        final_tangent_projection=cfg.model.final_tangent_projection,
     ).to(device)
     
     start_epoch = 0

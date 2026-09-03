@@ -71,6 +71,8 @@ def _load_main_model(cfg, device, preloaded_ckpt=None):
         num_layers=cfg.model.n_layers,
         hidden_dim=cfg.model.n_hidden,
         regulator_mass=cfg.model.regulator_mass,
+        particle_direction_mode=cfg.model.particle_direction_mode,
+        final_tangent_projection=cfg.model.final_tangent_projection,
     ).to(device)
 
     ckpt = (preloaded_ckpt if preloaded_ckpt is not None else

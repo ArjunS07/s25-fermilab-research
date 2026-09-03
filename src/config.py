@@ -29,12 +29,17 @@ class InferDataConfig(DataConfig):
 
 
 class ModelConfig(BaseModel):
-    """The published H LorentzNet configuration."""
+    """The published H LorentzNet configuration and explicit ablation switches."""
     model_config = ConfigDict(extra="forbid")
 
     n_hidden: int = Field(default=96, ge=1)
     n_layers: int = Field(default=6, ge=1)
     regulator_mass: float = 0.1
+    # The published H field uses physical-shell log-map directions.  The latent
+    # alternative is an explicitly checkpointed retraining ablation.
+    particle_direction_mode: Literal["physical_logmap", "latent_displacement"] = "physical_logmap"
+    # Retained as a checkpointed inference ablation; published H keeps this on.
+    final_tangent_projection: bool = True
 
 
 class TrainingConfig(BaseModel):
