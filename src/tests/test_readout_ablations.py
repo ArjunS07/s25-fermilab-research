@@ -3,6 +3,7 @@
 import pytest
 import torch
 
+from models.lorentznet_flow import build_lorentznet
 from tests.lorentz_test_utils import (
     apply_transform, build_model, random_proper_transform, sample_inputs,
 )
@@ -35,6 +36,17 @@ def test_latent_readout_is_projected_to_the_physical_tangent_space():
     tangent_residual = dotsq4(x, velocity)[mask.bool()].abs().max()
 
     assert tangent_residual < 1e-8
+
+
+def test_latent_readout_supports_the_float32_training_model():
+    model = build_lorentznet(5, hidden_dim=16, num_layers=2, regulator_mass=1.0,
+                             particle_direction_mode="latent_displacement").eval()
+    x, t, conditions, mask, refs = sample_inputs(seed=15, dtype=torch.float32, mass=1.0)
+
+    velocity = model(x, t, conditions, mask, ref_vectors=refs)
+
+    assert velocity.dtype == torch.float64
+    assert torch.isfinite(velocity).all()
 
 
 def test_terminal_projection_bypass_matches_physical_h_to_roundoff():

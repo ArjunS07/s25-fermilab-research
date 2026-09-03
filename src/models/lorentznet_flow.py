@@ -123,7 +123,7 @@ class LorentzNetBackbone(nn.Module):
         else:
             # The auxiliary workspace ablation intentionally forms both the
             # particle coefficients and directions from the final latent state.
-            direction = y.unsqueeze(1) - y.unsqueeze(2)
+            direction = (y.unsqueeze(1) - y.unsqueeze(2)).to(torch.float64)
         raw = torch.einsum("bij,bijf->bif", coefficients.to(torch.float64) * support, direction)
         raw = raw / support.sum(dim=2).clamp_min(1).to(torch.float64).sqrt().unsqueeze(-1)
 
