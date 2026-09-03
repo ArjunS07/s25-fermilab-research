@@ -1,0 +1,95 @@
+# Inference-only H ablations on the completed pre-ablation H-500K checkpoint.
+# Indexed and serial (parallelism: 1): Euler 32, Euler 64 control, then bypass
+# the final tangent projection at 64 steps.  Every arm reuses the old run's
+# exact Stage-1/prior replay bundle, so only its named treatment changes.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-eval-g30-h500-inference-ablations}
+spec:
+  ttlSecondsAfterFinished: 259200
+  backoffLimit: 0
+  completions: 3
+  parallelism: 1
+  completionMode: Indexed
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: eval
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: JOB_COMPLETION_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              GIT_COMMIT="6490849869f8c6c1fd27cc9895a643aa1b692865"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              SOURCE_RUN="/mnt/data/output/2026-08-12_21-59-44--2934c3ae-d927-4e3c-af85-1213d69674a9-g30-lnet-h-500k"
+              CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
+              REPLAY="$SOURCE_RUN/train/replay_bundle.pt"
+              case "$JOB_COMPLETION_INDEX" in
+                0) TAG="euler32"; STEPS=32; FINAL_PROJECTION=true ;;
+                1) TAG="euler64"; STEPS=64; FINAL_PROJECTION=true ;;
+                2) TAG="no-final-projection"; STEPS=64; FINAL_PROJECTION=false ;;
+                *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
+              esac
+              test -s "$ENV_ARCHIVE"
+              test -s "$CHECKPOINT"
+              test -s "$REPLAY"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-h500-${TAG}-eval"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf '%s\n' "$SOURCE_RUN" > "$OUT/source_run.txt"
+              printf '%s\n' "$CHECKPOINT" > "$OUT/checkpoint.txt"
+              printf 'tag=%s\nintegration_steps=%s\nfinal_tangent_projection=%s\nreplay_bundle=%s\n' "$TAG" "$STEPS" "$FINAL_PROJECTION" "$REPLAY" > "$OUT/ablation_controls.txt"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" -c 'import sys,torch; c=torch.load(sys.argv[1],map_location="cpu",weights_only=False); assert c["global_optimizer_step"]==500000; print("Verified H-500K checkpoint")' "$CHECKPOINT"
+              "$PYTHON" infer.py \
+                --config configs/infer-h.yaml \
+                --set data.jet_types="[g]" \
+                --set paths.checkpoint_path="$CHECKPOINT" \
+                --set paths.output_path="$SOURCE_RUN" \
+                --set paths.out_dir="$OUT/eval" \
+                --set paths.replay_bundle_path="$REPLAY" \
+                --set inference.n_samples=50000 \
+                --set inference.batch_size=128 \
+                --set inference.integration_steps="$STEPS" \
+                --set inference.prior_dist=axis_aligned_lognormal \
+                --set inference.use_ema_weights=true \
+                --set inference.use_cfg=false \
+                --set model.final_tangent_projection="$FINAL_PROJECTION"
+              for artifact in samples.pt prior_samples.pt replay_bundle.pt generation_diagnostics.json metrics.csv summary.json; do
+                test -s "$OUT/eval/$artifact"
+              done
+              "$PYTHON" -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["stage_status"]["samples"]["status"]=="ok"; assert d["stage_status"]["metrics"]["status"]=="ok"; assert "fpnd_g" in d["metrics"]; print({k:d["metrics"][k] for k in ("fpnd_g","w1m","fpd","frac_spacelike","frac_generated_invalid") if k in d["metrics"]})' "$OUT/eval/summary.json"
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 32Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 32Gi}
