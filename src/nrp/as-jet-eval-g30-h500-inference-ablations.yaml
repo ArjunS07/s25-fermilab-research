@@ -1,14 +1,16 @@
 # Inference-only H ablations on the completed pre-ablation H-500K checkpoint.
-# Indexed and serial (parallelism: 1): Euler 32, Euler 64 control, then bypass
-# the final tangent projection at 64 steps.  Every arm reuses the old run's
-# exact Stage-1/prior replay bundle, so only its named treatment changes.
+# The Euler-32 arm completed at the recorded output path before a post-run
+# assertion incorrectly treated optional FPND as mandatory.  This replacement
+# Job serially runs the two remaining arms: Euler 64 and final-projection bypass.
+# Every arm reuses the old run's exact Stage-1/prior replay bundle, so only its
+# named treatment changes.
 apiVersion: batch/v1
 kind: Job
 metadata: {name: as-jet-eval-g30-h500-inference-ablations}
 spec:
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
-  completions: 3
+  completions: 2
   parallelism: 1
   completionMode: Indexed
   template:
@@ -50,9 +52,8 @@ spec:
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               REPLAY="$SOURCE_RUN/train/replay_bundle.pt"
               case "$JOB_COMPLETION_INDEX" in
-                0) TAG="euler32"; STEPS=32; FINAL_PROJECTION=true ;;
-                1) TAG="euler64"; STEPS=64; FINAL_PROJECTION=true ;;
-                2) TAG="no-final-projection"; STEPS=64; FINAL_PROJECTION=false ;;
+                0) TAG="euler64"; STEPS=64; FINAL_PROJECTION=true ;;
+                1) TAG="no-final-projection"; STEPS=64; FINAL_PROJECTION=false ;;
                 *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
               esac
               test -s "$ENV_ARCHIVE"
@@ -88,7 +89,7 @@ spec:
               for artifact in samples.pt prior_samples.pt replay_bundle.pt generation_diagnostics.json metrics.csv summary.json; do
                 test -s "$OUT/eval/$artifact"
               done
-              "$PYTHON" -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["stage_status"]["samples"]["status"]=="ok"; assert d["stage_status"]["metrics"]["status"]=="ok"; assert "fpnd_g" in d["metrics"]; print({k:d["metrics"][k] for k in ("fpnd_g","w1m","fpd","frac_spacelike","frac_generated_invalid") if k in d["metrics"]})' "$OUT/eval/summary.json"
+              "$PYTHON" -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["stage_status"]["samples"]["status"]=="ok"; assert d["stage_status"]["metrics"]["status"]=="ok"; assert all(k in d["metrics"] for k in ("w1m","fpd","frac_spacelike","frac_generated_invalid")); print({k:d["metrics"][k] for k in ("fpnd_g","w1m","fpd","frac_spacelike","frac_generated_invalid") if k in d["metrics"]})' "$OUT/eval/summary.json"
           volumeMounts: [{name: data, mountPath: /mnt/data}]
           resources:
             requests: {nvidia.com/a40: 1, cpu: "2", memory: 32Gi}
