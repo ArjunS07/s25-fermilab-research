@@ -98,6 +98,28 @@ def run_stability_probe(*, optimizer_step, epoch, minibatch, probe_steps, model,
             f"Stability probe step={optimizer_step}: unstable={n_unstable}/{summary['n_total']} "
             f"reasons={summary['failure_reason_counts']}"
         )
+    except FloatingPointError as exc:
+        # A probe samples the current model and is diagnostic only. In
+        # particular, the intentionally untrained step-0 model can emit a
+        # velocity too large for the short Euler rollout even though its first
+        # optimization step is finite. Record that outcome without preventing
+        # the training run from reaching the next, scientifically useful probe.
+        n_total = int(cfg.inference.stability_probe_samples)
+        summary = {
+            "optimizer_step": optimizer_step,
+            "n_total": n_total,
+            "n_unstable": n_total,
+            "invalid_fraction": 1.0,
+            "n_crossed_max_abs_1e6": 0,
+            "failure_reason_counts": {"floating_point_error": n_total},
+            "error": str(exc),
+        }
+        with open(f"{probe_dir}/probe_summary.json", "w") as handle:
+            json.dump(summary, handle, indent=2)
+        print(
+            f"WARNING: stability probe step={optimizer_step} failed: {exc}. "
+            "Training will continue; model and RNG state were restored."
+        )
     finally:
         model.load_state_dict(raw_state, strict=True)
         model.train(was_training)
