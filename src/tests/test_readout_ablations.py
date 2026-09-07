@@ -49,6 +49,23 @@ def test_latent_readout_supports_the_float32_training_model():
     assert torch.isfinite(velocity).all()
 
 
+@pytest.mark.parametrize("mode", ["normalized_tangent", "raw_tangent"])
+def test_reference_direction_modes_are_jointly_equivariant(mode):
+    model = build_model(seed=16, reference_direction_mode=mode)
+    x, t, conditions, mask, refs = sample_inputs(seed=17)
+    transform = random_proper_transform(seed=18)
+
+    velocity = model(x, t, conditions, mask, ref_vectors=refs)
+    transformed_velocity = model(
+        apply_transform(x, transform) * mask.unsqueeze(-1), t, conditions, mask,
+        ref_vectors=apply_transform(refs, transform),
+    )
+
+    assert torch.allclose(
+        apply_transform(velocity, transform), transformed_velocity, atol=1e-5, rtol=1e-5
+    )
+
+
 def test_terminal_projection_bypass_matches_physical_h_to_roundoff():
     projected = build_model(seed=12)
     bypassed = build_model(seed=13, final_tangent_projection=False)

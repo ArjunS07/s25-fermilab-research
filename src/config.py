@@ -38,6 +38,9 @@ class ModelConfig(BaseModel):
     # The published H field uses physical-shell log-map directions.  The latent
     # alternative is an explicitly checkpointed retraining ablation.
     particle_direction_mode: Literal["physical_logmap", "latent_displacement"] = "physical_logmap"
+    # H normalizes physical tangent reference directions before weighting them.
+    # The raw tangent alternative is a checkpointed retraining ablation.
+    reference_direction_mode: Literal["normalized_tangent", "raw_tangent"] = "normalized_tangent"
     # Retained as a checkpointed inference ablation; published H keeps this on.
     final_tangent_projection: bool = True
 
