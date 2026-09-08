@@ -45,7 +45,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="916ba37fca10bef142f10ced3bd0acc558cfcc94"
+              GIT_COMMIT="9fecf2d809d1fbf5a26702ce42350f3f977be122"
               SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"

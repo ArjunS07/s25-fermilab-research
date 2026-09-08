@@ -43,7 +43,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="f954f2fea690ee5e2fac0be8be51079f1c3e7eda"
+              GIT_COMMIT="9fecf2d809d1fbf5a26702ce42350f3f977be122"
               SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               REPLAY="/mnt/data/output/2026-08-24_02-29-13--a85d5bf6-8808-4dd7-93bf-b831ca34fdf4-paper30-gqt994k-cfg-eval/eval/replay_bundle.pt"
