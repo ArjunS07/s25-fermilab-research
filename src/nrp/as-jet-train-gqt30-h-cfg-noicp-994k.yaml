@@ -1,0 +1,72 @@
+# First serial GQT-994K training ablation: remove only online geodesic ICP from
+# the CFG-trained canonical H recipe. Seeds, 10% null-conditioning dropout,
+# optimizer budget, prior, architecture, and terminal evaluation are retained.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-train-gqt30-h-cfg-noicp-994k}
+spec:
+  ttlSecondsAfterFinished: 259200
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              GIT_COMMIT="9b4bed282f695561bf94d0f358dc5bacde49a8b7"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt30-h-cfg-noicp-994k"
+              test -s "$ENV_ARCHIVE"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf 'treatment=remove_online_geodesic_icp\ncfg_null_dropout_rate=0.1\n' > "$OUT/ablation_controls.txt"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" \
+                --cache-dir /mnt/data/caches/stage1 --jet-types g q t \
+                --num-particles 30 --model-version v3
+              "$PYTHON" train.py \
+                --config configs/gqt30-lorentznet-h-rfm-logmap-200k.yaml \
+                --set paths.output_path="$OUT" \
+                --set training.num_epochs=2000 \
+                --set training.max_optimizer_steps=994000 \
+                --set training.cfg_null_dropout_rate=0.1 \
+                --set training.coupling=none \
+                --set training.stability_probe_steps="[0,20000,40000,80000,150000,200000,331000,500000,800000,994000]" \
+                --set inference.use_cfg=true \
+                --set inference.cfg_guidance_weight=1.0
+              for artifact in models/final_checkpoint.pth models/latest_checkpoint.pth metrics.csv summary.json; do
+                test -s "$OUT/train/$artifact"
+              done
+              "$PYTHON" -c 'import json,sys,torch; p=sys.argv[1]; c=torch.load(p+"/models/final_checkpoint.pth",map_location="cpu",weights_only=False); s=json.load(open(p+"/summary.json")); f=s["full_config"]; assert c["global_optimizer_step"]==994000; assert f["data"]["jet_types"]==["g","q","t"]; assert f["training"]["cfg_null_dropout_rate"]==0.1; assert f["training"]["coupling"]=="none"; assert f["model"]["particle_direction_mode"]=="physical_logmap"; assert f["model"]["reference_direction_mode"]=="normalized_tangent"; print("Verified GQT CFG no-ICP endpoint")' "$OUT/train"
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 24Gi}
