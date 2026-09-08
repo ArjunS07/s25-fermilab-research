@@ -1,13 +1,14 @@
-# Inference-only ablation of H's final outer tangent projection on the canonical
-# CFG-trained GQT-994K checkpoint. Evaluate every guidance weight needed by the
-# paper table at its established 64-step integration count and exact replay.
+# Matched fixed-step inference ablations on the canonical CFG-trained GQT-994K
+# checkpoint. Projection-on measures removal of adaptive subdivision relative
+# to the table's adaptive 64-step result; projection-off is compared against
+# that exact fixed-step control. Both use all three table guidance weights.
 apiVersion: batch/v1
 kind: Job
 metadata: {name: as-jet-eval-gqt994k-final-projection}
 spec:
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
-  completions: 3
+  completions: 6
   parallelism: 2
   completionMode: Indexed
   template:
@@ -49,18 +50,21 @@ spec:
               REPLAY="/mnt/data/output/2026-08-24_02-29-13--a85d5bf6-8808-4dd7-93bf-b831ca34fdf4-paper30-gqt994k-cfg-eval/eval/replay_bundle.pt"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
               case "$JOB_COMPLETION_INDEX" in
-                0) TAG="w000"; GUIDANCE="0.00"; USE_CFG=false ;;
-                1) TAG="w025"; GUIDANCE="0.25"; USE_CFG=true  ;;
-                2) TAG="w050"; GUIDANCE="0.50"; USE_CFG=true  ;;
+                0) TAG="fixed-projection-on-w000";  GUIDANCE="0.00"; USE_CFG=false; FINAL_PROJECTION=true  ;;
+                1) TAG="fixed-projection-on-w025";  GUIDANCE="0.25"; USE_CFG=true;  FINAL_PROJECTION=true  ;;
+                2) TAG="fixed-projection-on-w050";  GUIDANCE="0.50"; USE_CFG=true;  FINAL_PROJECTION=true  ;;
+                3) TAG="fixed-projection-off-w000"; GUIDANCE="0.00"; USE_CFG=false; FINAL_PROJECTION=false ;;
+                4) TAG="fixed-projection-off-w025"; GUIDANCE="0.25"; USE_CFG=true;  FINAL_PROJECTION=false ;;
+                5) TAG="fixed-projection-off-w050"; GUIDANCE="0.50"; USE_CFG=true;  FINAL_PROJECTION=false ;;
                 *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
               esac
               for required in "$CHECKPOINT" "$REPLAY" "$ENV_ARCHIVE"; do test -s "$required"; done
-              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt994k-no-final-projection-${TAG}-eval"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt994k-${TAG}-eval"
               mkdir -p "$OUT" /tmp/runtime
               exec > >(tee "$OUT/run.log") 2>&1
               printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
               printf '%s\n' "$SOURCE_RUN" > "$OUT/source_run.txt"
-              printf 'integration_steps=64\ncfg_guidance_weight=%s\nuse_cfg=%s\nfinal_tangent_projection=false\nreplay_bundle=%s\n' "$GUIDANCE" "$USE_CFG" "$REPLAY" > "$OUT/ablation_controls.txt"
+              printf 'integration_steps=64\ncfg_guidance_weight=%s\nuse_cfg=%s\nfinal_tangent_projection=%s\nadaptive_subdivision=false\nreplay_bundle=%s\n' "$GUIDANCE" "$USE_CFG" "$FINAL_PROJECTION" "$REPLAY" > "$OUT/ablation_controls.txt"
               tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
               PYTHON=/tmp/runtime/python-env/bin/python
               "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
@@ -84,7 +88,7 @@ spec:
                 --set inference.cfg_guidance_weight="$GUIDANCE" \
                 --set inference.stratify_metrics_by_class=true \
                 --set inference.skip_metrics=false \
-                --set model.final_tangent_projection=false
+                --set model.final_tangent_projection="$FINAL_PROJECTION"
               for artifact in samples.pt prior_samples.pt generation_diagnostics.json metrics.csv summary.json; do
                 test -s "$OUT/eval/$artifact"
               done
