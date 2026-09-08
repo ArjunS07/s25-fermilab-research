@@ -2,7 +2,8 @@
 # At each integration count, evaluate the three guidance weights needed to
 # reproduce every LorentzNet row in the paper table: w=0 supplies the
 # no-guidance G/Q/T rows, w=0.25 supplies selected Q, and w=0.5 supplies
-# selected T. Each arm reuses its exact 64-step Stage-1/prior replay bundle.
+# selected T. Each arm reuses the canonical Stage-1/prior replay and the
+# table-era adaptive safety settings (rapidity 0.5, at most 64 substeps).
 apiVersion: batch/v1
 kind: Job
 metadata: {name: as-jet-eval-gqt994k-euler-cfg-ablations}
@@ -45,7 +46,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="9fecf2d809d1fbf5a26702ce42350f3f977be122"
+              GIT_COMMIT="b4eb1daf934f5a4ee270fb0b0ee59ac6e1c41295"
               SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
@@ -85,6 +86,8 @@ spec:
                 --set inference.batch_size=128 \
                 --set inference.integration_steps="$STEPS" \
                 --set inference.prior_dist=axis_aligned_lognormal \
+                --set inference.mass_shell_max_step_rapidity=0.5 \
+                --set inference.mass_shell_max_substeps=64 \
                 --set inference.use_ema_weights=true \
                 --set inference.use_cfg="$USE_CFG" \
                 --set inference.cfg_guidance_weight="$GUIDANCE" \
