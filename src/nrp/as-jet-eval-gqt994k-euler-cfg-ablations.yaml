@@ -50,14 +50,15 @@ spec:
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
               case "$JOB_COMPLETION_INDEX" in
-                0) STEPS=32;  TAG="euler32-w000";  GUIDANCE="0.00"; USE_CFG=false; REPLAY="/mnt/data/output/2026-08-27_22-55-57--127bc902-840f-43a0-8db7-1d66267620cc-paper30-gqt994k-cfg-w000-regenerated/eval/replay_bundle.pt" ;;
-                1) STEPS=32;  TAG="euler32-w025";  GUIDANCE="0.25"; USE_CFG=true;  REPLAY="/mnt/data/output/2026-08-25_22-18-31--a31c196a-5009-42a1-82e9-a9696e6146ee-paper30-gqt994k-cfg-w025-eval/eval/replay_bundle.pt" ;;
-                2) STEPS=32;  TAG="euler32-w050";  GUIDANCE="0.50"; USE_CFG=true;  REPLAY="/mnt/data/output/2026-08-25_20-59-00--3a48a5f7-5493-4335-be28-c301daee932c-paper30-gqt994k-cfg-w050-eval/eval/replay_bundle.pt" ;;
-                3) STEPS=128; TAG="euler128-w000"; GUIDANCE="0.00"; USE_CFG=false; REPLAY="/mnt/data/output/2026-08-27_22-55-57--127bc902-840f-43a0-8db7-1d66267620cc-paper30-gqt994k-cfg-w000-regenerated/eval/replay_bundle.pt" ;;
-                4) STEPS=128; TAG="euler128-w025"; GUIDANCE="0.25"; USE_CFG=true;  REPLAY="/mnt/data/output/2026-08-25_22-18-31--a31c196a-5009-42a1-82e9-a9696e6146ee-paper30-gqt994k-cfg-w025-eval/eval/replay_bundle.pt" ;;
-                5) STEPS=128; TAG="euler128-w050"; GUIDANCE="0.50"; USE_CFG=true;  REPLAY="/mnt/data/output/2026-08-25_20-59-00--3a48a5f7-5493-4335-be28-c301daee932c-paper30-gqt994k-cfg-w050-eval/eval/replay_bundle.pt" ;;
+                0) STEPS=32;  TAG="euler32-w000";  GUIDANCE="0.00"; USE_CFG=false ;;
+                1) STEPS=32;  TAG="euler32-w025";  GUIDANCE="0.25"; USE_CFG=true  ;;
+                2) STEPS=32;  TAG="euler32-w050";  GUIDANCE="0.50"; USE_CFG=true  ;;
+                3) STEPS=128; TAG="euler128-w000"; GUIDANCE="0.00"; USE_CFG=false ;;
+                4) STEPS=128; TAG="euler128-w025"; GUIDANCE="0.25"; USE_CFG=true  ;;
+                5) STEPS=128; TAG="euler128-w050"; GUIDANCE="0.50"; USE_CFG=true  ;;
                 *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
               esac
+              REPLAY="/mnt/data/output/2026-08-24_02-29-13--a85d5bf6-8808-4dd7-93bf-b831ca34fdf4-paper30-gqt994k-cfg-eval/eval/replay_bundle.pt"
               for required in "$CHECKPOINT" "$ENV_ARCHIVE" "$REPLAY"; do test -s "$required"; done
               OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt994k-${TAG}-eval"
               mkdir -p "$OUT" /tmp/runtime
