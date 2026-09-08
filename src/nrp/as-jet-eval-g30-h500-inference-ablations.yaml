@@ -1,8 +1,8 @@
 # Inference-only H ablations on the completed pre-ablation H-500K checkpoint.
 # Euler-32 and Euler-64 both completed successfully before their Job wrappers
 # failed in overly strict post-run assertions; their artifacts are retained.
-# This replacement runs the two remaining useful arms: Euler 128 (to test the
-# observed first-order convergence) and final-projection bypass at 64 steps.
+# Euler-128 also completed successfully before a stale artifact check failed;
+# this replacement runs only the final-projection bypass at 64 steps.
 # Every arm reuses the old run's exact Stage-1/prior replay bundle.
 apiVersion: batch/v1
 kind: Job
@@ -10,7 +10,7 @@ metadata: {name: as-jet-eval-g30-h500-inference-ablations}
 spec:
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
-  completions: 2
+  completions: 1
   parallelism: 1
   completionMode: Indexed
   template:
@@ -52,8 +52,7 @@ spec:
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               REPLAY="$SOURCE_RUN/train/replay_bundle.pt"
               case "$JOB_COMPLETION_INDEX" in
-                0) TAG="euler128"; STEPS=128; FINAL_PROJECTION=true ;;
-                1) TAG="no-final-projection"; STEPS=64; FINAL_PROJECTION=false ;;
+                0) TAG="no-final-projection"; STEPS=64; FINAL_PROJECTION=false ;;
                 *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
               esac
               test -s "$ENV_ARCHIVE"
@@ -86,7 +85,7 @@ spec:
                 --set inference.use_ema_weights=true \
                 --set inference.use_cfg=false \
                 --set model.final_tangent_projection="$FINAL_PROJECTION"
-              for artifact in samples.pt prior_samples.pt replay_bundle.pt generation_diagnostics.json metrics.csv summary.json; do
+              for artifact in samples.pt prior_samples.pt generation_diagnostics.json metrics.csv summary.json; do
                 test -s "$OUT/eval/$artifact"
               done
           volumeMounts: [{name: data, mountPath: /mnt/data}]
