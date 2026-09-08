@@ -39,3 +39,25 @@ def test_generation_euler_path_stays_finite_and_on_shell():
         normsq4(state)[real], torch.full_like(normsq4(state)[real], mass**2),
         atol=1e-6,
     )
+
+
+def test_step_returns_per_trajectory_nonfinites_for_sampler_isolation(monkeypatch):
+    model = build_model(seed=31)
+    x, t, conditions, mask, refs = sample_inputs(batch=2, seed=32)
+
+    def zero_velocity(state, *_args, **_kwargs):
+        return torch.zeros_like(state)
+
+    def one_bad_trajectory(state, _velocity, _mass):
+        result = state.clone()
+        result[1] = float("nan")
+        return result
+
+    monkeypatch.setattr(model, "_mass_shell_velocity", zero_velocity)
+    monkeypatch.setattr("models.lorentznet_flow.exp_map", one_bad_trajectory)
+    stepped = model.step_hyperbolic(
+        x, conditions, mask, t[0], t[0] + 0.1, ref_vectors=refs,
+    )
+
+    assert torch.isfinite(stepped[0]).all()
+    assert not torch.isfinite(stepped[1]).all()

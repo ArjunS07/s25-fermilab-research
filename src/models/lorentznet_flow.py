@@ -207,8 +207,8 @@ class LorentzNetFlow(nn.Module):
                     self.regulator_mass),
             self.regulator_mass,
         )
-        if not torch.isfinite(stepped).all():
-            raise FloatingPointError("mass-shell Euler step produced a non-finite state")
+        # Return per-trajectory non-finites to generate_samples, which records
+        # and removes only the affected samples while continuing the batch.
         return stepped
 
 
