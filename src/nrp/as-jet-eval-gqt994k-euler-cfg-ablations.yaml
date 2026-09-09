@@ -1,16 +1,12 @@
-# Euler-step ablation for the canonical CFG-trained GQT-994K checkpoint.
-# At each integration count, evaluate the three guidance weights needed to
-# reproduce every LorentzNet row in the paper table: w=0 supplies the
-# no-guidance G/Q/T rows, w=0.25 supplies selected Q, and w=0.5 supplies
-# selected T. Each arm reuses the canonical Stage-1/prior replay and the
-# table-era adaptive safety settings (rapidity 0.5, at most 64 substeps).
+# Fixed-step 128-update ablation for the canonical CFG-trained GQT-994K
+# checkpoint. The completed 32-update outputs are preserved on the PVC.
 apiVersion: batch/v1
 kind: Job
 metadata: {name: as-jet-eval-gqt994k-euler-cfg-ablations}
 spec:
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
-  completions: 6
+  completions: 3
   parallelism: 2
   completionMode: Indexed
   template:
@@ -46,67 +42,30 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="b4eb1daf934f5a4ee270fb0b0ee59ac6e1c41295"
-              METRICS_COMMIT="9fecf2d809d1fbf5a26702ce42350f3f977be122"
+              GIT_COMMIT="9fecf2d809d1fbf5a26702ce42350f3f977be122"
               SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
+              REPLAY="/mnt/data/output/2026-08-24_02-29-13--a85d5bf6-8808-4dd7-93bf-b831ca34fdf4-paper30-gqt994k-cfg-eval/eval/replay_bundle.pt"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
               case "$JOB_COMPLETION_INDEX" in
-                0) STEPS=32;  TAG="euler32-w000";  GUIDANCE="0.00"; USE_CFG=false; REUSE_GENERATION=true  ;;
-                1) STEPS=32;  TAG="euler32-w025";  GUIDANCE="0.25"; USE_CFG=true;  REUSE_GENERATION=false ;;
-                2) STEPS=32;  TAG="euler32-w050";  GUIDANCE="0.50"; USE_CFG=true;  REUSE_GENERATION=false ;;
-                3) STEPS=128; TAG="euler128-w000"; GUIDANCE="0.00"; USE_CFG=false; REUSE_GENERATION=false ;;
-                4) STEPS=128; TAG="euler128-w025"; GUIDANCE="0.25"; USE_CFG=true;  REUSE_GENERATION=false ;;
-                5) STEPS=128; TAG="euler128-w050"; GUIDANCE="0.50"; USE_CFG=true;  REUSE_GENERATION=false ;;
+                0) TAG="euler128-fixed-w000"; GUIDANCE="0.00"; USE_CFG=false ;;
+                1) TAG="euler128-fixed-w025"; GUIDANCE="0.25"; USE_CFG=true  ;;
+                2) TAG="euler128-fixed-w050"; GUIDANCE="0.50"; USE_CFG=true  ;;
                 *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
               esac
-              REPLAY="/mnt/data/output/2026-08-24_02-29-13--a85d5bf6-8808-4dd7-93bf-b831ca34fdf4-paper30-gqt994k-cfg-eval/eval/replay_bundle.pt"
-              for required in "$CHECKPOINT" "$ENV_ARCHIVE" "$REPLAY"; do test -s "$required"; done
-              if [[ "$REUSE_GENERATION" == true ]]; then
-                OUT="/mnt/data/output/2026-09-08_15-07-42--6affa926-aef8-40e1-925c-8a4175a9bb17-gqt994k-euler32-w000-eval"
-              else
-                OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt994k-${TAG}-eval"
-              fi
+              for required in "$CHECKPOINT" "$REPLAY" "$ENV_ARCHIVE"; do test -s "$required"; done
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt994k-${TAG}-eval"
               mkdir -p "$OUT" /tmp/runtime
-              exec > >(tee -a "$OUT/run.log") 2>&1
+              exec > >(tee "$OUT/run.log") 2>&1
               printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
               printf '%s\n' "$SOURCE_RUN" > "$OUT/source_run.txt"
-              printf '%s\n' "$CHECKPOINT" > "$OUT/checkpoint.txt"
-              printf 'integration_steps=%s\ncfg_guidance_weight=%s\nuse_cfg=%s\nadaptive_subdivision=true\ngeneration_commit=%s\nmetrics_commit=%s\nreplay_bundle=%s\n' "$STEPS" "$GUIDANCE" "$USE_CFG" "$GIT_COMMIT" "$METRICS_COMMIT" "$REPLAY" > "$OUT/ablation_controls.txt"
+              printf 'integration_steps=128\ncfg_guidance_weight=%s\nuse_cfg=%s\nreplay_bundle=%s\n' "$GUIDANCE" "$USE_CFG" "$REPLAY" > "$OUT/ablation_controls.txt"
               tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
               PYTHON=/tmp/runtime/python-env/bin/python
               "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
               mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
               cd /tmp/repo/src
               "$PYTHON" -c 'import sys,torch; c=torch.load(sys.argv[1],map_location="cpu",weights_only=False); assert c["global_optimizer_step"]==994000; print("Verified CFG GQT-994K checkpoint")' "$CHECKPOINT"
-              if [[ "$REUSE_GENERATION" != true || ! -s "$OUT/eval/samples.pt" ]]; then
-                "$PYTHON" infer.py \
-                  --config configs/infer-g30-mass-shell.yaml \
-                  --set data.jet_types="[g,q,t]" \
-                  --set paths.checkpoint_path="$CHECKPOINT" \
-                  --set paths.output_path="$SOURCE_RUN" \
-                  --set paths.out_dir="$OUT/eval" \
-                  --set paths.replay_bundle_path="$REPLAY" \
-                  --set inference.n_samples=150000 \
-                  --set inference.samples_per_jet_type=50000 \
-                  --set inference.batch_size=128 \
-                  --set inference.integration_steps="$STEPS" \
-                  --set inference.prior_dist=axis_aligned_lognormal \
-                  --set inference.mass_shell_max_step_rapidity=0.5 \
-                  --set inference.mass_shell_max_substeps=64 \
-                  --set inference.use_ema_weights=true \
-                  --set inference.use_cfg="$USE_CFG" \
-                  --set inference.cfg_guidance_weight="$GUIDANCE" \
-                  --set inference.stratify_metrics_by_class=true \
-                  --set inference.skip_metrics=true
-              fi
-              for artifact in samples.pt prior_samples.pt generation_diagnostics.json; do
-                test -s "$OUT/eval/$artifact"
-              done
-              cd /tmp
-              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$METRICS_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo-metrics.tar.gz'); tarfile.open('/tmp/repo-metrics.tar.gz').extractall('/tmp')"
-              mv "/tmp/s25-fermilab-research-$METRICS_COMMIT" /tmp/repo-metrics
-              cd /tmp/repo-metrics/src
               "$PYTHON" infer.py \
                 --config configs/infer-h.yaml \
                 --set data.jet_types="[g,q,t]" \
@@ -114,18 +73,15 @@ spec:
                 --set paths.output_path="$SOURCE_RUN" \
                 --set paths.out_dir="$OUT/eval" \
                 --set paths.replay_bundle_path="$REPLAY" \
-                --set paths.replay_samples_path="$OUT/eval/samples.pt" \
-                --set paths.replay_prior_samples_path="$OUT/eval/prior_samples.pt" \
                 --set inference.n_samples=150000 \
                 --set inference.samples_per_jet_type=50000 \
                 --set inference.batch_size=128 \
-                --set inference.integration_steps="$STEPS" \
+                --set inference.integration_steps=128 \
                 --set inference.prior_dist=axis_aligned_lognormal \
                 --set inference.use_ema_weights=true \
                 --set inference.use_cfg="$USE_CFG" \
                 --set inference.cfg_guidance_weight="$GUIDANCE" \
                 --set inference.stratify_metrics_by_class=true \
-                --set inference.skip_samples=true \
                 --set inference.skip_metrics=false
               for artifact in samples.pt prior_samples.pt generation_diagnostics.json metrics.csv summary.json; do
                 test -s "$OUT/eval/$artifact"
