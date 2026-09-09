@@ -60,7 +60,7 @@ spec:
               for artifact in models/final_checkpoint.pth models/latest_checkpoint.pth metrics.csv summary.json; do
                 test -s "$OUT/train/$artifact"
               done
-              "$PYTHON" -c 'import json,sys,torch; p=sys.argv[1]; c=torch.load(p+"/models/final_checkpoint.pth",map_location="cpu",weights_only=False); s=json.load(open(p+"/summary.json")); m=s["full_config"]["model"]; assert c["global_optimizer_step"]==994000; assert s["effective_coupling"]["coupling"]=="online_geodesic_icp"; assert m["particle_direction_mode"]=="physical_logmap"; assert m["reference_direction_mode"]=="raw_tangent"; assert m["final_tangent_projection"] is True; print("Verified ICP raw-reference endpoint and provenance")' "$OUT/train"
+              "$PYTHON" -c 'import json,sys,torch; p=sys.argv[1]; c=torch.load(p+"/models/final_checkpoint.pth",map_location="cpu",weights_only=False); s=json.load(open(p+"/summary.json")); m=s["full_config"]["model"]; assert c["global_optimizer_step"]==994000; assert s["effective_coupling"]["coupling"]=="online_geodesic_icp"; assert m["particle_direction_mode"]=="physical_logmap"; assert m["reference_direction_mode"]=="raw_tangent"; print("Verified ICP raw-reference endpoint and provenance")' "$OUT/train"
           volumeMounts: [{name: data, mountPath: /mnt/data}]
           resources:
             requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}

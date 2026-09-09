@@ -126,7 +126,13 @@ class LorentzNetBackbone(nn.Module):
         else:
             # The auxiliary workspace ablation intentionally forms both the
             # particle coefficients and directions from the final latent state.
-            direction = (y.unsqueeze(1) - y.unsqueeze(2)).to(torch.float64)
+            # Project each latent displacement into the physical tangent space;
+            # by linearity this is exactly the former terminal projection of
+            # their weighted sum, while making the field tangent by construction.
+            latent_direction = (y.unsqueeze(1) - y.unsqueeze(2)).to(torch.float64)
+            direction = pushforward_to_tangent(
+                x64.unsqueeze(2), latent_direction, self.regulator_mass
+            )
         raw = torch.einsum("bij,bijf->bif", coefficients.to(torch.float64) * support, direction)
         raw = raw / support.sum(dim=2).clamp_min(1).to(torch.float64).sqrt().unsqueeze(-1)
 
@@ -152,13 +158,11 @@ class LorentzNetFlow(nn.Module):
     def __init__(self, condition_dim: int, n_particle_types: int, width: int = 96,
                  num_layers: int = 6, regulator_mass: float = 0.1,
                  particle_direction_mode: str = "physical_logmap",
-                 reference_direction_mode: str = "normalized_tangent",
-                 final_tangent_projection: bool = True):
+                 reference_direction_mode: str = "normalized_tangent"):
         super().__init__()
         self.cond_dim = condition_dim
         self.n_particles_idx = n_particle_types
         self.regulator_mass = float(regulator_mass)
-        self.final_tangent_projection = bool(final_tangent_projection)
         self.null_cond = nn.Parameter(torch.zeros(condition_dim))
         self.lorentznet_backbone = LorentzNetBackbone(
             condition_dim, width, num_layers, regulator_mass, particle_direction_mode,
@@ -176,12 +180,8 @@ class LorentzNetFlow(nn.Module):
             raise ValueError(
                 f"LorentzNetFlow expected {self.cond_dim} conditions, got {jet_conditions.shape[-1]}"
             )
-        raw = self.lorentznet_backbone(x, t, jet_conditions, mask, ref_vectors)
-        if self.final_tangent_projection:
-            raw = pushforward_to_tangent(
-                x.to(torch.float64), raw.to(torch.float64), self.regulator_mass
-            )
-        return raw * mask.unsqueeze(-1).to(raw.dtype)
+        velocity = self.lorentznet_backbone(x, t, jet_conditions, mask, ref_vectors)
+        return velocity * mask.unsqueeze(-1).to(velocity.dtype)
 
     def _mass_shell_velocity(self, state, conditions, mask, t, use_cfg,
                              guidance_weight, references):
@@ -215,8 +215,7 @@ class LorentzNetFlow(nn.Module):
 def build_lorentznet(max_num_jet_types: int, *, num_layers: int = 6,
                      hidden_dim: int = 96, regulator_mass: float = 0.1,
                      particle_direction_mode: str = "physical_logmap",
-                     reference_direction_mode: str = "normalized_tangent",
-                     final_tangent_projection: bool = True) -> LorentzNetFlow:
+                     reference_direction_mode: str = "normalized_tangent") -> LorentzNetFlow:
     return LorentzNetFlow(
         condition_dim=max_num_jet_types + 3,
         n_particle_types=max_num_jet_types,
@@ -225,7 +224,6 @@ def build_lorentznet(max_num_jet_types: int, *, num_layers: int = 6,
         regulator_mass=regulator_mass,
         particle_direction_mode=particle_direction_mode,
         reference_direction_mode=reference_direction_mode,
-        final_tangent_projection=final_tangent_projection,
     )
 
 

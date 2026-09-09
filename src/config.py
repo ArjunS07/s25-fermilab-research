@@ -41,8 +41,6 @@ class ModelConfig(BaseModel):
     # H normalizes physical tangent reference directions before weighting them.
     # The raw tangent alternative is a checkpointed retraining ablation.
     reference_direction_mode: Literal["normalized_tangent", "raw_tangent"] = "normalized_tangent"
-    # Retained as a checkpointed inference ablation; published H keeps this on.
-    final_tangent_projection: bool = True
 
 
 class TrainingConfig(BaseModel):

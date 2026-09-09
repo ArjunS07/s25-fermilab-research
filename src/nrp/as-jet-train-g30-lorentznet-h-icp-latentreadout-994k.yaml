@@ -2,7 +2,7 @@
 # geodesic ICP retained.  Relative to the completed H-994K control, this changes
 # only particle-direction construction: physical normalized Log_x(x_j) becomes
 # the final auxiliary displacement y_j^L - y_i^L.  Coefficients, normalized
-# physical reference vectors, final tangent projection, seeds, and evaluation
+# physical reference vectors, seeds, and evaluation
 # settings remain canonical H.
 apiVersion: batch/v1
 kind: Job
@@ -62,7 +62,7 @@ spec:
               for artifact in models/final_checkpoint.pth models/latest_checkpoint.pth metrics.csv summary.json; do
                 test -s "$OUT/train/$artifact"
               done
-              "$PYTHON" -c 'import json,sys,torch; p=sys.argv[1]; c=torch.load(p+"/models/final_checkpoint.pth",map_location="cpu",weights_only=False); s=json.load(open(p+"/summary.json")); m=s["full_config"]["model"]; assert c["global_optimizer_step"]==994000; assert s["effective_coupling"]["coupling"]=="online_geodesic_icp"; assert m["particle_direction_mode"]=="latent_displacement"; assert m["final_tangent_projection"] is True; print("Verified ICP latent-readout endpoint and provenance")' "$OUT/train"
+              "$PYTHON" -c 'import json,sys,torch; p=sys.argv[1]; c=torch.load(p+"/models/final_checkpoint.pth",map_location="cpu",weights_only=False); s=json.load(open(p+"/summary.json")); m=s["full_config"]["model"]; assert c["global_optimizer_step"]==994000; assert s["effective_coupling"]["coupling"]=="online_geodesic_icp"; assert m["particle_direction_mode"]=="latent_displacement"; print("Verified ICP latent-readout endpoint and provenance")' "$OUT/train"
           volumeMounts: [{name: data, mountPath: /mnt/data}]
           resources:
             requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}

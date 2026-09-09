@@ -8,7 +8,7 @@ Shared by training (``build_checkpoint``/``build_run_config``) and inference
 # older checkpoints are deliberately ignored after the H-only cleanup.
 ARCH_KEYS = (
     "n_hidden", "n_layers", "regulator_mass", "particle_direction_mode",
-    "reference_direction_mode", "final_tangent_projection",
+    "reference_direction_mode",
 )
 
 
