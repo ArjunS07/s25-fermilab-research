@@ -1,0 +1,340 @@
+\documentclass[10pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm,mathtools}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{float}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\Mink}{\langle\cdot,\cdot\rangle_M}
+\newcommand{\HH}{\mathcal{H}}
+\newcommand{\Exp}{\operatorname{Exp}}
+\newcommand{\Log}{\operatorname{Log}}
+\newcommand{\Proj}{\Pi}
+\newcommand{\dist}{d_m}
+\newcommand{\R}{\mathbb{R}}
+
+\title{LorentzNet-H: Lorentz-Equivariant Mass-Shell\
+Flow Matching for Jet Constituents}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We describe Arm H, a Lorentz-equivariant message-passing vector field trained by
+Riemannian flow matching on a regulated mass shell. The network uses evolving
+auxiliary Lorentz vectors for message passing, while its output field is built
+intrinsically from mass-shell logarithmic maps and normalized tangent projections
+of two condition-derived reference vectors. This document specifies the geometry,
+network, conditional prior, coupling, objective, and sampling procedure.
+\end{abstract}
+
+\section{Geometry and notation}
+
+Four-vectors are ordered as $p=(p^0,p^1,p^2,p^3)=(E,p_x,p_y,p_z)\in\R^{1,3}$
+and use metric signature $(+,-,-,-)$,
+\begin{equation}
+ \langle p,q\rangle_M=p^0q^0-\sum_{a=1}^3p^aq^a,
+ \qquad \|p\|_M^2\equiv p^2=\langle p,p\rangle_M.
+\end{equation}
+For a fixed radius (regulator mass) $m>0$, the forward hyperboloid is
+\begin{equation}
+ \HH_m=\{p\in\R^{1,3}:p^2=m^2,\ p^0>0\}.
+\end{equation}
+This is the radius-$m$ version of the unit hyperboloid used by
+Lou et al.~\cite[Table~2]{lou2020neural}; their convention is obtained with
+$x=p/m$ and $\langle x,y\rangle_L=-\langle p,q\rangle_M/m^2$.
+
+The tangent space and induced Riemannian metric of this hyperboloid are
+the standard expressions~\cite[Table~2]{lou2020neural}:
+\begin{equation}
+ T_p\HH_m=\{u:\langle p,u\rangle_M=0\},\qquad
+ g_p(u,v)=-\langle u,v\rangle_M,\qquad
+ \|u\|_p=\sqrt{-\langle u,u\rangle_M}.
+\end{equation}
+The corresponding ambient-to-tangent projection is~\cite[Table~2]{lou2020neural}
+\begin{equation}
+ \Proj_p(v)=v-\frac{\langle p,v\rangle_M}{m^2}p.
+ \label{eq:projection}
+\end{equation}
+
+For $p,q\in\HH_m$, the hyperbolic distance is~\cite[Table~2]{lou2020neural}
+\begin{equation}
+ \gamma(p,q)=\frac{\langle p,q\rangle_M}{m^2},\qquad
+ \dist(p,q)=m\operatorname{arcosh}\!\bigl(\gamma(p,q)\bigr).
+\end{equation}
+The associated logarithmic and exponential maps are~\cite[Table~2]{lou2020neural}
+\begin{align}
+ \Log_p(q)&=
+ \frac{\operatorname{arcosh}(\gamma(p,q))}
+ {\sinh(\operatorname{arcosh}(\gamma(p,q)))}
+ \bigl(q-\gamma(p,q)p\bigr),
+ \label{eq:log-map}\\
+ \Exp_p(u)&=\cosh\!\left(\frac{\|u\|_p}{m}\right)p+
+ m\sinh\!\left(\frac{\|u\|_p}{m}\right)\frac{u}{\|u\|_p}.
+ \label{eq:exp-map}
+\end{align}
+Both expressions use their continuous values at $q=p$ and $u=0$.
+
+\begin{center}
+\fbox{\begin{minipage}{0.91\linewidth}
+\small\textbf{Geometric interpretation.}
+With $w_{p\to q}=q-\gamma(p,q)p$ and
+$\|w_{p\to q}\|_p=m\sinh(\operatorname{arcosh}\gamma(p,q))$, the same map is
+$\displaystyle \Log_p(q)=\dist(p,q)w_{p\to q}/\|w_{p\to q}\|_p$.
+Thus the log map is the unit tangent direction from $p$ toward $q$, scaled by
+the geodesic distance.
+\end{minipage}}
+\end{center}
+
+A jet with $N$ real constituents is modelled as a point on the standard product
+manifold.  Its product metric and componentwise maps are likewise standard
+\cite{chen2023flow}:
+\begin{equation}
+ \mathcal{M}_N=\HH_m^N,\qquad
+ G_X(U,V)=\sum_{i=1}^N g_{x_i}(u_i,v_i),
+ \label{eq:product-metric}
+\end{equation}
+where $X=(x_1,\ldots,x_N)$ and $U=(u_1,\ldots,u_N)\in T_X\mathcal{M}_N$.
+The product maps act componentwise:
+\begin{equation}
+ \Exp_X(U)=(\Exp_{x_1}(u_1),\ldots,\Exp_{x_N}(u_N)),\qquad
+ \Log_X(Y)=(\Log_{x_1}(y_1),\ldots,\Log_{x_N}(y_N)).
+ \label{eq:product-maps}
+\end{equation}
+The choice to use this product manifold for jet constituents, and the masking of
+padded slots in implementation, are model-specific conventions.
+
+\section{Conditional inputs}
+
+The vector field receives the current physical state $X\in\mathcal{M}_N$, flow
+time $t\in[0,1]$, and condition $c=[c_{\rm type},N,p_{T,J},m_J]$. It also receives
+the ordered references $r_0=e_t=(1,0,0,0)$ and $r_1=p_J$. The latter is constructed
+from the conditioned jet attributes,
+\begin{equation}
+ p_J=\frac{1}{s}
+ \begin{pmatrix}
+ m_{T,J}\cosh\eta_J\\
+ p_{T,J}\cos\phi_J\\
+ p_{T,J}\sin\phi_J\\
+ m_{T,J}\sinh\eta_J
+ \end{pmatrix},\qquad m_{T,J}=\sqrt{p_{T,J}^2+m_J^2},
+ \label{eq:jet-reference}
+\end{equation}
+where $s$ is the dataset momentum scale. These vectors are condition-derived;
+they are not formed by summing the target constituents.
+
+\section{LorentzNet-H vector field}
+
+The network maintains invariant scalar features $h_i^\ell\in\R^{d_h}$ and
+auxiliary Lorentz-vector features $y_i^\ell\in\R^{1,3}$, with $d_h=96$ and
+$L=6$ layers. The physical state $x_i$ remains fixed during a network evaluation.
+Only $y_i^\ell$ evolves through message passing. The graph is complete over real
+constituents, with $\mathcal{N}(i)=\{j:j\neq i\}$.
+
+\begin{algorithm}[H]
+\caption{LorentzNet-H vector field $V_\theta(X,t,c;r_0,r_1)$}
+\label{alg:network}
+\small
+\begin{algorithmic}[1]
+\Require $X=(x_1,\ldots,x_N)$, $t$, $c$, $(r_0,r_1)$
+\Ensure $V_\theta(X,t,c;r_0,r_1)\in T_X\mathcal{M}_N$
+\State $y_i^0\gets x_i$ and $\tau(t)\gets[t,\sin(\pi t),\cos(\pi t)]$ for all $i$
+\State $h_i^0\gets\phi_{\rm seed}([\psi(\langle y_i^0,r_0\rangle_M),\psi(\langle y_i^0,r_1\rangle_M)])+\phi_c(c)-\phi_t(\tau(t))$
+\For{$\ell=0,\ldots,L-1$}
+  \State $\bar h_i^\ell\gets\operatorname{LayerNorm}(h_i^\ell)$
+  \For{each $j\in\mathcal{N}(i)$}
+    \State $\xi_{ij}^\ell\gets[\psi(\|y_i^\ell-y_j^\ell\|_M^2),\psi(\langle y_i^\ell,y_j^\ell\rangle_M)]$
+    \State $M_{ij}^\ell\gets\phi_e^\ell(\bar h_i^\ell,\bar h_j^\ell,\xi_{ij}^\ell)$; \quad $\alpha_{ij}^\ell\gets\phi_x^\ell(M_{ij}^\ell)$
+  \EndFor
+  \State $h_i^{\ell+1}\gets h_i^\ell+\phi_h^\ell\!\left(\bar h_i^\ell,|\mathcal{N}(i)|^{-1/2}\sum_{j\in\mathcal{N}(i)}M_{ij}^\ell\right)$
+  \State $y_i^{\ell+1}\gets y_i^\ell+\varepsilon_y|\mathcal{N}(i)|^{-1/2}\sum_{j\in\mathcal{N}(i)}\alpha_{ij}^\ell(y_i^\ell-y_j^\ell)$
+\EndFor
+\For{each $j\in\mathcal{N}(i)$}
+  \State $\xi_{ij}^L\gets[\psi(\|y_i^L-y_j^L\|_M^2),\psi(\langle y_i^L,y_j^L\rangle_M)]$
+  \State $a_{ij}\gets\phi_f(h_i^L,h_j^L,\xi_{ij}^L)$; \quad $q_{ij}\gets\Log_{x_i}(x_j)/(m+\dist(x_i,x_j))$
+\EndFor
+\State $v_i^{\rm part}\gets|\mathcal{N}(i)|^{-1/2}\sum_{j\in\mathcal{N}(i)}a_{ij}q_{ij}$
+\State $(b_{i0},b_{i1})\gets\phi_r(h_i^L,[\psi(\langle y_i^L,r_0\rangle_M),\psi(\langle y_i^L,r_1\rangle_M)])$
+\State $q_{ir}^{\rm ref}\gets\Proj_{x_i}(r_r)/(m+\|\Proj_{x_i}(r_r)\|_{x_i})$, for $r\in\{0,1\}$
+\State $v_i^{\rm ref}\gets b_{i0}q_{i0}^{\rm ref}+b_{i1}q_{i1}^{\rm ref}$
+\State $v_{\theta,i}\gets v_i^{\rm part}+v_i^{\rm ref}\in T_{x_i}\HH_m$
+\State \Return $V_\theta=(v_{\theta,1},\ldots,v_{\theta,N})$
+\end{algorithmic}
+\end{algorithm}
+
+The signed logarithmic preprocessing in Algorithm~\ref{alg:network} is
+\begin{equation}
+ \psi(z)=\operatorname{sgn}(z)\log(1+|z|).
+ \label{eq:signed-log}
+\end{equation}
+All learned maps $\phi_\bullet$ act on scalar invariant inputs. With
+$\sigma=\operatorname{SiLU}$, their widths are
+\begin{align}
+ \phi_c &: d_c\to d_h\to d_h,& \phi_t &: 3\to d_h\to d_h,&
+ \phi_{\rm seed}&:2\to d_h\to d_h,\\
+ \phi_e^\ell &: (2d_h+2)\to d_h\to d_h,&
+ \phi_h^\ell &:2d_h\to2d_h\to d_h,\\
+ \phi_x^\ell &:d_h\to d_h\to1,&
+ \phi_f &: (2d_h+2)\to d_h\to1,&
+ \phi_r &: (d_h+2)\to d_h\to2.
+ \label{eq:mlp-widths}
+\end{align}
+Every hidden linear layer is followed by $\sigma$; $\phi_e^\ell$ also applies
+$\sigma$ after its second linear layer. The final layers of $\phi_x^\ell$, $\phi_f$,
+and $\phi_r$ have weights initialized from $\mathcal{N}(0,10^{-6})$ and zero bias.
+The auxiliary-vector residual scale is $\varepsilon_y=10^{-2}$.
+
+There is no message gate, softmax, absolute-value operation, or positivity constraint.
+Thus the graph aggregation and the final particle readout are signed sums. The
+particle term is intrinsically tangent because $q_{ij}\in T_{x_i}\HH_m$, and the
+reference term is tangent by Eq.~\eqref{eq:projection}. Therefore their sum is
+the model output directly in $T_{x_i}\HH_m$.
+
+For $\Lambda\in SO^+(1,3)$, the network is jointly Lorentz equivariant,
+\begin{equation}
+ V_\theta(\Lambda^{\times N}X,t,c;\Lambda r_0,\Lambda r_1)
+ =\Lambda^{\times N}V_\theta(X,t,c;r_0,r_1).
+ \label{eq:equivariance}
+\end{equation}
+The statement follows because MLP inputs are Lorentz scalars, learned vector
+coefficients are scalars, and tangent maps commute with Lorentz transformations.
+Holding the references fixed in the laboratory frame supplies conditional symmetry
+breaking through the beam/time and jet directions.
+
+\section{Mass-shell Riemannian flow matching}
+
+\subsection{Source and data distributions}
+
+Observed massless constituent momenta $\bar x_i=(\|\bm p_i\|_2,\bm p_i)$ are
+lifted to the shell by preserving spatial momentum,
+\begin{equation}
+ \iota_m(\bar x_i)=\left(\sqrt{\|\bm p_i\|_2^2+m^2},\bm p_i\right).
+ \label{eq:shell-lift}
+\end{equation}
+Let $X_1\sim q_1(\cdot\mid c)$ denote a lifted target jet. The conditional source
+distribution $q_0(\cdot\mid c)$ is an axis-aligned lognormal prior. It samples
+\begin{align}
+ \Delta\eta_i,\Delta\phi_i&\stackrel{\rm iid}{\sim}\mathcal{N}(0,0.15^2),&
+ z_i&\stackrel{\rm iid}{\sim}\mathcal{N}(0,1),\\
+ w_i&=\frac{e^{z_i}}{\sum_j e^{z_j}},&
+ \eta_i&=\eta_J+\Delta\eta_i,\qquad\phi_i=\phi_J+\Delta\phi_i.
+\end{align}
+Writing
+\begin{equation}
+ R=\left\|\sum_iw_i(\cos\phi_i,\sin\phi_i)\right\|_2,
+ \qquad p_{T,i}=w_i\frac{p_{T,J}}{R},
+ \label{eq:prior-pt}
+\end{equation}
+the unlifted source four-vector is
+\begin{equation}
+ \bar x_{0,i}=\frac{1}{s}
+ (p_{T,i}\cosh\eta_i,\ p_{T,i}\cos\phi_i,\ p_{T,i}\sin\phi_i,\ p_{T,i}\sinh\eta_i),
+\end{equation}
+followed by the lift in Eq.~\eqref{eq:shell-lift}.
+
+\subsection{Online geodesic coupling}
+
+Particle indices do not identify physical objects. For every fresh source draw,
+prior constituents are paired with target constituents through the per-jet
+Hungarian assignment
+\begin{equation}
+ \pi^\star=\arg\min_{\pi\in S_N}\sum_{i=1}^N\dist(x_{0,\pi(i)},x_{1,i})^2.
+ \label{eq:icp}
+\end{equation}
+The source is permuted according to $\pi^\star$ before the RFM path is formed.
+This coupling is recomputed online for each training batch and does not reuse a
+fixed noise-to-data pairing.
+
+\subsection{Conditional geodesic path and objective}
+
+For a coupled pair $(X_0,X_1)$ and $t\sim\mathcal{U}[0,1]$, RFM uses the
+product-manifold geodesic
+\begin{equation}
+ X_t=\Exp_{X_1}\!\left((1-t)\Log_{X_1}(X_0)\right)
+ =\Exp_{X_0}\!\left(t\Log_{X_0}(X_1)\right).
+ \label{eq:rfm-path}
+\end{equation}
+Its conditional velocity, tangent at $X_t$, is
+\begin{equation}
+U_t(X_t\mid X_1)=\frac{\Log_{X_t}(X_1)}{1-t}\in T_{X_t}\mathcal{M}_N.
+\label{eq:target-field}
+\end{equation}
+Equation~\eqref{eq:target-field} is the geodesic specialization of the
+distance-gradient target in Chen and Lipman~\cite[Eqs.~(13)--(15)]{chen2023flow},
+not a separate choice of target field.  Let $d_{\mathcal{M}}$ denote the geodesic
+distance of the product metric.  Along the conditional geodesic,
+\begin{equation}
+ d_{\mathcal{M}}(X_t,X_1)=(1-t)d_{\mathcal{M}}(X_0,X_1),\qquad
+ \|\nabla_{X_t}d_{\mathcal{M}}(X_t,X_1)\|_{X_t}=1,
+ \label{eq:geodesic-distance-identities}
+\end{equation}
+and the standard distance-gradient identity is
+\begin{equation}
+ \Log_{X_t}(X_1)=-d_{\mathcal{M}}(X_t,X_1)
+ \nabla_{X_t}d_{\mathcal{M}}(X_t,X_1).
+ \label{eq:log-distance-gradient}
+\end{equation}
+For $\kappa(t)=1-t$, the Chen--Lipman target therefore reduces as
+\begin{align}
+ U_t(X_t\mid X_1)
+ &=-d_{\mathcal{M}}(X_0,X_1)\nabla_{X_t}d_{\mathcal{M}}(X_t,X_1) \notag\\
+ &=\frac{\Log_{X_t}(X_1)}{1-t}.
+ \label{eq:target-field-derivation}
+\end{align}
+The numerator vanishes linearly as $t\to1$; implementation terminates just before
+$t=1$ and uses a protected denominator.
+
+The model is trained by the product-manifold squared error
+\begin{equation}
+ \mathcal{L}_{\rm RFM}(\theta)=
+ \mathbb{E}\left[
+ \left\|V_\theta(X_t,t,c;r_0,r_1)-U_t(X_t\mid X_1)\right\|_{X_t}^2
+ \right],
+ \label{eq:rfm-loss}
+\end{equation}
+where the norm is defined by Eq.~\eqref{eq:product-metric} and is averaged over
+real particles in implementation. Under squared-error regression, the population
+optimum is the marginal velocity
+\begin{equation}
+ V^\star(x,t,c)=\mathbb{E}[U_t(X_t\mid X_1)\mid X_t=x,c].
+ \label{eq:marginal-field}
+\end{equation}
+This field has the same time marginals as the mixture of conditional geodesic paths,
+so integrating it transports $q_0(\cdot\mid c)$ toward $q_1(\cdot\mid c)$.
+
+\subsection{Sampling}
+
+Generation starts from $X(0)\sim q_0(\cdot\mid c)$ and integrates
+\begin{equation}
+ \dot X(t)=V_\theta(X(t),t,c;r_0,r_1).
+ \label{eq:ode}
+\end{equation}
+Using geodesic Euler integration, one step is
+\begin{equation}
+ X_{k+1}=\Exp_{X_k}\!\left(\Delta t\,V_\theta(X_k,t_k,c;r_0,r_1)\right).
+ \label{eq:euler}
+\end{equation}
+The product exponential is applied constituentwise. Hence all generated particles
+remain on the positive-energy mass shell throughout sampling. The reported Arm H
+configuration uses $m=0.1$, 64 Euler steps, and an endpoint time of $0.99999$.
+
+\begin{thebibliography}{9}
+\bibitem{lou2020neural}
+Aaron Lou, Derek Lim, Isay Katsman, Leo Huang, Qingxuan Jiang, Ser-Nam Lim, and
+Christopher M. De Sa.
+\newblock Neural Manifold Ordinary Differential Equations.
+\newblock In \emph{Advances in Neural Information Processing Systems}, 2020.
+\newblock Appendix B.4, Table 2.
+
+\bibitem{chen2023flow}
+Ricky T. Q. Chen and Yaron Lipman.
+\newblock Flow Matching on General Geometries.
+\newblock \emph{arXiv preprint arXiv:2302.03660}, 2023.
+\end{thebibliography}
+
+\end{document}
