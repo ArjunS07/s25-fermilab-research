@@ -16,7 +16,7 @@ spec:
           image: python:3.11-slim
           env:
             - name: GIT_COMMIT
-              value: c6ddfa8
+              value: 2ccb627
           command: ["/bin/sh", "-lc"]
           args:
             - |
