@@ -86,7 +86,6 @@ def plot_training_curves() -> None:
     ax.set_yscale("log")
     ax.set_xlabel("Training epoch")
     ax.set_ylabel("Flow-matching loss (25-epoch mean)")
-    ax.set_title("Matched gluon-30 training curves")
     tufte_axes(ax)
     ax.legend(frameon=False)
     fig.savefig(OUT / "training_curves_icp.png", dpi=220)
@@ -110,12 +109,11 @@ def plot_icp_ablation() -> None:
     for index, ax in enumerate(axes):
         bars = ax.bar(range(3), values[:, index], color=colors, width=0.7)
         ax.set_xticks(range(3), [row[0] for row in rows], fontsize=8)
-        ax.set_title(titles[index])
+        ax.set_ylabel(titles[index])
         tufte_axes(ax)
         for bar in bars:
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f"{bar.get_height():.3g}",
                     ha="center", va="bottom", fontsize=8)
-    fig.suptitle("Matched 994k-step gluon-30 coupling ablation", fontsize=12)
     fig.savefig(OUT / "icp_ablation.png", dpi=220)
     fig.savefig(OUT / "icp_ablation.pdf")
     plt.close(fig)
@@ -135,7 +133,6 @@ def plot_euler_scaling() -> None:
     ax.set_xticks(steps, [str(step) for step in steps])
     ax.set_xlabel("Geodesic Euler steps")
     ax.set_ylabel("FPND")
-    ax.set_title(r"FPND versus geodesic Euler steps ($w=0$)")
     tufte_axes(ax)
     ax.legend(title="Jet class", frameon=False)
     fig.savefig(OUT / "euler_step_scaling.png", dpi=220)
@@ -156,7 +153,6 @@ def plot_cfg_sweep() -> None:
     ax.set_yscale("log")
     ax.set_xlabel("CFG guidance weight")
     ax.set_ylabel("FPND")
-    ax.set_title("FPND versus CFG guidance weight (64 steps)")
     tufte_axes(ax)
     ax.legend(title="Jet class", frameon=False)
     fig.savefig(OUT / "cfg_guidance_sweep.png", dpi=220)
@@ -173,12 +169,11 @@ def plot_architecture_ablation() -> None:
     for ax, values, title in zip(axes, [fpnd, w1m], [r"FPND$_g$", r"W1M $\times 10^3$"]):
         bars = ax.bar(range(4), values, color=colors)
         ax.set_xticks(range(4), names, fontsize=8)
-        ax.set_title(title)
+        ax.set_ylabel(title)
         tufte_axes(ax)
         for bar in bars:
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f"{bar.get_height():.3g}",
                     ha="center", va="bottom", fontsize=8)
-    fig.suptitle("Reference normalization and evolving auxiliary geometry (200k)", fontsize=11)
     fig.savefig(OUT / "architecture_g_to_j.png", dpi=220)
     fig.savefig(OUT / "architecture_g_to_j.pdf")
     plt.close(fig)

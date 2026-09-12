@@ -1,0 +1,40 @@
+{
+  "euler_scaling": [
+    {"steps": 32, "seconds": 992.1, "g": 0.4059334, "q": 0.6131796, "t": 0.9646051},
+    {"steps": 64, "seconds": 1853.8, "g": 0.1419973, "q": 0.2679004, "t": 0.5243825},
+    {"steps": 128, "seconds": 3713.5, "g": 0.0797202, "q": 0.1546227, "t": 0.3692616}
+  ],
+  "cfg_sweep": [
+    {"weight": 0.0, "g": 0.141994, "q": 0.267901, "t": 0.524383},
+    {"weight": 0.25, "g": 0.318242, "q": 0.213679, "t": 0.280137},
+    {"weight": 0.5, "g": 0.525544, "q": 0.313784, "t": 0.201928},
+    {"weight": 0.75, "g": 0.706259, "q": 0.579637, "t": 0.258170},
+    {"weight": 1.0, "g": 0.916041, "q": 1.633959, "t": 0.426059},
+    {"weight": 2.0, "g": 4.538778, "q": 5.721714, "t": 2.100775},
+    {"weight": 3.0, "g": 25.0270, "q": 15.1774, "t": 8.48116}
+  ],
+  "icp_ablation": [
+    {"key": "canonical", "label": "ICP, physical", "fpnd": 0.3910436, "fpd_x1e4": 1.447851, "w1m_x1e3": 2.025379},
+    {"key": "no_icp", "label": "no ICP, physical", "fpnd": 1.0540927, "fpd_x1e4": 4.858730, "w1m_x1e3": 3.931887},
+    {"key": "latent", "label": "no ICP, latent", "fpnd": 1.0459087, "fpd_x1e4": 4.836940, "w1m_x1e3": 3.918190}
+  ],
+  "architecture_gj": [
+    {"run": "G", "geometry": "evolving", "reference": "raw", "fpnd": 0.3935, "w1m_x1e3": 1.884},
+    {"run": "H", "geometry": "evolving", "reference": "normalized", "fpnd": 0.3745, "w1m_x1e3": 1.808},
+    {"run": "I", "geometry": "fixed", "reference": "raw", "fpnd": 0.4264, "w1m_x1e3": 1.981},
+    {"run": "J", "geometry": "fixed", "reference": "normalized", "fpnd": 0.4563, "w1m_x1e3": 2.191}
+  ],
+  "geometry_ablation": [
+    {"arm": "A", "geometry": "Euclidean", "references": "none", "w1m": 0.249857, "invalid_pct": 4.492, "spacelike_pct": 25.45},
+    {"arm": "B", "geometry": "mass shell", "references": "none", "w1m": 0.025672, "invalid_pct": 0.0, "spacelike_pct": 0.0},
+    {"arm": "C", "geometry": "Euclidean", "references": "plain", "w1m": 0.105699, "invalid_pct": 0.006, "spacelike_pct": 33.87},
+    {"arm": "D", "geometry": "mass shell", "references": "plain", "w1m": 0.008915, "invalid_pct": 0.004, "spacelike_pct": 0.0}
+  ],
+  "readout_initialization": [
+    {"step": 0, "small_normal": 64, "zero": 0},
+    {"step": 100, "small_normal": 64, "zero": 0},
+    {"step": 500, "small_normal": 60, "zero": 63},
+    {"step": 1000, "small_normal": 0, "zero": 18},
+    {"step": 2000, "small_normal": 0, "zero": 0}
+  ]
+}

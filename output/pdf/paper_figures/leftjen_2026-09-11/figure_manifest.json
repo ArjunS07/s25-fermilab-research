@@ -1,0 +1,49 @@
+{
+  "generated_from_completed_outputs_only": true,
+  "output_directory": "/mnt/data/paper_figures/leftjen_2026-09-11",
+  "runs": {
+    "gqt_train": {
+      "path": "/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k/train",
+      "summary": "/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k/train/summary.json"
+    },
+    "gqt_w000": {
+      "path": "/mnt/data/output/2026-08-26_05-10-21--ef9da51c-6ce0-4bb2-9d68-d88e8f0af41a-paper30-gqt994k-cfg-w000-repaired/eval",
+      "summary": "/mnt/data/output/2026-08-26_05-10-21--ef9da51c-6ce0-4bb2-9d68-d88e8f0af41a-paper30-gqt994k-cfg-w000-repaired/eval/summary.json"
+    },
+    "gqt_w025": {
+      "path": "/mnt/data/output/2026-08-25_22-18-31--a31c196a-5009-42a1-82e9-a9696e6146ee-paper30-gqt994k-cfg-w025-eval/eval",
+      "summary": "/mnt/data/output/2026-08-25_22-18-31--a31c196a-5009-42a1-82e9-a9696e6146ee-paper30-gqt994k-cfg-w025-eval/eval/summary.json"
+    },
+    "gqt_w050": {
+      "path": "/mnt/data/output/2026-08-25_20-59-00--3a48a5f7-5493-4335-be28-c301daee932c-paper30-gqt994k-cfg-w050-eval/eval",
+      "summary": "/mnt/data/output/2026-08-25_20-59-00--3a48a5f7-5493-4335-be28-c301daee932c-paper30-gqt994k-cfg-w050-eval/eval/summary.json"
+    },
+    "h_icp": {
+      "path": "/mnt/data/output/2026-08-18_20-22-22--2c831a59-7454-4778-905c-697235fd4aa2-g30-lnet-h-994k-r2/train",
+      "summary": "/mnt/data/output/2026-08-18_20-22-22--2c831a59-7454-4778-905c-697235fd4aa2-g30-lnet-h-994k-r2/train/summary.json"
+    },
+    "h_noicp": {
+      "path": "/mnt/data/output/2026-09-03_17-17-34--410ae05d-160e-49fc-b8a7-6b8711039446-g30-lnet-h-noicp-994k/train",
+      "summary": "/mnt/data/output/2026-09-03_17-17-34--410ae05d-160e-49fc-b8a7-6b8711039446-g30-lnet-h-noicp-994k/train/summary.json"
+    },
+    "h_noicp_latent": {
+      "path": "/mnt/data/output/2026-09-04_23-03-18--431bf3f5-8c53-4ed3-ab4f-3f4337f7a1b6-g30-lnet-h-noicp-latent-994k/train",
+      "summary": "/mnt/data/output/2026-09-04_23-03-18--431bf3f5-8c53-4ed3-ab4f-3f4337f7a1b6-g30-lnet-h-noicp-latent-994k/train/summary.json"
+    }
+  },
+  "figures": {
+    "selected_cfg_distributions": "Class-selected relative eta/phi/pT and relative-mass overlays; g:w=0, q:w=0.25, t:w=0.5. Exact sample paths and counts are stored in data/distribution_histograms.json.",
+    "training_curves_icp": "Matched gluon-30 loss curves for ICP and no-ICP variants.",
+    "icp_ablation": "Matched 994k gluon-30 endpoint metrics.",
+    "euler_step_scaling": "GQT-994k w=0 FPND at 32, 64, and 128 steps.",
+    "cfg_guidance_sweep": "GQT-994k 64-step classwise guidance sweep.",
+    "architecture_g_to_j": "Validated 200k gluon-30 G--J construction ablation.",
+    "geometry_ablation": "Historical A--D Euclidean versus mass-shell support comparison.",
+    "readout_initialization_stability": "Fixed-seed unstable-trajectory counts during the 2k initialization qualification."
+  },
+  "local_regeneration": {
+    "script": "src/analysis/generate_local_paper_plots.py",
+    "data_directory": "output/pdf/paper_figures/leftjen_2026-09-11/data",
+    "style": "Seaborn ticks, Computer Modern via LaTeX, title-free, grid-free, quiet two-spine axes"
+  }
+}
