@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build paper figures from completed, immutable LEFTJeN experiment outputs.
+"""Build paper figures from completed, immutable JetFUEL experiment outputs.
 
 This script intentionally does not sample models or recompute physics metrics.  It
 reads the validated summaries/curves already stored on the results PVC, copies the
@@ -19,7 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 PVC = Path("/mnt/data/output")
-OUT = Path("/mnt/data/paper_figures/leftjen_2026-09-11")
+OUT = Path("/mnt/data/paper_figures/jetfuel_2026-09-11")
 
 RUNS = {
     "gqt_train": PVC / "2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k/train",
@@ -257,7 +257,7 @@ def write_manifest() -> None:
     }
     (OUT / "figure_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (OUT / "README.txt").write_text(
-        "LEFTJeN paper-figure bundle\n\n"
+        "JetFUEL paper-figure bundle\n\n"
         "The root figures are derived comparisons. source_diagnostics/ contains the\n"
         "original evaluation plots for the three selected CFG settings. No model was\n"
         "sampled and no metric was recomputed by this CPU-only job. See\n"

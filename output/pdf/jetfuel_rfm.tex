@@ -1,0 +1,615 @@
+\documentclass[10pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm,mathtools}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\Mink}{\langle\cdot,\cdot\rangle_M}
+\newcommand{\HH}{\mathcal{H}}
+\newcommand{\Exp}{\operatorname{Exp}}
+\newcommand{\Log}{\operatorname{Log}}
+\newcommand{\Proj}{\Pi}
+\newcommand{\dist}{d_m}
+\newcommand{\R}{\mathbb{R}}
+
+\title{JetFUEL: Jet Flow Matching with Equivariance\
+Under the Lorentz Group}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We introduce JetFUEL (Jet Flow Matching with Equivariance Under the Lorentz Group),
+a Lorentz-equivariant message-passing vector field trained by
+Riemannian flow matching on a regulated mass shell. The network uses evolving
+auxiliary Lorentz vectors for message passing, while its output field is built
+intrinsically from mass-shell logarithmic maps and normalized tangent projections
+of two condition-derived reference vectors. This document specifies the geometry,
+network, conditional prior, coupling, objective, and sampling procedure.
+\end{abstract}
+
+\section{Geometry and notation}
+
+Four-vectors are ordered as $p=(p^0,p^1,p^2,p^3)=(E,p_x,p_y,p_z)\in\R^{1,3}$
+and use metric signature $(+,-,-,-)$,
+\begin{equation}
+ \langle p,q\rangle_M=p^0q^0-\sum_{a=1}^3p^aq^a,
+ \qquad \|p\|_M^2\equiv p^2=\langle p,p\rangle_M.
+\end{equation}
+For a fixed radius (regulator mass) $m>0$, the forward hyperboloid is
+\begin{equation}
+ \HH_m=\{p\in\R^{1,3}:p^2=m^2,\ p^0>0\}.
+\end{equation}
+This is the radius-$m$ version of the unit hyperboloid used by
+Lou et al.~\cite[Table~2]{lou2020neural}; their convention is obtained with
+$x=p/m$ and $\langle x,y\rangle_L=-\langle p,q\rangle_M/m^2$.
+
+The tangent space and induced Riemannian metric of this hyperboloid are
+the standard expressions~\cite[Table~2]{lou2020neural}:
+\begin{equation}
+ T_p\HH_m=\{u:\langle p,u\rangle_M=0\},\qquad
+ g_p(u,v)=-\langle u,v\rangle_M,\qquad
+ \|u\|_p=\sqrt{-\langle u,u\rangle_M}.
+\end{equation}
+The corresponding ambient-to-tangent projection is~\cite[Table~2]{lou2020neural}
+\begin{equation}
+ \Proj_p(v)=v-\frac{\langle p,v\rangle_M}{m^2}p.
+ \label{eq:projection}
+\end{equation}
+
+For $p,q\in\HH_m$, the hyperbolic distance is~\cite[Table~2]{lou2020neural}
+\begin{equation}
+ \gamma(p,q)=\frac{\langle p,q\rangle_M}{m^2},\qquad
+ \dist(p,q)=m\operatorname{arcosh}\!\bigl(\gamma(p,q)\bigr).
+\end{equation}
+The associated logarithmic and exponential maps are~\cite[Table~2]{lou2020neural}
+\begin{align}
+ \Log_p(q)&=
+ \frac{\operatorname{arcosh}(\gamma(p,q))}
+ {\sinh(\operatorname{arcosh}(\gamma(p,q)))}
+ \bigl(q-\gamma(p,q)p\bigr),
+ \label{eq:log-map}\\
+ \Exp_p(u)&=\cosh\!\left(\frac{\|u\|_p}{m}\right)p+
+ m\sinh\!\left(\frac{\|u\|_p}{m}\right)\frac{u}{\|u\|_p}.
+ \label{eq:exp-map}
+\end{align}
+Both expressions use their continuous values at $q=p$ and $u=0$.
+
+\begin{center}
+\fbox{\begin{minipage}{0.91\linewidth}
+\small\textbf{Geometric interpretation.}
+With $w_{p\to q}=q-\gamma(p,q)p$ and
+$\|w_{p\to q}\|_p=m\sinh(\operatorname{arcosh}\gamma(p,q))$, the same map is
+$\displaystyle \Log_p(q)=\dist(p,q)w_{p\to q}/\|w_{p\to q}\|_p$.
+Thus the log map is the unit tangent direction from $p$ toward $q$, scaled by
+the geodesic distance.
+\end{minipage}}
+\end{center}
+
+A jet with $N$ real constituents is modelled as a point on the standard product
+manifold.  Its product metric and componentwise maps are likewise standard
+\cite{chen2023flow}:
+\begin{equation}
+ \mathcal{M}_N=\HH_m^N,\qquad
+ G_X(U,V)=\sum_{i=1}^N g_{x_i}(u_i,v_i),
+ \label{eq:product-metric}
+\end{equation}
+where $X=(x_1,\ldots,x_N)$ and $U=(u_1,\ldots,u_N)\in T_X\mathcal{M}_N$.
+The product maps act componentwise:
+\begin{equation}
+ \Exp_X(U)=(\Exp_{x_1}(u_1),\ldots,\Exp_{x_N}(u_N)),\qquad
+ \Log_X(Y)=(\Log_{x_1}(y_1),\ldots,\Log_{x_N}(y_N)).
+ \label{eq:product-maps}
+\end{equation}
+The choice to use this product manifold for jet constituents, and the masking of
+padded slots in implementation, are model-specific conventions.
+
+\section{Conditional inputs}
+
+The vector field receives the current physical state $X\in\mathcal{M}_N$, flow
+time $t\in[0,1]$, and condition $c=[c_{\rm type},N,p_{T,J},m_J]$. It also receives
+the ordered references $r_0=e_t=(1,0,0,0)$ and $r_1=p_J$. The latter is constructed
+from the conditioned jet attributes,
+\begin{equation}
+ p_J=\frac{1}{s}
+ \begin{pmatrix}
+ m_{T,J}\cosh\eta_J\\
+ p_{T,J}\cos\phi_J\\
+ p_{T,J}\sin\phi_J\\
+ m_{T,J}\sinh\eta_J
+ \end{pmatrix},\qquad m_{T,J}=\sqrt{p_{T,J}^2+m_J^2},
+ \label{eq:jet-reference}
+\end{equation}
+where $s$ is the dataset momentum scale. These vectors are condition-derived;
+they are not formed by summing the target constituents.
+
+\section{JetFUEL vector field}
+
+The network maintains invariant scalar features $h_i^\ell\in\R^{d_h}$ and
+auxiliary Lorentz-vector features $y_i^\ell\in\R^{1,3}$, with $d_h=96$ and
+$L=6$ layers. The physical state $x_i$ remains fixed during a network evaluation.
+Only $y_i^\ell$ evolves through message passing. The graph is complete over real
+constituents, with $\mathcal{N}(i)=\{j:j\neq i\}$.
+
+\begin{algorithm}[H]
+\caption{JetFUEL vector field $V_\theta(X,t,c;r_0,r_1)$}
+\label{alg:network}
+\small
+\begin{algorithmic}[1]
+\Require $X=(x_1,\ldots,x_N)$, $t$, $c$, $(r_0,r_1)$
+\Ensure $V_\theta(X,t,c;r_0,r_1)\in T_X\mathcal{M}_N$
+\State $y_i^0\gets x_i$ and $\tau(t)\gets[t,\sin(\pi t),\cos(\pi t)]$ for all $i$
+\State $h_i^0\gets\phi_{\rm seed}([\psi(\langle y_i^0,r_0\rangle_M),\psi(\langle y_i^0,r_1\rangle_M)])+\phi_c(c)-\phi_t(\tau(t))$
+\For{$\ell=0,\ldots,L-1$}
+  \State $\bar h_i^\ell\gets\operatorname{LayerNorm}(h_i^\ell)$
+  \For{each $j\in\mathcal{N}(i)$}
+    \State $\xi_{ij}^\ell\gets[\psi(\|y_i^\ell-y_j^\ell\|_M^2),\psi(\langle y_i^\ell,y_j^\ell\rangle_M)]$
+    \State $M_{ij}^\ell\gets\phi_e^\ell(\bar h_i^\ell,\bar h_j^\ell,\xi_{ij}^\ell)$; \quad $\alpha_{ij}^\ell\gets\phi_x^\ell(M_{ij}^\ell)$
+  \EndFor
+  \State $h_i^{\ell+1}\gets h_i^\ell+\phi_h^\ell\!\left(\bar h_i^\ell,|\mathcal{N}(i)|^{-1/2}\sum_{j\in\mathcal{N}(i)}M_{ij}^\ell\right)$
+  \State $y_i^{\ell+1}\gets y_i^\ell+\varepsilon_y|\mathcal{N}(i)|^{-1/2}\sum_{j\in\mathcal{N}(i)}\alpha_{ij}^\ell(y_i^\ell-y_j^\ell)$
+\EndFor
+\For{each $j\in\mathcal{N}(i)$}
+  \State $\xi_{ij}^L\gets[\psi(\|y_i^L-y_j^L\|_M^2),\psi(\langle y_i^L,y_j^L\rangle_M)]$
+  \State $a_{ij}\gets\phi_f(h_i^L,h_j^L,\xi_{ij}^L)$; \quad $q_{ij}\gets\Log_{x_i}(x_j)/(m+\dist(x_i,x_j))$
+\EndFor
+\State $v_i^{\rm part}\gets|\mathcal{N}(i)|^{-1/2}\sum_{j\in\mathcal{N}(i)}a_{ij}q_{ij}$
+\State $(b_{i0},b_{i1})\gets\phi_r(h_i^L,[\psi(\langle y_i^L,r_0\rangle_M),\psi(\langle y_i^L,r_1\rangle_M)])$
+\State $q_{ir}^{\rm ref}\gets\Proj_{x_i}(r_r)/(m+\|\Proj_{x_i}(r_r)\|_{x_i})$, for $r\in\{0,1\}$
+\State $v_i^{\rm ref}\gets b_{i0}q_{i0}^{\rm ref}+b_{i1}q_{i1}^{\rm ref}$
+\State $v_{\theta,i}\gets v_i^{\rm part}+v_i^{\rm ref}\in T_{x_i}\HH_m$
+\State \Return $V_\theta=(v_{\theta,1},\ldots,v_{\theta,N})$
+\end{algorithmic}
+\end{algorithm}
+
+The signed logarithmic preprocessing in Algorithm~\ref{alg:network} is
+\begin{equation}
+ \psi(z)=\operatorname{sgn}(z)\log(1+|z|).
+ \label{eq:signed-log}
+\end{equation}
+All learned maps $\phi_\bullet$ act on scalar invariant inputs. With
+$\sigma=\operatorname{SiLU}$, their widths are
+\begin{align}
+ \phi_c &: d_c\to d_h\to d_h,& \phi_t &: 3\to d_h\to d_h,&
+ \phi_{\rm seed}&:2\to d_h\to d_h,\\
+ \phi_e^\ell &: (2d_h+2)\to d_h\to d_h,&
+ \phi_h^\ell &:2d_h\to2d_h\to d_h,\\
+ \phi_x^\ell &:d_h\to d_h\to1,&
+ \phi_f &: (2d_h+2)\to d_h\to1,&
+ \phi_r &: (d_h+2)\to d_h\to2.
+ \label{eq:mlp-widths}
+\end{align}
+Every hidden linear layer is followed by $\sigma$; $\phi_e^\ell$ also applies
+$\sigma$ after its second linear layer. The final layers of $\phi_x^\ell$, $\phi_f$,
+and $\phi_r$ have weights initialized from $\mathcal{N}(0,10^{-6})$ and zero bias.
+The auxiliary-vector residual scale is $\varepsilon_y=10^{-2}$.
+
+There is no message gate, softmax, absolute-value operation, or positivity constraint.
+Thus the graph aggregation and the final particle readout are signed sums. The
+particle term is intrinsically tangent because $q_{ij}\in T_{x_i}\HH_m$, and the
+reference term is tangent by Eq.~\eqref{eq:projection}. Therefore their sum is
+the model output directly in $T_{x_i}\HH_m$.
+
+For $\Lambda\in SO^+(1,3)$, the network is jointly Lorentz equivariant,
+\begin{equation}
+ V_\theta(\Lambda^{\times N}X,t,c;\Lambda r_0,\Lambda r_1)
+ =\Lambda^{\times N}V_\theta(X,t,c;r_0,r_1).
+ \label{eq:equivariance}
+\end{equation}
+The statement follows because MLP inputs are Lorentz scalars, learned vector
+coefficients are scalars, and tangent maps commute with Lorentz transformations.
+Holding the references fixed in the laboratory frame supplies conditional symmetry
+breaking through the beam/time and jet directions.
+
+\section{Mass-shell Riemannian flow matching}
+
+\subsection{Source and data distributions}
+
+Observed massless constituent momenta $\bar x_i=(\|\bm p_i\|_2,\bm p_i)$ are
+lifted to the shell by preserving spatial momentum,
+\begin{equation}
+ \iota_m(\bar x_i)=\left(\sqrt{\|\bm p_i\|_2^2+m^2},\bm p_i\right).
+ \label{eq:shell-lift}
+\end{equation}
+Let $X_1\sim q_1(\cdot\mid c)$ denote a lifted target jet. The conditional source
+distribution $q_0(\cdot\mid c)$ is an axis-aligned lognormal prior. It samples
+\begin{align}
+ \Delta\eta_i,\Delta\phi_i&\stackrel{\rm iid}{\sim}\mathcal{N}(0,0.15^2),&
+ z_i&\stackrel{\rm iid}{\sim}\mathcal{N}(0,1),\\
+ w_i&=\frac{e^{z_i}}{\sum_j e^{z_j}},&
+ \eta_i&=\eta_J+\Delta\eta_i,\qquad\phi_i=\phi_J+\Delta\phi_i.
+\end{align}
+Writing
+\begin{equation}
+ R=\left\|\sum_iw_i(\cos\phi_i,\sin\phi_i)\right\|_2,
+ \qquad p_{T,i}=w_i\frac{p_{T,J}}{R},
+ \label{eq:prior-pt}
+\end{equation}
+the unlifted source four-vector is
+\begin{equation}
+ \bar x_{0,i}=\frac{1}{s}
+ (p_{T,i}\cosh\eta_i,\ p_{T,i}\cos\phi_i,\ p_{T,i}\sin\phi_i,\ p_{T,i}\sinh\eta_i),
+\end{equation}
+followed by the lift in Eq.~\eqref{eq:shell-lift}.
+
+\subsection{Online geodesic coupling}
+
+Particle indices do not identify physical objects. For every fresh source draw,
+prior constituents are paired with target constituents through the per-jet
+Hungarian assignment
+\begin{equation}
+ \pi^\star=\arg\min_{\pi\in S_N}\sum_{i=1}^N\dist(x_{0,\pi(i)},x_{1,i})^2.
+ \label{eq:icp}
+\end{equation}
+The source is permuted according to $\pi^\star$ before the RFM path is formed.
+This coupling is recomputed online for each training batch and does not reuse a
+fixed noise-to-data pairing.
+
+\subsection{Conditional geodesic path and objective}
+
+For a coupled pair $(X_0,X_1)$ and $t\sim\mathcal{U}[0,1]$, RFM uses the
+product-manifold geodesic
+\begin{equation}
+ X_t=\Exp_{X_1}\!\left((1-t)\Log_{X_1}(X_0)\right)
+ =\Exp_{X_0}\!\left(t\Log_{X_0}(X_1)\right).
+ \label{eq:rfm-path}
+\end{equation}
+Its conditional velocity, tangent at $X_t$, is
+\begin{equation}
+U_t(X_t\mid X_1)=\frac{\Log_{X_t}(X_1)}{1-t}\in T_{X_t}\mathcal{M}_N.
+\label{eq:target-field}
+\end{equation}
+Equation~\eqref{eq:target-field} is the geodesic specialization of the
+distance-gradient target in Chen and Lipman~\cite[Eqs.~(13)--(15)]{chen2023flow},
+not a separate choice of target field.  Let $d_{\mathcal{M}}$ denote the geodesic
+distance of the product metric.  Along the conditional geodesic,
+\begin{equation}
+ d_{\mathcal{M}}(X_t,X_1)=(1-t)d_{\mathcal{M}}(X_0,X_1),\qquad
+ \|\nabla_{X_t}d_{\mathcal{M}}(X_t,X_1)\|_{X_t}=1,
+ \label{eq:geodesic-distance-identities}
+\end{equation}
+and the standard distance-gradient identity is
+\begin{equation}
+ \Log_{X_t}(X_1)=-d_{\mathcal{M}}(X_t,X_1)
+ \nabla_{X_t}d_{\mathcal{M}}(X_t,X_1).
+ \label{eq:log-distance-gradient}
+\end{equation}
+For $\kappa(t)=1-t$, the Chen--Lipman target therefore reduces as
+\begin{align}
+ U_t(X_t\mid X_1)
+ &=-d_{\mathcal{M}}(X_0,X_1)\nabla_{X_t}d_{\mathcal{M}}(X_t,X_1) \notag\\
+ &=\frac{\Log_{X_t}(X_1)}{1-t}.
+ \label{eq:target-field-derivation}
+\end{align}
+The numerator vanishes linearly as $t\to1$; implementation terminates just before
+$t=1$ and uses a protected denominator.
+
+The model is trained by the product-manifold squared error
+\begin{equation}
+ \mathcal{L}_{\rm RFM}(\theta)=
+ \mathbb{E}\left[
+ \left\|V_\theta(X_t,t,c;r_0,r_1)-U_t(X_t\mid X_1)\right\|_{X_t}^2
+ \right],
+ \label{eq:rfm-loss}
+\end{equation}
+where the norm is defined by Eq.~\eqref{eq:product-metric} and is averaged over
+real particles in implementation. Under squared-error regression, the population
+optimum is the marginal velocity
+\begin{equation}
+ V^\star(x,t,c)=\mathbb{E}[U_t(X_t\mid X_1)\mid X_t=x,c].
+ \label{eq:marginal-field}
+\end{equation}
+This field has the same time marginals as the mixture of conditional geodesic paths,
+so integrating it transports $q_0(\cdot\mid c)$ toward $q_1(\cdot\mid c)$.
+
+\subsection{Sampling}
+
+Generation starts from $X(0)\sim q_0(\cdot\mid c)$ and integrates
+\begin{equation}
+ \dot X(t)=V_\theta(X(t),t,c;r_0,r_1).
+ \label{eq:ode}
+\end{equation}
+Using geodesic Euler integration, one step is
+\begin{equation}
+ X_{k+1}=\Exp_{X_k}\!\left(\Delta t\,V_\theta(X_k,t_k,c;r_0,r_1)\right).
+ \label{eq:euler}
+\end{equation}
+The product exponential is applied constituentwise. Hence all generated particles
+remain on the positive-energy mass shell throughout sampling. The reported Arm H
+configuration uses $m=0.1$, 64 Euler steps, and an endpoint time of $0.99999$.
+
+\section{Ablation results}
+\label{sec:ablations}
+
+Unless stated otherwise, the endpoint metrics below use EMA weights, 50,000
+generated jets, and 64 geodesic Euler steps. FPND is computed after the validated
+JetNet coordinate conversion; historical FPND values produced before that repair are
+excluded. W1M, W1P, and FPD are reported in the native normalized JetNet convention.
+These are single-run estimates, so small differences should not be interpreted as
+seed-level significance.
+
+\subsection{Geometry and readout construction}
+
+The earliest controlled comparison replaced ambient Euclidean interpolation with the
+regulated mass-shell path while holding the presence or absence of reference readout
+fixed. Table~\ref{tab:geometry-ablation} reports only quantities that remain valid for
+those historical runs. The mass-shell formulation reduced W1M by approximately an
+order of magnitude and removed the large spacelike component population. Physical
+support is therefore enforced by construction rather than learned as an approximate
+constraint.
+
+\begin{table}[H]
+\centering
+\caption{Early geometry ablation on gluon-30 at 200k updates. FPND is omitted because
+these runs predate the corrected ParticleNet input convention. Percentages refer to
+generated jets or generated constituents as appropriate.}
+\label{tab:geometry-ablation}
+\small
+\begin{tabular}{clrrrr}
+\toprule
+Arm & Geometry and readout & W1M $\downarrow$ & Invalid (\%) & Spacelike (\%) & $E<0$ (\%) \\
+\midrule
+A & Euclidean, no references       & 0.249857 & 4.492 & 25.45 & 2.290 \\
+B & Mass shell, no references      & 0.025672 & 0.000 &  0.00 & 0.000 \\
+C & Euclidean, plain references    & 0.105699 & 0.006 & 33.87 & 0.298 \\
+D & Mass shell, plain references   & 0.008915 & 0.004 &  0.00 & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The later G--J campaign isolates normalized tangent references versus raw reference
+projections and evolving auxiliary geometry versus fixed physical geometry.
+Table~\ref{tab:gj-ablation} shows a consistent advantage for evolving $y^\ell$ over
+fixed geometry (G versus I and H versus J). Reference normalization is mildly favorable
+in the evolving model but not decisive at this sample size. Reinjecting condition and
+time embeddings in every block does not help.
+
+\begin{table}[H]
+\centering
+\caption{Controlled gluon-30 construction ablations. ``Evol.'' denotes evolving
+auxiliary Lorentz vectors and ``fixed'' denotes message geometry frozen to $x$.
+The 500k rows test training duration rather than a new architecture.}
+\label{tab:gj-ablation}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llrrrrrr}
+\toprule
+Run & Construction & FPND$_g$ $\downarrow$ & FPD $\times10^4$ $\downarrow$ & W1M $\times10^3$ $\downarrow$ & mean W1P $\times10^3$ $\downarrow$ & Cov. $\uparrow$ & MMD $\times10^2$ $\downarrow$ \\
+\midrule
+G, 200k & raw references, evol.        & 0.3935 & 1.593 & 1.884 & 1.371 & 0.563 & 2.647 \\
+H, 200k & normalized references, evol. & \textbf{0.3745} & \textbf{1.469} & \textbf{1.808} & \textbf{1.264} & \textbf{0.565} & 2.684 \\
+I, 200k & raw references, fixed        & 0.4264 & 1.685 & 1.981 & 1.405 & 0.545 & 2.793 \\
+J, 200k & normalized references, fixed & 0.4563 & 1.747 & 2.191 & 1.465 & 0.539 & 2.815 \\
+H, 200k & per-block condition/time     & 0.3868 & 1.524 & 2.164 & 1.299 & 0.544 & 2.740 \\
+G, 500k & raw references, evol.        & 0.3754 & \textbf{1.389} & \textbf{1.868} & 1.384 & \textbf{0.555} & \textbf{2.676} \\
+H, 500k & normalized references, evol. & \textbf{0.3678} & 1.397 & 2.030 & \textbf{1.334} & 0.551 & 2.844 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Coupling and the auxiliary workspace}
+
+Table~\ref{tab:icp-ablation} is the matched 994k-update gluon-30 training comparison.
+Removing online geodesic ICP increases FPND$_g$ from $0.391$ to $1.054$ and worsens
+FPD, W1M, and W1P while retaining exact physical support. ICP therefore improves the
+learned distribution rather than merely preventing invalid trajectories. Replacing the
+physical log-map directions by raw latent displacements $y_j^L-y_i^L$ leaves the
+already-degraded no-ICP result nearly unchanged. Because the completed latent run also
+removes ICP, it does \emph{not} isolate the readout choice under the canonical coupling;
+the corresponding ICP-enabled retraining remains necessary before simplifying the final
+physical readout.
+
+\begin{table}[H]
+\centering
+\caption{Matched 994k-update gluon-30 coupling/readout runs. ``Physical'' uses
+coefficients from $(h^L,y^L)$ but directions from $\Log_{x_i}(x_j)$; ``latent'' uses
+$y_j^L-y_i^L$ for the directions.}
+\label{tab:icp-ablation}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llrrrrrr}
+\toprule
+Coupling & Directions & FPND$_g$ $\downarrow$ & FPD $\times10^4$ $\downarrow$ & W1M $\times10^3$ $\downarrow$ & mean W1P $\times10^3$ $\downarrow$ & Cov. $\uparrow$ & MMD $\times10^2$ $\downarrow$ \\
+\midrule
+online ICP & physical & \textbf{0.3910} & \textbf{1.448} & \textbf{2.025} & \textbf{1.529} & \textbf{0.556} & 2.690 \\
+none       & physical & 1.0541 & 4.859 & 3.932 & 2.763 & 0.536 & \textbf{2.630} \\
+none       & latent   & 1.0459 & 4.837 & 3.918 & 2.825 & 0.553 & 2.758 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Rejected auxiliary mechanisms and capacity reduction}
+
+The matched 100k-update Gram-auxiliary experiment in
+Table~\ref{tab:gram-ablation} improves a few one-dimensional quantities but damages the
+joint 36-EFP FPD by a factor of $4.3$ and worsens W1P. It was therefore rejected. The
+2k token smoke tests in Table~\ref{tab:token-ablation} likewise show no loss advantage;
+the scalar-vector token violates the endpoint-invalidity gate. Neither mechanism is
+present in the final model.
+
+\begin{table}[H]
+\centering
+\caption{Matched gluon-30 auxiliary-objective ablation at 100k updates. Historical
+FPND is omitted because these runs predate the corrected input convention.}
+\label{tab:gram-ablation}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrrr}
+\toprule
+Objective & W1M $\times10^3$ & mean W1P $\times10^3$ & mean W1EFP $\times10^5$ & FPD $\times10^4$ & Cov. & MMD $\times10^2$ \\
+\midrule
+control & 1.805 & \textbf{0.959} & 1.487 & \textbf{6.15} & 0.54 & 2.681 \\
+Gram-50 & \textbf{1.724} & 1.137 & \textbf{1.323} & 26.40 & \textbf{0.56} & \textbf{2.619} \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Jet-token qualification smoke test at 2k optimizer updates.}
+\label{tab:token-ablation}
+\small
+\begin{tabular}{lrrl}
+\toprule
+Token & Final median loss $\downarrow$ & Invalid endpoints & Qualification \\
+\midrule
+none          & \textbf{0.004798} & 0/2000 & pass \\
+scalar        & 0.005057 & 1/2000 & pass with warning \\
+scalar+vector & ---      & 3/2000 & fail \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The subsequent backbone simplification reduced parameter count by more than an order of
+magnitude without a corresponding collapse in corrected FPND. Table~\ref{tab:capacity}
+is a capacity frontier rather than a perfectly matched width ablation: variants a--c use
+width 96, d uses width 128, and the historical attention model uses width 256. The
+readout-only, no-pooling variant is the smallest and best of the message-passing variants
+on FPND; global pooling is not justified by these results.
+
+\begin{table}[H]
+\centering
+\caption{Gluon-30 capacity and message-passing simplification at 600k updates. The
+attention-model FPND was recomputed after the coordinate repair; its other historical
+metrics are omitted here.}
+\label{tab:capacity}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrrrr}
+\toprule
+Backbone & Parameters & FPND$_g$ $\downarrow$ & FPD $\times10^4$ $\downarrow$ & W1M $\times10^3$ $\downarrow$ & Cov. $\uparrow$ & MMD $\times10^2$ $\downarrow$ \\
+\midrule
+tangent attention, width 256       & 7.39M & \textbf{0.507} & --- & --- & --- & --- \\
+readout-only, no pool, width 96    & 0.513M & 0.5295 & 3.484 & 2.431 & 0.550 & \textbf{2.591} \\
+tangent channels, no pool, width 96& 0.560M & 0.5504 & 2.995 & \textbf{2.310} & 0.536 & 2.744 \\
+readout-only, global pool, width 96 & 0.848M & 0.5460 & 2.760 & 2.602 & \textbf{0.552} & 2.704 \\
+tangent channels, global pool, width 128 & 0.910M & 0.553 & \textbf{2.462} & 2.635 & 0.548 & 2.704 \\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Training stability and readout initialization}
+
+Zero-initializing the terminal velocity heads makes the initial sampler the identity map.
+The 2k-update qualification in Table~\ref{tab:init-ablation} shows that initialization
+strongly changes the route to a stable solution, but the terminal losses and endpoint
+validity are tied. Zero initialization was retained as the safer default; this is not a
+claim of better converged sample quality. The experiment also demonstrates why loss
+alone is insufficient for checkpoint selection: either arm can have an ordinary loss
+while fixed-seed sampler probes remain unstable.
+
+\begin{table}[H]
+\centering
+\caption{Velocity-readout initialization qualification. Probe entries report unstable
+trajectories out of 64.}
+\label{tab:init-ablation}
+\small
+\begin{tabular}{lrr}
+\toprule
+Quantity & small-normal & zero \\
+\midrule
+unstable at step 0      & 64/64 & \textbf{0/64} \\
+unstable at step 100    & 64/64 & \textbf{0/64} \\
+unstable at step 500    & \textbf{60/64} & 63/64 \\
+unstable at step 1000   & \textbf{0/64} & 18/64 \\
+unstable at step 2000   & 0/64 & 0/64 \\
+first-200 median loss   & 7.664803 & \textbf{0.015781} \\
+final-200 median loss   & 0.004732 & \textbf{0.004675} \\
+final failures (of 128) & 0 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Inference-time simplifications and scaling}
+
+The GQT-994k checkpoint gives a clean integration-resolution curve without retraining.
+As shown in Table~\ref{tab:euler-ablation}, doubling from 32 to 64 and from 64 to 128
+steps improves FPND in every class while approximately doubling generation time. The
+continued gain at 128 steps indicates discretization error at the canonical 64-step
+setting rather than a saturated sampler.
+
+\begin{table}[H]
+\centering
+\caption{Geodesic Euler scaling for the GQT-994k checkpoint at fixed $w=0$. Generation
+time is for 150,000 class-stratified samples on the same A40 inference setup.}
+\label{tab:euler-ablation}
+\small
+\begin{tabular}{rrrrr}
+\toprule
+Steps & FPND$_g$ $\downarrow$ & FPND$_q$ $\downarrow$ & FPND$_t$ $\downarrow$ & Generation time (s) \\
+\midrule
+32  & 0.4059 & 0.6132 & 0.9646 &  992.1 \\
+64  & 0.1420 & 0.2679 & 0.5244 & 1853.8 \\
+128 & \textbf{0.0797} & \textbf{0.1546} & \textbf{0.3693} & 3713.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The class-conditional guidance sweep in Table~\ref{tab:cfg-sweep} is sharply
+class-dependent. Guidance is unnecessary for gluons, while light-quark and top jets
+prefer $w=0.25$ and $w=0.5$, respectively. Larger weights rapidly degrade all classes.
+
+\begin{table}[H]
+\centering
+\caption{Classwise FPND for the GQT-994k classifier-free-guidance sweep at 64 Euler
+steps. Bold entries are the selected per-class deployment settings.}
+\label{tab:cfg-sweep}
+\small
+\begin{tabular}{rrrr}
+\toprule
+$w$ & FPND$_g$ $\downarrow$ & FPND$_q$ $\downarrow$ & FPND$_t$ $\downarrow$ \\
+\midrule
+0.00 & \textbf{0.1420} & 0.2679 & 0.5244 \\
+0.25 & 0.3182 & \textbf{0.2137} & 0.2801 \\
+0.50 & 0.5255 & 0.3138 & \textbf{0.2019} \\
+0.75 & 0.7063 & 0.5796 & 0.2582 \\
+1.00 & 0.9160 & 1.6340 & 0.4261 \\
+2.00 & 4.5388 & 5.7217 & 2.1008 \\
+3.00 & 25.0270 & 15.1774 & 8.4812 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Finally, Table~\ref{tab:projection-ablation} tests the redundant terminal tangent
+projection that previously followed the sum of already-tangent particle and reference
+terms. Turning it off leaves FPND unchanged to approximately six significant figures,
+and the 36-EFP FPD is numerically identical. The projection was therefore deleted from
+both implementation and algorithm.
+
+\begin{table}[H]
+\centering
+\caption{Final-projection ablation on the GQT-994k checkpoint at the selected per-class
+guidance weights. ``On'' applies $\Pi_{x_i}$ to the final sum; ``off'' returns that
+already-tangent sum directly.}
+\label{tab:projection-ablation}
+\small
+\begin{tabular}{lrrrr}
+\toprule
+Class ($w$) & FPND on & FPND off & FPD on $\times10^4$ & FPD off $\times10^4$ \\
+\midrule
+g ($0$)    & 0.14199731 & 0.14199728 & 8.7697 & 8.7697 \\
+q ($0.25$) & 0.21368916 & 0.21369031 & 33.2823 & 33.2823 \\
+t ($0.5$)  & 0.20192473 & 0.20192409 & 24.2870 & 24.2870 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{thebibliography}{9}
+\bibitem{lou2020neural}
+Aaron Lou, Derek Lim, Isay Katsman, Leo Huang, Qingxuan Jiang, Ser-Nam Lim, and
+Christopher M. De Sa.
+\newblock Neural Manifold Ordinary Differential Equations.
+\newblock In \emph{Advances in Neural Information Processing Systems}, 2020.
+\newblock Appendix B.4, Table 2.
+
+\bibitem{chen2023flow}
+Ricky T. Q. Chen and Yaron Lipman.
+\newblock Flow Matching on General Geometries.
+\newblock \emph{arXiv preprint arXiv:2302.03660}, 2023.
+\end{thebibliography}
+
+\end{document}

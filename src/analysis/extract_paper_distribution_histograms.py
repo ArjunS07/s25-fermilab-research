@@ -12,7 +12,7 @@ import torch
 
 
 ROOT = Path("/mnt/data/output")
-OUT = Path("/mnt/data/paper_figures/leftjen_2026-09-11/data/distribution_histograms.json")
+OUT = Path("/mnt/data/paper_figures/jetfuel_2026-09-11/data/distribution_histograms.json")
 TEST_DATA = ROOT / "2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k/data/x_test.pkl"
 SELECTED = {
     "g": (0, 0.0, ROOT / "2026-08-25_02-02-13--46b37f78-4a56-4b6d-bd1c-651dfaac0c27-paper30-gqt994k-cfg-w000-eval/eval"),

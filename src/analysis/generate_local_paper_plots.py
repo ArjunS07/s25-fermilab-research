@@ -215,7 +215,7 @@ def plot_distributions(data_dir: Path, out_dir: Path) -> None:
             quiet_axes(ax)
     handles = [
         Line2D([0], [0], color="#222222", lw=1.35, label="JetNet"),
-        Line2D([0], [0], color="#555555", lw=1.45, ls="--", label="LEFTJeN"),
+        Line2D([0], [0], color="#555555", lw=1.45, ls="--", label="JetFUEL"),
     ]
     fig.legend(handles=handles, loc="upper center", ncol=2, bbox_to_anchor=(0.5, 1.015))
     save(fig, out_dir, "selected_cfg_distributions")

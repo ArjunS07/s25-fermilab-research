@@ -1,0 +1,12 @@
+method,paper,arxiv_url,jet_setting,jet_type,conditioning,training,fpnd_g,fpd,w1m,mean_w1p,coverage,mmd,physicality,comparable,note
+JetNet MC floor,PC-JeDi,https://arxiv.org/abs/2303.05376,gluon-30,g,truth reference,not a trained generator,0.01,,0.00044,0.00041,0.55,0.0367,,true,Statistical reference floor reported in PC-JeDi.
+MPGAN,MPGAN,https://arxiv.org/abs/2106.11535,gluon-30,g,jet attributes from test set,2000 epochs; batch 256,0.12,,0.00070,0.00090,0.56,0.0370,,true,PC-JeDi re-evaluation values; FPD is not reported.
+PC-JeDi DDIM,PC-JeDi,https://arxiv.org/abs/2303.05376,gluon-30,g,jet attributes from test set,3000 epochs maximum; batch 256,0.12,,0.00090,0.00066,0.54,0.0364,,true,Published checkpoint epoch is not specified; FPD is not reported.
+PC-JeDi EM,PC-JeDi,https://arxiv.org/abs/2303.05376,gluon-30,g,jet attributes from test set,3000 epochs maximum; batch 256,0.10,,0.00057,0.00058,0.54,0.0362,,true,Published checkpoint epoch is not specified; FPD is not reported.
+EPiC-FM,EPiC-FM,https://arxiv.org/abs/2310.00049,top-30 and top-150 only,g,not gluon-30,10000 epochs; batch 1024,,,,,,,,false,Not a gluon-30 evaluation; included only to document scope.
+EPiC-JeDi,EPiC-JeDi,https://arxiv.org/abs/2310.00049,top-30 and top-150 only,g,not gluon-30,10000 epochs; batch 1024,,,,,,,,false,Not a gluon-30 evaluation; included only to document scope.
+MPGAN,MPGAN,https://arxiv.org/abs/2106.11535,light-quark-30,q,jet attributes from test set,2000 epochs; batch 256,0.35,,0.00060,0.00490,0.50,0.0260,,true,Original MPGAN Table 2 MP/MP result; PC-JeDi does not report light-quark jets.
+JetNet MC floor,PC-JeDi,https://arxiv.org/abs/2303.05376,top-30,t,truth reference,not a trained generator,0.01,,0.00032,0.00040,0.59,0.0713,,true,Statistical reference floor reported in PC-JeDi.
+MPGAN,PC-JeDi,https://arxiv.org/abs/2303.05376,top-30,t,jet attributes from test set,2000 epochs; batch 256,0.36,,0.00064,0.00217,0.58,0.0711,,true,PC-JeDi re-evaluation values; FPD is not reported.
+PC-JeDi DDIM,PC-JeDi,https://arxiv.org/abs/2303.05376,top-30,t,jet attributes from test set,3000 epochs maximum; batch 256,0.28,,0.00148,0.00101,0.59,0.0713,,true,Published checkpoint epoch is not specified; FPD is not reported.
+PC-JeDi EM,PC-JeDi,https://arxiv.org/abs/2303.05376,top-30,t,jet attributes from test set,3000 epochs maximum; batch 256,0.15,,0.00136,0.00121,0.59,0.0711,,true,Published checkpoint epoch is not specified; FPD is not reported.
