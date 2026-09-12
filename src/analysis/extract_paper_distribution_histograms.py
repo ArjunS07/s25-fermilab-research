@@ -9,7 +9,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from jetnet.utils import EtaPhiPtE_to_relEtaPhiPt, cartesian_to_EtaPhiPtE
 
 
 ROOT = Path("/mnt/data/output")
@@ -20,6 +19,29 @@ SELECTED = {
     "q": (1, 0.25, ROOT / "2026-08-25_22-18-31--a31c196a-5009-42a1-82e9-a9696e6146ee-paper30-gqt994k-cfg-w025-eval/eval"),
     "t": (2, 0.5, ROOT / "2026-08-25_20-59-00--3a48a5f7-5493-4335-be28-c301daee932c-paper30-gqt994k-cfg-w050-eval/eval"),
 }
+
+
+def cartesian_to_relative(p4: torch.Tensor) -> torch.Tensor:
+    """Convert (E, px, py, pz) particles to JetNet relative eta/phi/pT."""
+    energy, px, py, pz = p4.unbind(dim=-1)
+    pt = torch.sqrt(px.square() + py.square())
+    particle_eta = torch.asinh(pz / pt.clamp_min(1e-12))
+    particle_phi = torch.atan2(py, px)
+
+    total = p4.sum(dim=1)
+    jet_px, jet_py, jet_pz = total[:, 1], total[:, 2], total[:, 3]
+    jet_pt = torch.sqrt(jet_px.square() + jet_py.square()).clamp_min(1e-12)
+    jet_eta = torch.asinh(jet_pz / jet_pt)
+    jet_phi = torch.atan2(jet_py, jet_px)
+
+    eta_rel = particle_eta - jet_eta[:, None]
+    phi_rel = torch.atan2(
+        torch.sin(particle_phi - jet_phi[:, None]),
+        torch.cos(particle_phi - jet_phi[:, None]),
+    )
+    pt_rel = pt / jet_pt[:, None]
+    relative = torch.stack((eta_rel, phi_rel, pt_rel), dim=-1)
+    return relative * (p4.abs().sum(dim=-1) > 0).unsqueeze(-1)
 
 
 def relative_mass_from_rel(rel: torch.Tensor) -> np.ndarray:
@@ -80,9 +102,7 @@ def main() -> None:
         finite = torch.isfinite(samples).all(dim=-1).all(dim=-1)
         selected = finite & (generated_types == class_index)
         generated = samples[selected]
-        generated_abs = cartesian_to_EtaPhiPtE(generated)
-        generated_rel = EtaPhiPtE_to_relEtaPhiPt(generated_abs)
-        generated_rel *= (generated.abs().sum(dim=-1) > 0).unsqueeze(-1)
+        generated_rel = cartesian_to_relative(generated)
 
         test_rel = test_rel_all[test_types == class_index]
         features = {
@@ -97,7 +117,7 @@ def main() -> None:
             "histograms": {name: histogram_pair(*values, feature=name)
                            for name, values in features.items()},
         }
-        del samples, bundle, generated, generated_abs, generated_rel
+        del samples, bundle, generated, generated_rel
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(payload, indent=2) + "\n")

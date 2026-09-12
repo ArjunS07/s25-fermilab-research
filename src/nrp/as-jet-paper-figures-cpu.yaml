@@ -26,12 +26,9 @@ spec:
               git clone https://github.com/ArjunS07/s25-fermilab-research.git /tmp/repo
               cd /tmp/repo
               git checkout "$GIT_COMMIT"
-              pip install --no-cache-dir matplotlib==3.10.6 pillow==11.3.0 numpy==2.3.3
-              python src/analysis/generate_paper_figures.py
-              mkdir -p /tmp/numpy-wheel /tmp/hist-deps
-              pip download --no-deps --dest /tmp/numpy-wheel --platform manylinux2014_x86_64 --python-version 311 --implementation cp --abi cp311 numpy==1.26.4
-              python -c 'import glob,zipfile; zipfile.ZipFile(glob.glob("/tmp/numpy-wheel/*.whl")[0]).extractall("/tmp/hist-deps")'
-              PYTHONPATH=/tmp/hist-deps /mnt/data/python-env/bin/python src/analysis/extract_paper_distribution_histograms.py
+              pip install --no-cache-dir numpy==1.26.4
+              pip install --no-cache-dir torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+              python src/analysis/extract_paper_distribution_histograms.py
           resources:
             requests:
               cpu: "1"
