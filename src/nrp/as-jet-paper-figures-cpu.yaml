@@ -16,7 +16,7 @@ spec:
           image: python:3.11-slim
           env:
             - name: GIT_COMMIT
-              value: REPLACE_WITH_FROZEN_COMMIT_SHA
+              value: 438c4ac4abf437be12bcc152d87d05c38e098802
           command: ["/bin/sh", "-lc"]
           args:
             - |
