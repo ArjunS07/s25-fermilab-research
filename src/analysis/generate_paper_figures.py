@@ -177,10 +177,12 @@ def plot_architecture_ablation() -> None:
 def crop_class_panel(path: Path, cls_index: int) -> Image.Image:
     image = Image.open(path).convert("RGB")
     width, height = image.size
-    left = int(width * (0.015 + cls_index * 0.328))
-    right = int(width * (0.345 + cls_index * 0.328))
+    # Keep only the top-row class panel.  The source canvas also has a pooled
+    # panel in its second row, so the lower crop boundary must stay above 0.51.
+    left = int(width * (0.040 + cls_index * 0.328))
+    right = int(width * (0.342 + cls_index * 0.328))
     top = int(height * 0.035)
-    bottom = int(height * 0.565)
+    bottom = int(height * 0.505)
     return image.crop((left, top, min(right, width), bottom))
 
 
@@ -192,21 +194,23 @@ def plot_selected_distributions() -> None:
         fractions = crop_class_panel(RUNS[key] / "jet_z1_z2.png", cls_index)
         panels.append((cls, weight, mass, fractions))
 
-    cell_w, cell_h = 1000, 530
-    header = 80
-    canvas = Image.new("RGB", (cell_w * 2, header + cell_h * 3), "white")
+    left_margin = 150
+    cell_w, cell_h = 1000, 500
+    header = 90
+    canvas = Image.new("RGB", (left_margin + cell_w * 2, header + cell_h * 3), "white")
     draw = ImageDraw.Draw(canvas)
     font = ImageFont.load_default(size=28)
-    draw.text((cell_w // 2, 20), "Invariant jet mass", fill="black", anchor="ma", font=font)
-    draw.text((cell_w + cell_w // 2, 20), "Leading and subleading transverse-momentum fractions",
+    draw.text((left_margin + cell_w // 2, 22), "Invariant jet mass", fill="black", anchor="ma", font=font)
+    draw.text((left_margin + cell_w + cell_w // 2, 22), "Leading and subleading transverse-momentum fractions",
               fill="black", anchor="ma", font=font)
     for row, (cls, weight, mass, fractions) in enumerate(panels):
         y = header + row * cell_h
         for col, panel in enumerate((mass, fractions)):
-            panel.thumbnail((cell_w - 10, cell_h - 10), Image.Resampling.LANCZOS)
-            x = col * cell_w + (cell_w - panel.width) // 2
+            panel.thumbnail((cell_w - 20, cell_h - 20), Image.Resampling.LANCZOS)
+            x = left_margin + col * cell_w + (cell_w - panel.width) // 2
             canvas.paste(panel, (x, y + (cell_h - panel.height) // 2))
-        draw.text((12, y + 12), f"{cls} jets, w={weight:g}", fill="black", font=font)
+        draw.text((left_margin // 2, y + cell_h // 2), f"{cls} jets\nw={weight:g}",
+                  fill="black", anchor="mm", align="center", font=font)
     canvas.save(OUT / "selected_cfg_distributions.png", dpi=(220, 220))
 
 
