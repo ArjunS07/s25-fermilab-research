@@ -34,6 +34,16 @@ RUNS = {
 COLORS = {"g": "#386cb0", "q": "#ef7f1a", "t": "#2a9d3f"}
 
 
+def tufte_axes(ax: plt.Axes) -> None:
+    """Use a quiet frame: no grid, no top/right spine, outward ticks."""
+    ax.grid(False)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(0.8)
+    ax.spines["bottom"].set_linewidth(0.8)
+    ax.tick_params(direction="out", length=3, width=0.8)
+
+
 def require_inputs() -> None:
     missing = [str(path) for path in RUNS.values() if not path.is_dir()]
     if missing:
@@ -77,7 +87,7 @@ def plot_training_curves() -> None:
     ax.set_xlabel("Training epoch")
     ax.set_ylabel("Flow-matching loss (25-epoch mean)")
     ax.set_title("Matched gluon-30 training curves")
-    ax.grid(alpha=0.25)
+    tufte_axes(ax)
     ax.legend(frameon=False)
     fig.savefig(OUT / "training_curves_icp.png", dpi=220)
     fig.savefig(OUT / "training_curves_icp.pdf")
@@ -101,11 +111,11 @@ def plot_icp_ablation() -> None:
         bars = ax.bar(range(3), values[:, index], color=colors, width=0.7)
         ax.set_xticks(range(3), [row[0] for row in rows], fontsize=8)
         ax.set_title(titles[index])
-        ax.grid(axis="y", alpha=0.25)
+        tufte_axes(ax)
         for bar in bars:
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f"{bar.get_height():.3g}",
                     ha="center", va="bottom", fontsize=8)
-    fig.suptitle("Online geodesic ICP is the dominant matched-training ablation", fontsize=12)
+    fig.suptitle("Matched 994k-step gluon-30 coupling ablation", fontsize=12)
     fig.savefig(OUT / "icp_ablation.png", dpi=220)
     fig.savefig(OUT / "icp_ablation.pdf")
     plt.close(fig)
@@ -124,9 +134,9 @@ def plot_euler_scaling() -> None:
     ax.set_xscale("log", base=2)
     ax.set_xticks(steps, [str(step) for step in steps])
     ax.set_xlabel("Geodesic Euler steps")
-    ax.set_ylabel("FPND (lower is better)")
-    ax.set_title(r"Inference-time integration scaling ($w=0$)")
-    ax.grid(alpha=0.25)
+    ax.set_ylabel("FPND")
+    ax.set_title(r"FPND versus geodesic Euler steps ($w=0$)")
+    tufte_axes(ax)
     ax.legend(title="Jet class", frameon=False)
     fig.savefig(OUT / "euler_step_scaling.png", dpi=220)
     fig.savefig(OUT / "euler_step_scaling.pdf")
@@ -145,9 +155,9 @@ def plot_cfg_sweep() -> None:
         ax.plot(weights, values, marker="o", lw=2, color=COLORS[cls], label=cls)
     ax.set_yscale("log")
     ax.set_xlabel("CFG guidance weight")
-    ax.set_ylabel("FPND (log scale)")
-    ax.set_title("Class-conditional guidance sweep at 64 steps")
-    ax.grid(alpha=0.25, which="both")
+    ax.set_ylabel("FPND")
+    ax.set_title("FPND versus CFG guidance weight (64 steps)")
+    tufte_axes(ax)
     ax.legend(title="Jet class", frameon=False)
     fig.savefig(OUT / "cfg_guidance_sweep.png", dpi=220)
     fig.savefig(OUT / "cfg_guidance_sweep.pdf")
@@ -164,7 +174,7 @@ def plot_architecture_ablation() -> None:
         bars = ax.bar(range(4), values, color=colors)
         ax.set_xticks(range(4), names, fontsize=8)
         ax.set_title(title)
-        ax.grid(axis="y", alpha=0.25)
+        tufte_axes(ax)
         for bar in bars:
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f"{bar.get_height():.3g}",
                     ha="center", va="bottom", fontsize=8)
@@ -263,7 +273,13 @@ def write_manifest() -> None:
 def main() -> None:
     require_inputs()
     OUT.mkdir(parents=True, exist_ok=True)
-    plt.style.use("seaborn-v0_8-whitegrid")
+    plt.style.use("seaborn-v0_8-white")
+    plt.rcParams.update({
+        "axes.edgecolor": "#444444",
+        "axes.linewidth": 0.8,
+        "legend.frameon": False,
+        "savefig.bbox": "tight",
+    })
     plot_training_curves()
     plot_icp_ablation()
     plot_euler_scaling()

@@ -28,6 +28,7 @@ spec:
               git checkout "$GIT_COMMIT"
               pip install --no-cache-dir matplotlib==3.10.6 pillow==11.3.0 numpy==2.3.3
               python src/analysis/generate_paper_figures.py
+              /mnt/data/python-env/bin/python src/analysis/extract_paper_distribution_histograms.py
           resources:
             requests:
               cpu: "1"
