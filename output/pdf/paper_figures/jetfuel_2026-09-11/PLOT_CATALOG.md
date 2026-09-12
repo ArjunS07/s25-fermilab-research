@@ -6,9 +6,10 @@ generate new samples or recompute physics metrics. Exact PVC sources are recorde
 
 ## Strongest main-text candidates
 
-1. `selected_cfg_distributions.pdf` — direct JetNet/JetFUEL overlays for relative
-   constituent $\eta$, $\phi$, and $p_T$, plus relative jet mass, using the selected
-   guidance value for each class. This is the closest counterpart to the MPGAN-style
+1. `selected_cfg_distributions.pdf` — direct overlays of JetNet test samples and
+   JetFUEL-generated samples for relative constituent $\eta$, $\phi$, and $p_T$,
+   plus relative jet mass, using the selected guidance value for each class. This
+   is the closest counterpart to the MPGAN-style
    distribution panel.
 2. `euler_step_scaling.pdf` — the cleanest inference ablation. It shows monotonic
    FPND improvement from 32 to 64 to 128 steps for every GQT class, with no retraining.
