@@ -6,7 +6,7 @@ generate new samples or recompute physics metrics. Exact PVC sources are recorde
 
 ## Strongest main-text candidates
 
-1. `selected_cfg_distributions.pdf` — direct overlays of JetNet test samples and
+1. `selected_cfg_distributions.pdf` — direct overlays of JetNet held-out samples and
    JetFUEL-generated samples for relative constituent $\eta$, $\phi$, and $p_T$,
    plus relative jet mass, using the selected guidance value for each class. This
    is the closest counterpart to the MPGAN-style

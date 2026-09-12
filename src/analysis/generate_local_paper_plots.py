@@ -12,7 +12,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from matplotlib.lines import Line2D
-from matplotlib.legend_handler import HandlerTuple
 
 
 CLASS_COLORS = {"g": "#0072B2", "q": "#D55E00", "t": "#009E73"}
@@ -199,7 +198,7 @@ def plot_distributions(data_dir: Path, out_dir: Path) -> None:
         ("pt_rel", r"Particle $p_T^{\mathrm{rel}}$"),
         ("relative_mass", r"Relative jet mass"),
     ]
-    fig, axes = plt.subplots(3, 4, figsize=(10.5, 6.6), constrained_layout=True)
+    fig, axes = plt.subplots(3, 4, figsize=(10.5, 6.6))
     for row, cls in enumerate(("g", "q", "t")):
         class_data = payload["classes"][cls]
         for col, (feature, xlabel) in enumerate(features):
@@ -207,28 +206,29 @@ def plot_distributions(data_dir: Path, out_dir: Path) -> None:
             hist = class_data["histograms"][feature]
             edges = np.asarray(hist["edges"])
             centers = 0.5 * (edges[:-1] + edges[1:])
-            sns.lineplot(x=centers, y=hist["test_density"], color="#161616", lw=1.55,
+            sns.lineplot(x=centers, y=hist["test_density"], color="#222222", lw=1.35,
                          drawstyle="steps-mid", ax=ax)
             sns.lineplot(x=centers, y=hist["generated_density"], color=CLASS_COLORS[cls],
-                         lw=1.65, drawstyle="steps-mid", linestyle=(0, (5, 2)), ax=ax)
+                         lw=1.45, drawstyle="steps-mid", linestyle="--", ax=ax)
             ax.set_xlabel(xlabel if row == 2 else "")
             ax.set_ylabel(f"{cls} jets\nDensity" if col == 0 else "")
             quiet_axes(ax)
-    reference_handle = Line2D([0], [0], color="#161616", lw=1.55)
-    generated_handle = tuple(
-        Line2D([0], [0], color=CLASS_COLORS[cls], lw=1.65, ls=(0, (5, 2)))
-        for cls in ("g", "q", "t")
-    )
+    handles = [
+        Line2D([0], [0], color="#222222", lw=1.35),
+        Line2D([0], [0], color="#555555", lw=1.45, ls="--"),
+    ]
     fig.legend(
-        [reference_handle, generated_handle],
-        ["JetNet test samples", "JetFUEL-generated samples"],
-        handler_map={tuple: HandlerTuple(ndivide=None, pad=0.25)},
+        handles,
+        ["JetNet held-out samples", "JetFUEL-generated samples"],
         loc="upper center",
         ncol=2,
-        columnspacing=2.4,
-        handlelength=3.0,
-        bbox_to_anchor=(0.5, 1.015),
+        columnspacing=2.0,
+        handlelength=2.5,
+        bbox_to_anchor=(0.5, 0.985),
+        borderaxespad=0,
     )
+    fig.subplots_adjust(left=0.075, right=0.985, bottom=0.095, top=0.875,
+                        hspace=0.22, wspace=0.22)
     save(fig, out_dir, "selected_cfg_distributions")
 
 
