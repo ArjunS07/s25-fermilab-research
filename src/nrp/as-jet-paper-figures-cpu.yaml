@@ -28,6 +28,7 @@ spec:
               git checkout "$GIT_COMMIT"
               pip install --no-cache-dir numpy==1.26.4
               pip install --no-cache-dir torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+              pip install --no-cache-dir jetnet
               python src/analysis/extract_paper_distribution_histograms.py
           resources:
             requests:
