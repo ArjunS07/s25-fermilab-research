@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: as-jet-paper-figures-cpu
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: as-jet-paper-figures-cpu
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: paper-figures
+          image: python:3.11-slim
+          env:
+            - name: GIT_COMMIT
+              value: REPLACE_WITH_FROZEN_COMMIT_SHA
+          command: ["/bin/sh", "-lc"]
+          args:
+            - |
+              set -eu
+              apt-get update
+              apt-get install -y --no-install-recommends git
+              git clone https://github.com/ArjunS07/s25-fermilab-research.git /tmp/repo
+              cd /tmp/repo
+              git checkout "$GIT_COMMIT"
+              pip install --no-cache-dir matplotlib==3.10.6 pillow==11.3.0 numpy==2.3.3
+              python src/analysis/generate_paper_figures.py
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: results
+              mountPath: /mnt/data
+      volumes:
+        - name: results
+          persistentVolumeClaim:
+            claimName: as-jet-train-pvc-2
