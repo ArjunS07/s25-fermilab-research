@@ -1,0 +1,85 @@
+# Full common-replay endpoint test. Launch only after the cheap layerwise screen.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-eval-gqt994k-layer-gates}
+spec:
+  ttlSecondsAfterFinished: 259200
+  backoffLimit: 0
+  completions: 6
+  parallelism: 2
+  completionMode: Indexed
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: eval
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - name: JOB_COMPLETION_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
+              CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
+              REPLAY="/mnt/data/output/2026-08-24_02-29-13--a85d5bf6-8808-4dd7-93bf-b831ca34fdf4-paper30-gqt994k-cfg-eval/eval/replay_bundle.pt"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              case "$JOB_COMPLETION_INDEX" in
+                0) TAG="baseline"; GATE="baseline" ;;
+                1) TAG="prefix5";  GATE="6=0" ;;
+                2) TAG="prefix4";  GATE="5=0,6=0" ;;
+                3) TAG="prefix3";  GATE="4=0,5=0,6=0" ;;
+                4) TAG="keep135";  GATE="2=0,4=0,6=0" ;;
+                5) TAG="keep246";  GATE="1=0,3=0,5=0" ;;
+                *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
+              esac
+              for required in "$ENV_ARCHIVE" "$CHECKPOINT" "$REPLAY"; do test -s "$required"; done
+              test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt994k-layergate-${TAG}"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf 'gate=%s\nsource=%s\nreplay=%s\n' "$GATE" "$SOURCE_RUN" "$REPLAY" > "$OUT/eval_controls.txt"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" analysis/evaluate_layer_gate.py \
+                --checkpoint "$CHECKPOINT" \
+                --source-run "$SOURCE_RUN" \
+                --replay-bundle "$REPLAY" \
+                --output-dir "$OUT/eval" \
+                --gate "$GATE" \
+                --integration-steps 64 \
+                --guidance-weight 0 \
+                --batch-size 128 \
+                --samples-per-class 50000
+              for artifact in samples.pt prior_samples.pt metrics.csv layer_gate_summary.json; do
+                test -s "$OUT/eval/$artifact"
+              done
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "2", memory: 32Gi}
+            limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 32Gi}
+
