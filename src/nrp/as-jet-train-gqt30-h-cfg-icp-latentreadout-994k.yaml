@@ -1,12 +1,11 @@
-# Serial training ablation: latent particle directions with the canonical online
-# geodesic ICP retained.  Relative to the completed H-994K control, this changes
-# only particle-direction construction: physical normalized Log_x(x_j) becomes
-# the final auxiliary displacement y_j^L - y_i^L.  Coefficients, normalized
-# physical reference vectors, seeds, and evaluation
-# settings remain canonical H.
+# Matched GQT-30 CFG readout ablation with canonical online geodesic ICP retained.
+# Relative to the completed GQT CFG H-994K control, the intended treatment is only
+# particle-direction construction: physical normalized Log_x(x_j) becomes the
+# final auxiliary displacement y_j^L - y_i^L.  Seeds, 10% null-conditioning
+# dropout, prior, optimizer budget, references, and terminal evaluation are retained.
 apiVersion: batch/v1
 kind: Job
-metadata: {name: as-jet-train-g30-lnet-h-icp-latent-994k}
+metadata: {name: as-jet-train-gqt30-h-cfg-icp-latent-994k}
 spec:
   ttlSecondsAfterFinished: 86400
   backoffLimit: 0
@@ -39,30 +38,37 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="6490849869f8c6c1fd27cc9895a643aa1b692865"
+              GIT_COMMIT="9b4bed282f695561bf94d0f358dc5bacde49a8b7"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
-              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-g30-lnet-h-icp-latent-994k"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt30-h-cfg-icp-latent-994k"
               test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
               test -s "$ENV_ARCHIVE"
               mkdir -p "$OUT" /tmp/runtime
               exec > >(tee "$OUT/run.log") 2>&1
               printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf 'treatment=latent_displacement_readout\ncoupling=online_geodesic_icp\ncfg_null_dropout_rate=0.1\n' > "$OUT/ablation_controls.txt"
               tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
               PYTHON=/tmp/runtime/python-env/bin/python
               "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
               mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
               cd /tmp/repo/src
               "$PYTHON" prepare_stage1.py --output-path "$OUT" \
-                --cache-dir /mnt/data/caches/stage1 --jet-types g \
+                --cache-dir /mnt/data/caches/stage1 --jet-types g q t \
                 --num-particles 30 --model-version v3
               "$PYTHON" train.py \
-                --config configs/g30-lorentznet-h-rfm-logmap-tangentrefs-994k.yaml \
+                --config configs/gqt30-lorentznet-h-rfm-logmap-200k.yaml \
                 --set paths.output_path="$OUT" \
+                --set training.num_epochs=2000 \
+                --set training.max_optimizer_steps=994000 \
+                --set training.cfg_null_dropout_rate=0.1 \
+                --set training.stability_probe_steps="[0,20000,40000,80000,150000,200000,331000,500000,800000,994000]" \
+                --set inference.use_cfg=true \
+                --set inference.cfg_guidance_weight=1.0 \
                 --set model.particle_direction_mode=latent_displacement
               for artifact in models/final_checkpoint.pth models/latest_checkpoint.pth metrics.csv summary.json; do
                 test -s "$OUT/train/$artifact"
               done
-              "$PYTHON" -c 'import json,sys,torch; p=sys.argv[1]; c=torch.load(p+"/models/final_checkpoint.pth",map_location="cpu",weights_only=False); s=json.load(open(p+"/summary.json")); m=s["full_config"]["model"]; assert c["global_optimizer_step"]==994000; assert s["effective_coupling"]["coupling"]=="online_geodesic_icp"; assert m["particle_direction_mode"]=="latent_displacement"; print("Verified ICP latent-readout endpoint and provenance")' "$OUT/train"
+              "$PYTHON" -c 'import json,sys,torch; p=sys.argv[1]; c=torch.load(p+"/models/final_checkpoint.pth",map_location="cpu",weights_only=False); s=json.load(open(p+"/summary.json")); f=s["full_config"]; assert c["global_optimizer_step"]==994000; assert f["data"]["jet_types"]==["g","q","t"]; assert f["training"]["cfg_null_dropout_rate"]==0.1; assert f["training"]["coupling"]=="online_geodesic_icp"; assert f["model"]["particle_direction_mode"]=="latent_displacement"; assert f["model"]["reference_direction_mode"]=="normalized_tangent"; print("Verified GQT CFG ICP latent-readout endpoint")' "$OUT/train"
           volumeMounts: [{name: data, mountPath: /mnt/data}]
           resources:
             requests: {nvidia.com/a40: 1, cpu: "2", memory: 24Gi}
