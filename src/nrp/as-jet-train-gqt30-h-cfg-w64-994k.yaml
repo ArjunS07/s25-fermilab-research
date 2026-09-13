@@ -34,7 +34,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              GIT_COMMIT="0331866592c49a044d22a1481d7cdbeb2453ddeb"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
               OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt30-h-cfg-w64-994k"
               test -s "$ENV_ARCHIVE"
@@ -77,4 +77,3 @@ spec:
           resources:
             requests: {nvidia.com/a40: 1, cpu: "2", memory: 32Gi}
             limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 32Gi}
-

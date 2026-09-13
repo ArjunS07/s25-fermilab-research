@@ -39,7 +39,7 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="REPLACE_WITH_FROZEN_COMMIT_SHA"
+              GIT_COMMIT="0331866592c49a044d22a1481d7cdbeb2453ddeb"
               SOURCE_RUN="/mnt/data/output/2026-08-21_10-04-25--cf87d826-9bab-45fb-b52e-02c9a60af5b8-gqt30-lnet-h-cfg-994k"
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               REPLAY="/mnt/data/output/2026-08-24_02-29-13--a85d5bf6-8808-4dd7-93bf-b831ca34fdf4-paper30-gqt994k-cfg-eval/eval/replay_bundle.pt"
@@ -82,4 +82,3 @@ spec:
           resources:
             requests: {nvidia.com/a40: 1, cpu: "2", memory: 32Gi}
             limits: {nvidia.com/a40: 1, cpu: "2.4", memory: 32Gi}
-
