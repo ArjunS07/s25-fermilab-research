@@ -1,7 +1,7 @@
 # Frozen-checkpoint layerwise depth/width screen. No training.
 apiVersion: batch/v1
 kind: Job
-metadata: {name: as-jet-analyze-gqt994k-layerwise-a100-r2}
+metadata: {name: as-jet-analyze-gqt994k-layerwise-a40-r3}
 spec:
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
@@ -67,5 +67,5 @@ spec:
               mv /mnt/data/output/run-pointers/gqt994k-layerwise-analysis.txt.tmp /mnt/data/output/run-pointers/gqt994k-layerwise-analysis.txt
           volumeMounts: [{name: data, mountPath: /mnt/data}]
           resources:
-            requests: {nvidia.com/a100: 1, cpu: "4", memory: 32Gi}
-            limits: {nvidia.com/a100: 1, cpu: "4", memory: 32Gi}
+            requests: {nvidia.com/a40: 1, cpu: "4", memory: 32Gi}
+            limits: {nvidia.com/a40: 1, cpu: "4", memory: 32Gi}

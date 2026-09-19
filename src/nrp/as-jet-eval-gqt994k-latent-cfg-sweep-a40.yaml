@@ -1,11 +1,10 @@
 # Full all-class CFG sweep for the matched ICP latent-displacement readout model.
-# Created suspended while training finishes; unsuspend only after the final
-# 994K-step checkpoint exists. Every arm replays the same canonical GQT bundle.
+# Training is complete; every arm replays the same canonical GQT bundle.
 apiVersion: batch/v1
 kind: Job
-metadata: {name: as-jet-eval-gqt994k-latent-cfg-sweep-a100}
+metadata: {name: as-jet-eval-gqt994k-latent-cfg-sweep-a40}
 spec:
-  suspend: true
+  suspend: false
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
   completions: 7
@@ -95,5 +94,5 @@ spec:
               "$PYTHON" -c 'import json,sys; d=json.load(open(sys.argv[1])); m=d["metrics"]; required=[f"{stem}_{jet}" for stem in ("fpnd","fpd","w1m","w1p","cov_mmd") for jet in ("g","q","t")]; assert all(k in m for k in required), (required,m.keys()); print({k:m[k] for k in required})' "$OUT/eval/summary.json"
           volumeMounts: [{name: data, mountPath: /mnt/data}]
           resources:
-            requests: {nvidia.com/a100: 1, cpu: "4", memory: 40Gi}
-            limits: {nvidia.com/a100: 1, cpu: "4", memory: 40Gi}
+            requests: {nvidia.com/a40: 1, cpu: "4", memory: 40Gi}
+            limits: {nvidia.com/a40: 1, cpu: "4", memory: 40Gi}
