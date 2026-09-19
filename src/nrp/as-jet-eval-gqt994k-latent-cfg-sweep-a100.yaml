@@ -1,15 +1,15 @@
-# Class-matched evaluation of the GQT-994K no-ICP retrain against the
-# canonical table settings: g at w=0, q at w=0.25, and t at w=0.5.
-# Each arm slices the canonical replay bundle to its one required class, so
-# this evaluates 50K rather than 150K jets per GPU allocation.
+# Full all-class CFG sweep for the matched ICP latent-displacement readout model.
+# Created suspended while training finishes; unsuspend only after the final
+# 994K-step checkpoint exists. Every arm replays the same canonical GQT bundle.
 apiVersion: batch/v1
 kind: Job
-metadata: {name: as-jet-eval-gqt994k-noicp-cfg-a100}
+metadata: {name: as-jet-eval-gqt994k-latent-cfg-sweep-a100}
 spec:
+  suspend: true
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
-  completions: 3
-  parallelism: 3
+  completions: 7
+  parallelism: 7
   completionMode: Indexed
   template:
     spec:
@@ -44,54 +44,42 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="9fecf2d809d1fbf5a26702ce42350f3f977be122"
-              SOURCE_RUN="/mnt/data/output/2026-09-08_15-00-09--543a2039-8600-45df-9577-7912e1b00963-gqt30-h-cfg-noicp-994k"
-              CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
-              REPLAY_SOURCE="/mnt/data/output/2026-08-24_02-29-13--a85d5bf6-8808-4dd7-93bf-b831ca34fdf4-paper30-gqt994k-cfg-eval/eval/replay_bundle.pt"
+              GIT_COMMIT="9b4bed282f695561bf94d0f358dc5bacde49a8b7"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              REPLAY="/mnt/data/output/2026-08-24_02-29-13--a85d5bf6-8808-4dd7-93bf-b831ca34fdf4-paper30-gqt994k-cfg-eval/eval/replay_bundle.pt"
+              SOURCE_RUN=$(find /mnt/data/output -maxdepth 1 -type d -name "*-gqt30-h-cfg-icp-latent-994k" -print | sort | tail -n 1)
+              CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               case "$JOB_COMPLETION_INDEX" in
-                0) TAG="g-w000"; JET_TYPE="g"; CLASS_ID=0; GUIDANCE="0.00"; USE_CFG=false ;;
-                1) TAG="q-w025"; JET_TYPE="q"; CLASS_ID=1; GUIDANCE="0.25"; USE_CFG=true  ;;
-                2) TAG="t-w050"; JET_TYPE="t"; CLASS_ID=2; GUIDANCE="0.50"; USE_CFG=true  ;;
+                0) TAG="w000"; GUIDANCE="0.00"; USE_CFG=false ;;
+                1) TAG="w025"; GUIDANCE="0.25"; USE_CFG=true ;;
+                2) TAG="w050"; GUIDANCE="0.50"; USE_CFG=true ;;
+                3) TAG="w075"; GUIDANCE="0.75"; USE_CFG=true ;;
+                4) TAG="w100"; GUIDANCE="1.00"; USE_CFG=true ;;
+                5) TAG="w200"; GUIDANCE="2.00"; USE_CFG=true ;;
+                6) TAG="w300"; GUIDANCE="3.00"; USE_CFG=true ;;
                 *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
               esac
-              for required in "$CHECKPOINT" "$REPLAY_SOURCE" "$ENV_ARCHIVE"; do test -s "$required"; done
-              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt994k-noicp-${TAG}-eval"
-              CLASS_REPLAY="/tmp/replay-${JET_TYPE}.pt"
+              for required in "$CHECKPOINT" "$REPLAY" "$ENV_ARCHIVE"; do test -s "$required"; done
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt994k-latent-cfg-${TAG}-eval"
               mkdir -p "$OUT" /tmp/runtime
               exec > >(tee "$OUT/run.log") 2>&1
               printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
               printf '%s\n' "$SOURCE_RUN" > "$OUT/source_run.txt"
-              printf 'jet_type=%s\nintegration_steps=64\ncfg_guidance_weight=%s\nuse_cfg=%s\nreplay_source=%s\n' \
-                "$JET_TYPE" "$GUIDANCE" "$USE_CFG" "$REPLAY_SOURCE" > "$OUT/ablation_controls.txt"
+              printf 'readout=latent_displacement\nintegration_steps=64\ncfg_guidance_weight=%s\nuse_cfg=%s\nreplay_bundle=%s\n' "$GUIDANCE" "$USE_CFG" "$REPLAY" > "$OUT/ablation_controls.txt"
               tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
               PYTHON=/tmp/runtime/python-env/bin/python
               "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
               mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
               cd /tmp/repo/src
-              "$PYTHON" -c 'import sys,torch; c=torch.load(sys.argv[1],map_location="cpu",weights_only=False); assert c["global_optimizer_step"]==994000; assert c["full_config"]["training"]["coupling"]=="none"; print("Verified GQT-994K no-ICP checkpoint")' "$CHECKPOINT"
-              "$PYTHON" - "$REPLAY_SOURCE" "$CLASS_ID" "$CLASS_REPLAY" <<'PY'
-              import sys
-              import torch
-
-              source, class_id, destination = sys.argv[1], int(sys.argv[2]), sys.argv[3]
-              bundle = torch.load(source, map_location="cpu", weights_only=False)
-              ids = bundle["generated_jet_attrs"][:, :5].argmax(dim=-1)
-              selection = torch.nonzero(ids == class_id, as_tuple=False).flatten()
-              assert selection.numel() == 50_000, selection.numel()
-              for key in ("generated_jet_attrs", "jet_phi", "masks", "internal_prior"):
-                  bundle[key] = bundle[key][selection]
-              bundle["metadata"] = dict(bundle["metadata"], n_samples=50_000, samples_per_jet_type=50_000)
-              torch.save(bundle, destination)
-              PY
+              "$PYTHON" -c 'import sys,torch; c=torch.load(sys.argv[1],map_location="cpu",weights_only=False); f=c["full_config"]; assert c["global_optimizer_step"]==994000; assert f["model"]["particle_direction_mode"]=="latent_displacement"; assert f["training"]["coupling"]=="online_geodesic_icp"; print("Verified latent-readout endpoint")' "$CHECKPOINT"
               "$PYTHON" infer.py \
                 --config configs/infer-h.yaml \
-                --set data.jet_types="[$JET_TYPE]" \
+                --set data.jet_types="[g,q,t]" \
                 --set paths.checkpoint_path="$CHECKPOINT" \
                 --set paths.output_path="$SOURCE_RUN" \
                 --set paths.out_dir="$OUT/eval" \
-                --set paths.replay_bundle_path="$CLASS_REPLAY" \
-                --set inference.n_samples=50000 \
+                --set paths.replay_bundle_path="$REPLAY" \
+                --set inference.n_samples=150000 \
                 --set inference.samples_per_jet_type=50000 \
                 --set inference.batch_size=512 \
                 --set inference.integration_steps=64 \
@@ -104,7 +92,7 @@ spec:
               for artifact in samples.pt prior_samples.pt generation_diagnostics.json metrics.csv summary.json; do
                 test -s "$OUT/eval/$artifact"
               done
-              "$PYTHON" -c 'import json,sys; jet_type,summary=sys.argv[1:]; d=json.load(open(summary)); m=d["metrics"]; required=[f"fpnd_{jet_type}",f"fpd_{jet_type}",f"w1m_{jet_type}",f"w1p_{jet_type}",f"cov_mmd_{jet_type}"]; assert all(k in m for k in required), (required,m.keys()); print({k:m[k] for k in required})' "$JET_TYPE" "$OUT/eval/summary.json"
+              "$PYTHON" -c 'import json,sys; d=json.load(open(sys.argv[1])); m=d["metrics"]; required=[f"{stem}_{jet}" for stem in ("fpnd","fpd","w1m","w1p","cov_mmd") for jet in ("g","q","t")]; assert all(k in m for k in required), (required,m.keys()); print({k:m[k] for k in required})' "$OUT/eval/summary.json"
           volumeMounts: [{name: data, mountPath: /mnt/data}]
           resources:
             requests: {nvidia.com/a100: 1, cpu: "4", memory: 40Gi}

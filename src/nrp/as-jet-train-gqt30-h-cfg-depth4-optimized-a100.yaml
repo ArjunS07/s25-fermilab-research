@@ -1,0 +1,92 @@
+# Throughput-optimized four-layer GQT model for the time-limited A100 campaign.
+# It preserves the canonical 248.5M-example exposure while using a 3,072-sample
+# physical/effective batch. This is an optimized reduced-depth model, not a
+# one-knob depth ablation, because its optimizer batch and schedule are rescaled.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-train-gqt30-h-cfg-depth4-opt-a100}
+spec:
+  ttlSecondsAfterFinished: 259200
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values: [NVIDIA-A100-SXM4-80GB, NVIDIA-A100-80GB-PCIe]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              GIT_COMMIT="0331866592c49a044d22a1481d7cdbeb2453ddeb"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt30-h-cfg-depth4-opt-b3072-248m-a100"
+              test -s "$ENV_ARCHIVE"
+              test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf 'treatment=optimized_depth_4\ncomparison_class=optimized_model_not_depth_only_ablation\naccelerator=a100_80gb\nn_hidden=96\nn_layers=4\nbatch_size=3072\ntarget_batch_size=3072\ntraining_examples=248500224\noptimizer_steps=80892\nlr_scaling=half_sqrt_batch_ratio\nlr=0.0010516273\nwarmup_steps=163\nema_decay=0.9877811162\nweight_decay=0.000003505424\ncfg_null_dropout_rate=0.1\ncoupling=online_geodesic_icp\n' > "$OUT/ablation_controls.txt"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" \
+                --cache-dir /mnt/data/caches/stage1 --jet-types g q t \
+                --num-particles 30 --model-version v3
+              "$PYTHON" train.py \
+                --config configs/gqt30-lorentznet-h-rfm-logmap-200k.yaml \
+                --set paths.output_path="$OUT" \
+                --set model.n_hidden=96 \
+                --set model.n_layers=4 \
+                --set training.batch_size=3072 \
+                --set training.target_batch_size=3072 \
+                --set training.num_epochs=300 \
+                --set training.max_optimizer_steps=80892 \
+                --set training.lr=0.0010516273 \
+                --set training.lr_warmup_steps=163 \
+                --set training.ema_decay=0.9877811162 \
+                --set training.weight_decay=0.000003505424 \
+                --set training.cfg_null_dropout_rate=0.1 \
+                --set training.coupling=online_geodesic_icp \
+                --set training.stability_probe_steps="[0,163,814,1628,8138,16276,40690,65104,80892]" \
+                --set inference.n_samples=15000 \
+                --set inference.samples_per_jet_type=5000 \
+                --set inference.integration_steps=64 \
+                --set inference.stratify_metrics_by_class=true \
+                --set inference.use_cfg=false \
+                --set inference.cfg_guidance_weight=0.0
+              for artifact in models/final_checkpoint.pth models/latest_checkpoint.pth metrics.csv summary.json replay_bundle.pt; do
+                test -s "$OUT/train/$artifact"
+              done
+              "$PYTHON" -c 'import json,math,sys,torch; p=sys.argv[1]; c=torch.load(p+"/models/final_checkpoint.pth",map_location="cpu",weights_only=False); s=json.load(open(p+"/summary.json")); f=s["full_config"]; t=f["training"]; assert c["global_optimizer_step"]==80892; assert f["model"]["n_hidden"]==96; assert f["model"]["n_layers"]==4; assert t["batch_size"]==3072; assert t["target_batch_size"]==3072; assert math.isclose(t["lr"],0.0010516273); assert t["cfg_null_dropout_rate"]==0.1; assert t["coupling"]=="online_geodesic_icp"; assert all(k in s["metrics"] for k in ("fpnd_g","fpnd_q","fpnd_t")); print("Verified optimized depth-4 CFG/ICP endpoint")' "$OUT/train"
+              mkdir -p /mnt/data/output/run-pointers
+              printf '%s\n' "$OUT" > /mnt/data/output/run-pointers/gqt30-h-cfg-depth4-optimized-a100.txt.tmp
+              mv /mnt/data/output/run-pointers/gqt30-h-cfg-depth4-optimized-a100.txt.tmp /mnt/data/output/run-pointers/gqt30-h-cfg-depth4-optimized-a100.txt
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a100: 1, cpu: "4", memory: 64Gi}
+            limits: {nvidia.com/a100: 1, cpu: "4", memory: 64Gi}
