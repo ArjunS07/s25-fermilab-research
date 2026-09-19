@@ -85,11 +85,12 @@ def __x_test_to_abs(X_test, device='cpu'):
     not tracked per-jet in JetNet, so we draw a uniform reference phi per jet —
     that random assignment is what the fixed EVAL_SEED reproduces.
     """
-    jet_eta = (X_test[:][1][:, 0]).unsqueeze(1)
-    jet_phi_vals = (2 * torch.pi) * torch.rand(len(X_test)).unsqueeze(1)
-    jet_pt_ec = X_test[:][1][:, 1:3]
+    particles, features = X_test[:]
+    jet_eta = features[:, 0].unsqueeze(1)
+    jet_phi_vals = (2 * torch.pi) * torch.rand(features.shape[0]).unsqueeze(1)
+    jet_pt_ec = features[:, 1:3]
     jet_features = torch.concat([jet_eta, jet_phi_vals, jet_pt_ec], dim=-1)
-    eta_rel, phi_rel, pt_rel = torch.unbind(X_test[:][0][:, :, :3], axis=-1)
+    eta_rel, phi_rel, pt_rel = torch.unbind(particles[:, :, :3], axis=-1)
     Eta, Phi, Pt, _ = torch.unbind(jet_features, axis=-1)
 
     pt = pt_rel * Pt.unsqueeze(1)
@@ -134,6 +135,7 @@ def run_save_metrics(
         prior_samples: exact pre-transport Cartesian state paired with gen_samples.
     """
     torch.manual_seed(EVAL_SEED)  # fixed yardstick across runs
+    X_test = jet_attributes.select_configured_jets(X_test, jet_types)
     if prior_samples is None:
         print("Prior provenance unavailable: exact paired prior tensor was not supplied; "
               "prior overlays will be omitted (not reconstructed).")

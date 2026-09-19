@@ -63,6 +63,23 @@ def local_jet_type_indices(global_indices, jet_types):
     return local_indices
 
 
+def select_configured_jets(dataset, jet_types):
+    """Return only dataset rows belonging to the configured global classes."""
+    particles, features = dataset[:]
+    global_types = features[:, 4].long()
+    configured_global_types = torch.tensor(
+        global_jet_type_indices(jet_types),
+        dtype=global_types.dtype,
+        device=global_types.device,
+    )
+    selected = (global_types.unsqueeze(-1) == configured_global_types).any(dim=-1)
+    if not selected.any():
+        raise ValueError(
+            f"dataset contains no samples for configured jet_types={jet_types}"
+        )
+    return particles[selected], features[selected]
+
+
 def generate_jets(model, device, jet_types=None, num_jets=1000, one_hot_types=None,
                   n_jet_types=None):
     """
