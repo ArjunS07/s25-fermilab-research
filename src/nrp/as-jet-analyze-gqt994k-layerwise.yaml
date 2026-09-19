@@ -1,7 +1,7 @@
 # Frozen-checkpoint layerwise depth/width screen. No training.
 apiVersion: batch/v1
 kind: Job
-metadata: {name: as-jet-analyze-gqt994k-layerwise-a100}
+metadata: {name: as-jet-analyze-gqt994k-layerwise-a100-r2}
 spec:
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
@@ -49,6 +49,7 @@ spec:
               "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
               mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
               cd /tmp/repo/src
+              export PYTHONPATH=/tmp/repo/src
               "$PYTHON" analysis/analyze_layerwise_importance.py \
                 --checkpoint "$CHECKPOINT" \
                 --replay-bundle "$REPLAY" \

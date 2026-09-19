@@ -4,7 +4,7 @@
 # this evaluates 50K rather than 150K jets per GPU allocation.
 apiVersion: batch/v1
 kind: Job
-metadata: {name: as-jet-eval-gqt994k-noicp-cfg-a100}
+metadata: {name: as-jet-eval-gqt994k-noicp-cfg-a100-r2}
 spec:
   ttlSecondsAfterFinished: 259200
   backoffLimit: 0
@@ -44,15 +44,15 @@ spec:
           args:
             - |
               set -euo pipefail
-              GIT_COMMIT="9fecf2d809d1fbf5a26702ce42350f3f977be122"
+              GIT_COMMIT="709c48beeab8a76411b7c74f73c94cdf13bd97d6"
               SOURCE_RUN="/mnt/data/output/2026-09-08_15-00-09--543a2039-8600-45df-9577-7912e1b00963-gqt30-h-cfg-noicp-994k"
               CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
               REPLAY_SOURCE="/mnt/data/output/2026-08-24_02-29-13--a85d5bf6-8808-4dd7-93bf-b831ca34fdf4-paper30-gqt994k-cfg-eval/eval/replay_bundle.pt"
               ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
               case "$JOB_COMPLETION_INDEX" in
-                0) TAG="g-w000"; JET_TYPE="g"; CLASS_ID=0; GUIDANCE="0.00"; USE_CFG=false ;;
-                1) TAG="q-w025"; JET_TYPE="q"; CLASS_ID=1; GUIDANCE="0.25"; USE_CFG=true  ;;
-                2) TAG="t-w050"; JET_TYPE="t"; CLASS_ID=2; GUIDANCE="0.50"; USE_CFG=true  ;;
+                0) TAG="g-w000"; JET_TYPE="g"; CLASS_ID=0; GUIDANCE="0.00"; USE_CFG=false; REPLAY_SAMPLES=""; REPLAY_PRIOR="" ;;
+                1) TAG="q-w025"; JET_TYPE="q"; CLASS_ID=1; GUIDANCE="0.25"; USE_CFG=true; REPLAY_SAMPLES="/mnt/data/output/2026-09-19_17-03-54--46305777-01b9-4460-940b-262297da2867-gqt994k-noicp-q-w025-eval/eval/samples.pt"; REPLAY_PRIOR="/mnt/data/output/2026-09-19_17-03-54--46305777-01b9-4460-940b-262297da2867-gqt994k-noicp-q-w025-eval/eval/prior_samples.pt" ;;
+                2) TAG="t-w050"; JET_TYPE="t"; CLASS_ID=2; GUIDANCE="0.50"; USE_CFG=true; REPLAY_SAMPLES=""; REPLAY_PRIOR="" ;;
                 *) echo "Unexpected completion index: $JOB_COMPLETION_INDEX"; exit 1 ;;
               esac
               for required in "$CHECKPOINT" "$REPLAY_SOURCE" "$ENV_ARCHIVE"; do test -s "$required"; done
@@ -84,6 +84,15 @@ spec:
               bundle["metadata"] = dict(bundle["metadata"], n_samples=50_000, samples_per_jet_type=50_000)
               torch.save(bundle, destination)
               PY
+              EXTRA_ARGS=()
+              if [[ -n "$REPLAY_SAMPLES" ]]; then
+                for required in "$REPLAY_SAMPLES" "$REPLAY_PRIOR"; do test -s "$required"; done
+                EXTRA_ARGS+=(
+                  --set inference.skip_samples=true
+                  --set paths.replay_samples_path="$REPLAY_SAMPLES"
+                  --set paths.replay_prior_samples_path="$REPLAY_PRIOR"
+                )
+              fi
               "$PYTHON" infer.py \
                 --config configs/infer-h.yaml \
                 --set data.jet_types="[$JET_TYPE]" \
@@ -100,8 +109,14 @@ spec:
                 --set inference.use_cfg="$USE_CFG" \
                 --set inference.cfg_guidance_weight="$GUIDANCE" \
                 --set inference.stratify_metrics_by_class=true \
-                --set inference.skip_metrics=false
-              for artifact in samples.pt prior_samples.pt generation_diagnostics.json metrics.csv summary.json; do
+                --set inference.skip_metrics=false \
+                "${EXTRA_ARGS[@]}"
+              if [[ -z "$REPLAY_SAMPLES" ]]; then
+                for artifact in samples.pt prior_samples.pt generation_diagnostics.json; do
+                  test -s "$OUT/eval/$artifact"
+                done
+              fi
+              for artifact in metrics.csv summary.json; do
                 test -s "$OUT/eval/$artifact"
               done
               "$PYTHON" -c 'import json,sys; jet_type,summary=sys.argv[1:]; d=json.load(open(summary)); m=d["metrics"]; required=[f"fpnd_{jet_type}",f"fpd_{jet_type}",f"w1m_{jet_type}",f"w1p_{jet_type}",f"cov_mmd_{jet_type}"]; assert all(k in m for k in required), (required,m.keys()); print({k:m[k] for k in required})' "$JET_TYPE" "$OUT/eval/summary.json"
