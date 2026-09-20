@@ -1,0 +1,32 @@
+{
+  "checkpoint": "/Users/arjunsharma/development/s25-fermilab-research/src/downloaded_output/2026-08-20_02-39-35--443ccd42-5a6d-4112-994c-e41f39012fd6-gqt30-lnet-h-994k/train/models/final_checkpoint.pth",
+  "replay_bundle": "/Users/arjunsharma/development/s25-fermilab-research/src/downloaded_output/2026-08-20_02-39-35--443ccd42-5a6d-4112-994c-e41f39012fd6-gqt30-lnet-h-994k/train/replay_bundle.pt",
+  "weight_view": "EMA if available, otherwise raw",
+  "architecture": {
+    "n_hidden": 96,
+    "n_layers": 6,
+    "regulator_mass": 0.1,
+    "particle_direction_mode": "physical_logmap",
+    "reference_direction_mode": "normalized_tangent"
+  },
+  "num_samples": 48,
+  "time": 0.5,
+  "boost_axis": "x",
+  "rotation_axis": "y",
+  "max_beta": 0.99,
+  "max_angle": 3.141592653589793,
+  "dtypes": [
+    "float32",
+    "float64"
+  ],
+  "aggregation": "arithmetic mean over a class-balanced pooled sample; per-jet p10-p90 band",
+  "samples_by_jet_type": {
+    "g": 16,
+    "q": 16,
+    "t": 16
+  },
+  "max_relative_l2": {
+    "float32": 0.1010565832222318,
+    "float64": 8.763497963458734e-10
+  }
+}

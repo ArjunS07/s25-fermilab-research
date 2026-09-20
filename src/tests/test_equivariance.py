@@ -7,6 +7,8 @@ No Phase >=1 run is valid until these pass. They encode:
      scalar/geometry path.
   3. Residual SO(2): rotating particles about the jet axis (refs fixed) rotates the output.
 """
+import math
+
 import pytest
 import torch
 
@@ -14,6 +16,7 @@ from tests.lorentz_test_utils import (
     build_model,
     sample_inputs,
     apply_transform,
+    boost_4x4,
     rotation_4x4,
     random_proper_transform,
 )
@@ -34,6 +37,26 @@ def test_joint_lorentz_equivariance(transform_seed):
     v_of_L = model(xL, t, cond, mask, ref_vectors=refL)
 
     assert torch.allclose(Lv, v_of_L, atol=1e-5, rtol=1e-5)
+
+
+@pytest.mark.parametrize(
+    "transform",
+    [
+        pytest.param(rotation_4x4("y", 0.9), id="rotation"),
+        pytest.param(boost_4x4("x", math.atanh(0.8)), id="boost-beta-0.8"),
+    ],
+)
+def test_separate_rotation_and_boost_equivariance(transform):
+    """Check rotations and beta-parameterized boosts independently, transforming both refs."""
+    model = build_model(seed=0)
+    x, t, cond, mask, refs = sample_inputs(jet_axis="z", seed=8)
+
+    expected = apply_transform(model(x, t, cond, mask, ref_vectors=refs), transform)
+    transformed_x = apply_transform(x, transform) * mask.unsqueeze(-1)
+    transformed_refs = apply_transform(refs, transform)
+    observed = model(transformed_x, t, cond, mask, ref_vectors=transformed_refs)
+
+    assert torch.allclose(expected, observed, atol=1e-5, rtol=1e-5)
 
 
 def test_symmetry_breaking_particles_only_rotation():
