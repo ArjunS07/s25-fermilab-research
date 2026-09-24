@@ -1,0 +1,92 @@
+# Identical training recipe to the A100 width-64/depth-4 double-exposure run.
+# Only the Job identity, output provenance, and accelerator request differ.
+# 121,338 x 4,096 = 497,000,448 examples versus 248,500,000 canonical.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-train-gqt30-h-cfg-w64-d4-2x-a40}
+spec:
+  ttlSecondsAfterFinished: 259200
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values: [NVIDIA-A40]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: train
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              GIT_COMMIT="71f0a7db6102b5e79d6db13696df883c68df847f"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt30-h-cfg-w64-d4-b4096-497m-a40"
+              test -s "$ENV_ARCHIVE"
+              test "$GIT_COMMIT" != "REPLACE_WITH_FROZEN_COMMIT_SHA"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf 'treatment=joint_width64_depth4_2x_exposure\ncomparison_class=combined_architecture_and_exposure_treatment\naccelerator=a40_48gb\nn_hidden=64\nn_layers=4\nbatch_size=4096\ntarget_batch_size=4096\nepoch_frac=0.9903046075525722\ncanonical_training_examples=248500000\ntarget_training_examples=497000000\nactual_training_examples=497000448\noptimizer_steps=121338\nlr=0.0008586501\nwarmup_steps=122\nema_decay=0.9837414235\nweight_decay=0.000004047715\ncfg_null_dropout_rate=0.1\ncoupling=online_geodesic_icp\n' > "$OUT/ablation_controls.txt"
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" prepare_stage1.py --output-path "$OUT" \
+                --cache-dir /mnt/data/caches/stage1 --jet-types g q t \
+                --num-particles 30 --model-version v3
+              "$PYTHON" train.py \
+                --config configs/gqt30-lorentznet-h-rfm-logmap-200k.yaml \
+                --set paths.output_path="$OUT" \
+                --set model.n_hidden=64 \
+                --set model.n_layers=4 \
+                --set training.batch_size=4096 \
+                --set training.target_batch_size=4096 \
+                --set training.epoch_frac=0.9903046075525722 \
+                --set training.num_epochs=1400 \
+                --set training.max_optimizer_steps=121338 \
+                --set training.lr=0.0008586501 \
+                --set training.lr_warmup_steps=122 \
+                --set training.ema_decay=0.9837414235 \
+                --set training.weight_decay=0.000004047715 \
+                --set training.cfg_null_dropout_rate=0.1 \
+                --set training.coupling=online_geodesic_icp \
+                --set training.stability_probe_steps="[0,122,610,1221,6104,12207,22136,30335,60669,97070,121338]" \
+                --set inference.n_samples=150000 \
+                --set inference.samples_per_jet_type=50000 \
+                --set inference.integration_steps=64 \
+                --set inference.stratify_metrics_by_class=true \
+                --set inference.use_cfg=false \
+                --set inference.cfg_guidance_weight=0.0
+              for artifact in models/final_checkpoint.pth models/latest_checkpoint.pth metrics.csv summary.json replay_bundle.pt; do
+                test -s "$OUT/train/$artifact"
+              done
+              "$PYTHON" -c 'import json,math,sys,torch; p=sys.argv[1]; c=torch.load(p+"/models/final_checkpoint.pth",map_location="cpu",weights_only=False); s=json.load(open(p+"/summary.json")); f=s["full_config"]; t=f["training"]; assert c["global_optimizer_step"]==121338; assert s["global_optimizer_step"]==121338; assert f["model"]["n_hidden"]==64; assert f["model"]["n_layers"]==4; assert t["batch_size"]==4096 and t["target_batch_size"]==4096; assert math.isclose(t["epoch_frac"],0.9903046075525722); assert math.isclose(t["lr"],0.0008586501); assert t["lr_warmup_steps"]==122; assert math.isclose(t["ema_decay"],0.9837414235); assert t["cfg_null_dropout_rate"]==0.1; assert t["coupling"]=="online_geodesic_icp"; assert math.isfinite(s["final_loss"]); assert all(k in s["metrics"] for k in ("fpnd_g","fpnd_q","fpnd_t")); print("Verified width-64/depth-4 double-exposure CFG/ICP endpoint")' "$OUT/train"
+              mkdir -p /mnt/data/output/run-pointers
+              printf '%s\n' "$OUT" > /mnt/data/output/run-pointers/gqt30-h-cfg-w64-d4-2x-a40.txt.tmp
+              mv /mnt/data/output/run-pointers/gqt30-h-cfg-w64-d4-2x-a40.txt.tmp /mnt/data/output/run-pointers/gqt30-h-cfg-w64-d4-2x-a40.txt
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "6", memory: 64Gi}
+            limits: {nvidia.com/a40: 1, cpu: "6", memory: 64Gi}
