@@ -1,0 +1,154 @@
+# Class-matched CFG sweep of the qualified A40 width-64/depth-4, 2x-exposure
+# checkpoint. One A40 pod evaluates seven weights sequentially on the same
+# canonical 150k-jet replay bundle (50k per g/q/t class). Every arm retains its
+# own samples and diagnostics; non-finite arms must not be ranked silently.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: as-jet-eval-gqt30-h-cfg-w64-d4-2x-sweep-a40}
+spec:
+  ttlSecondsAfterFinished: 259200
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values: [rci-nautilus01.msu.montana.edu]
+                  - key: nvidia.com/gpu.product
+                    operator: In
+                    values: [NVIDIA-A40]
+      volumes:
+        - {name: data, persistentVolumeClaim: {claimName: as-jet-train-pvc-2}}
+      containers:
+        - name: eval
+          image: python:3.10-slim
+          env:
+            - {name: PYTHONUNBUFFERED, value: "1"}
+            - {name: OMP_NUM_THREADS, value: "2"}
+            - {name: MKL_NUM_THREADS, value: "2"}
+            - {name: OPENBLAS_NUM_THREADS, value: "1"}
+            - {name: TORCH_NUM_THREADS, value: "2"}
+            - {name: TORCH_NUM_INTEROP_THREADS, value: "1"}
+            - name: POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+          command: [/bin/bash, -c]
+          args:
+            - |
+              set -euo pipefail
+              GIT_COMMIT="71f0a7db6102b5e79d6db13696df883c68df847f"
+              POINTER="/mnt/data/output/run-pointers/gqt30-h-cfg-w64-d4-2x-a40.txt"
+              ENV_ARCHIVE="/mnt/data/caches/runtime/python-env-py310-torch271.tar"
+              REPLAY="/mnt/data/output/2026-08-24_02-29-13--a85d5bf6-8808-4dd7-93bf-b831ca34fdf4-paper30-gqt994k-cfg-eval/eval/replay_bundle.pt"
+              test -s "$POINTER"
+              SOURCE_RUN="$(cat "$POINTER")"
+              CHECKPOINT="$SOURCE_RUN/train/models/final_checkpoint.pth"
+              for required in "$CHECKPOINT" "$SOURCE_RUN/train/qualification_summary.json" "$REPLAY" "$ENV_ARCHIVE"; do test -s "$required"; done
+              OUT="/mnt/data/output/$(date +%F_%H-%M-%S)--$POD_UID-gqt30-h-cfg-w64-d4-2x-sweep-a40"
+              mkdir -p "$OUT" /tmp/runtime
+              exec > >(tee "$OUT/run.log") 2>&1
+              printf '%s\n' "$GIT_COMMIT" > "$OUT/git_commit.txt"
+              printf '%s\n' "$SOURCE_RUN" > "$OUT/source_run.txt"
+              printf '%s\n' "$REPLAY" > "$OUT/replay_source.txt"
+              printf 'weights=0,0.25,0.5,0.75,1,2,3\nclasses=g,q,t\nsamples_per_class=50000\nintegration_steps=64\nevaluation_seed=42\n' > "$OUT/sweep_controls.txt"
+              nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+              tar -xf "$ENV_ARCHIVE" -C /tmp/runtime
+              PYTHON=/tmp/runtime/python-env/bin/python
+              for attempt in 1 2 3 4 5; do
+                if "$PYTHON" -c "import tarfile,urllib.request; u='https://github.com/ArjunS07/s25-fermilab-research/archive/'+'$GIT_COMMIT'+'.tar.gz'; urllib.request.urlretrieve(u,'/tmp/repo.tar.gz'); tarfile.open('/tmp/repo.tar.gz').extractall('/tmp')"; then
+                  break
+                fi
+                if [ "$attempt" -eq 5 ]; then exit 1; fi
+                rm -f /tmp/repo.tar.gz
+                sleep $((attempt * 15))
+              done
+              mv "/tmp/s25-fermilab-research-$GIT_COMMIT" /tmp/repo
+              cd /tmp/repo/src
+              "$PYTHON" - "$CHECKPOINT" "$SOURCE_RUN/train/qualification_summary.json" "$REPLAY" <<'PY'
+              import json
+              import sys
+              import torch
+
+              checkpoint_path, qualification_path, replay_path = sys.argv[1:]
+              checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+              config = checkpoint["full_config"]
+              assert checkpoint["global_optimizer_step"] == 121338
+              assert config["model"]["n_hidden"] == 64
+              assert config["model"]["n_layers"] == 4
+              assert config["model"]["particle_direction_mode"] == "physical_logmap"
+              assert config["model"]["reference_direction_mode"] == "normalized_tangent"
+              assert config["training"]["coupling"] == "online_geodesic_icp"
+              assert config["training"]["cfg_null_dropout_rate"] == 0.1
+              assert sum(value.numel() for value in checkpoint["model_state_dict"].values()) == 193039
+              assert json.load(open(qualification_path))["passed"]
+              bundle = torch.load(replay_path, map_location="cpu", weights_only=False)
+              types = bundle["generated_jet_attrs"][:, :5].argmax(dim=-1)
+              assert [int((types == i).sum()) for i in range(3)] == [50000, 50000, 50000]
+              print("Verified qualified width-64/depth-4 checkpoint and balanced canonical replay")
+              PY
+              for arm in w000:0:false w025:0.25:true w050:0.5:true w075:0.75:true w100:1:true w200:2:true w300:3:true; do
+                IFS=: read -r TAG GUIDANCE USE_CFG <<< "$arm"
+                ARM_OUT="$OUT/$TAG"
+                mkdir -p "$ARM_OUT"
+                printf 'cfg_guidance_weight=%s\nuse_cfg=%s\n' "$GUIDANCE" "$USE_CFG" > "$ARM_OUT/arm_controls.txt"
+                echo "Starting $TAG (guidance=$GUIDANCE, use_cfg=$USE_CFG)"
+                "$PYTHON" infer.py \
+                  --config configs/infer-h.yaml \
+                  --set data.jet_types="[g,q,t]" \
+                  --set data.num_particles=30 \
+                  --set paths.checkpoint_path="$CHECKPOINT" \
+                  --set paths.output_path="$SOURCE_RUN" \
+                  --set paths.out_dir="$ARM_OUT/eval" \
+                  --set paths.replay_bundle_path="$REPLAY" \
+                  --set inference.n_samples=150000 \
+                  --set inference.samples_per_jet_type=50000 \
+                  --set inference.batch_size=512 \
+                  --set inference.integration_steps=64 \
+                  --set inference.prior_dist=axis_aligned_lognormal \
+                  --set inference.seed=42 \
+                  --set inference.use_ema_weights=true \
+                  --set inference.use_cfg="$USE_CFG" \
+                  --set inference.cfg_guidance_weight="$GUIDANCE" \
+                  --set inference.stratify_metrics_by_class=true \
+                  --set inference.skip_metrics=false
+                for artifact in samples.pt prior_samples.pt generation_diagnostics.json metrics.csv summary.json; do
+                  test -s "$ARM_OUT/eval/$artifact"
+                done
+                "$PYTHON" - "$ARM_OUT/eval/summary.json" "$ARM_OUT/eval/generation_diagnostics.json" "$ARM_OUT/quality.json" <<'PY'
+              import json
+              import sys
+
+              summary = json.load(open(sys.argv[1]))
+              diagnostics = json.load(open(sys.argv[2]))
+              assert summary["stage_status"]["samples"]["status"] == "ok"
+              assert summary["stage_status"]["metrics"]["status"] == "ok"
+              metrics = summary["metrics"]
+              required = [f"{stem}_{jet}" for stem in ("fpnd", "fpd", "w1m", "w1p", "cov_mmd") for jet in ("g", "q", "t")]
+              assert all(key in metrics for key in required), (required, metrics.keys())
+              failures = int(diagnostics.get("n_failed", 0))
+              finite_extremes = int(metrics.get("n_generated_finite_max_abs_gt_1e6", 0))
+              quality = {
+                  "n_nonfinite": failures,
+                  "n_finite_max_abs_gt_1e6": finite_extremes,
+                  "qualified_for_ranking": failures == 0 and finite_extremes == 0,
+              }
+              with open(sys.argv[3], "w") as handle:
+                  json.dump(quality, handle, indent=2)
+              print("Arm metrics:", {key: metrics[key] for key in required})
+              print("Arm quality:", quality)
+              PY
+                POINTER_DIR="/mnt/data/output/run-pointers/gqt30-h-cfg-w64-d4-2x-sweep-a40"
+                mkdir -p "$POINTER_DIR"
+                printf '%s\n' "$ARM_OUT" > "$POINTER_DIR/$TAG.txt.tmp"
+                mv "$POINTER_DIR/$TAG.txt.tmp" "$POINTER_DIR/$TAG.txt"
+                echo "Completed $TAG"
+              done
+              echo "Completed all seven CFG arms"
+          volumeMounts: [{name: data, mountPath: /mnt/data}]
+          resources:
+            requests: {nvidia.com/a40: 1, cpu: "4", memory: 40Gi}
+            limits: {nvidia.com/a40: 1, cpu: "4", memory: 40Gi}
