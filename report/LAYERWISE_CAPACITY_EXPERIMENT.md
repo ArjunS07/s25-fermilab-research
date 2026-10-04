@@ -71,6 +71,7 @@ At 30 particles, the dense-layer estimates are:
 | width 96, depth 6 | 617,297 | 0.456024 | 1.000 |
 | width 96, depth 3 | 337,646 | 0.245450 | 0.538 |
 | width 64, depth 6 | 276,369 | 0.203492 | 0.446 |
+| width 64, depth 4 | 193,039 | 0.140869 | 0.309 |
 | width 64, depth 3 | 151,374 | 0.109558 | 0.240 |
 
 ## Width-64 training and evaluation
@@ -88,4 +89,3 @@ internal weights `0.125, 0.25, 0.375, 0.5, 0.75, 1.0`; together with the
 terminal `w=0` arm, this contains the current class-selected weights and a
 focused neighborhood around them. Select the weight independently by class
 only after all completed arms pass provenance and physicality checks.
-

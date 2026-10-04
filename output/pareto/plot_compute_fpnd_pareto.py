@@ -116,6 +116,15 @@ METHODS = {
             "t": 0.17438752767836263,
         },
     },
+    "JetFUEL w64/d4 / 64-step ($w=0$)": {
+        # Width-64/depth-4 double-exposure A40 checkpoint.  The exact dense
+        # model cost is 0.140868992 GFLOP/forward; training processed
+        # 497,000,448 examples.  Only the qualified/nominated gluon endpoint
+        # is plotted (50k jets, EMA, 64 steps, zero invalid samples).
+        "train": 210.035856400,
+        "infer": 9.015615488,
+        "fpnd": {"g": 0.2031151125036672},
+    },
 }
 
 # Source-level sampler accounting.  In PET/OmniLearn, the released w=0 path
@@ -136,13 +145,21 @@ SAMPLER_WORK = {
     "JetFUEL 128 / unguided ($w=0$)": "CFG-trained checkpoint, unguided inference: 128 evaluations",
     "JetFUEL 64 / optimal guidance": "class-optimal w=(0,0.25,0.5): 64 or 128 evaluations",
     "JetFUEL 128 / optimal measured guidance": "best completed w=(0,0,0.5): 128 or 256 evaluations",
+    "JetFUEL w64/d4 / 64-step ($w=0$)": "width-64/depth-4 checkpoint: 64 evaluations",
 }
 
 JETFUEL = {name for name in METHODS if name.startswith("JetFUEL")}
 TRAIN_GROUP = {
     "PC-JeDi DDIM": "PC-JeDi",
     "PC-JeDi EM": "PC-JeDi",
-    **{name: "JetFUEL" for name in JETFUEL},
+    **{
+        name: (
+            "JetFUEL w64 d4 checkpoint"
+            if name.startswith("JetFUEL w64/d4")
+            else "JetFUEL 96x6 checkpoint"
+        )
+        for name in JETFUEL
+    },
 }
 CLASSES = ("g", "q", "t")
 CLASS_TITLES = {"g": "Gluon ($g$)", "q": "Light quark ($q$)", "t": "Top ($t$)"}
@@ -165,6 +182,7 @@ STYLE = {
     "JetFUEL 128 / unguided ($w=0$)": ("#6F4E7C", "s"),
     "JetFUEL 64 / optimal guidance": ("#D45087", "o"),
     "JetFUEL 128 / optimal measured guidance": ("#D45087", "s"),
+    "JetFUEL w64/d4 / 64-step ($w=0$)": ("#E76F51", "X"),
 }
 
 
@@ -425,7 +443,7 @@ def make_plot(
 
     fig.legend(
         handles=handles, loc="lower center", ncol=5, frameon=False,
-        bbox_to_anchor=(0.5, 0.048), columnspacing=1.5, handletextpad=0.45,
+        bbox_to_anchor=(0.5, 0.102), columnspacing=1.5, handletextpad=0.45,
     )
     fig.suptitle(
         "JetNet-30 GPU-compute--quality Pareto comparison"
@@ -434,17 +452,17 @@ def make_plot(
     )
     fig.text(
         0.5, 0.012,
-        "Lower-left is better. GPU model FLOPs only; CPU preprocessing, metrics, I/O, and wall-clock time are excluded. "
-        "Conditional generation only; attribute/conditioning generators are excluded. "
-        "Training is the portfolio cost for all applicable g/q/t models: joint training is counted once and separate fits are summed. "
-        "The training row shows one point per checkpoint, using its best measured sampler for each class. "
-        rf"Lifecycle adds inference for $10^{{{exponent}}}$ total generated jets. "
-        "One GPU MAC = 2 FLOPs; FP32 and FP64 operations are not throughput-weighted. "
-        "Training totals use published/released maximum budgets where stopping epochs are unavailable. "
-        "JetFUEL guidance points use the lowest measured FPND separately by class; the 128-step $w=0.25$ arm is pending.",
-        ha="center", va="bottom", fontsize=8.2,
+        "Lower-left is better. GPU model FLOPs only; CPU preprocessing, metrics, I/O, and wall-clock time are excluded.\n"
+        "Conditional generation only; attribute/conditioning generators are excluded.\n"
+        "Training is the g/q/t portfolio cost: joint training is counted once and separate fits are summed. "
+        "The training row shows one point per checkpoint.\n"
+        rf"Lifecycle adds inference for $10^{{{exponent}}}$ generated jets. One GPU MAC = 2 FLOPs; operation precision is not throughput-weighted.\n"
+        "Training uses published/released maximum budgets where stopping epochs are unavailable. "
+        "JetFUEL guidance is selected separately by class.\n"
+        "The 128-step w=0.25 arm is pending; the w64/d4 ablation contributes only its nominated 64-step unguided gluon result.",
+        ha="center", va="bottom", fontsize=7.8,
     )
-    fig.subplots_adjust(left=0.07, right=0.985, top=0.945, bottom=0.145, hspace=0.32, wspace=0.16)
+    fig.subplots_adjust(left=0.07, right=0.985, top=0.945, bottom=0.235, hspace=0.32, wspace=0.16)
     stem = OUT / f"jetnet30_compute_fpnd_pareto_3x3_m1e{exponent}{filename_suffix}"
     fig.savefig(stem.with_suffix(".pdf"), bbox_inches="tight")
     fig.savefig(stem.with_suffix(".png"), dpi=240, bbox_inches="tight")

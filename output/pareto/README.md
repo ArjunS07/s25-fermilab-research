@@ -71,8 +71,10 @@ weights**, not one point per inference configuration. JetFUEL's 64/128-step and
 guided/unguided samples all use the same checkpoint, so this row displays the
 lowest measured FPND from that checkpoint for each class: 128/unguided for `g`
 and `q`, and 128/`w=0.5` for `t`. PC-JeDi's DDIM and EM samplers are likewise
-collapsed to its better EM result. The inference and lifecycle rows retain all
-sampler configurations because those choices change marginal deployment cost.
+collapsed to its better EM result. The independently trained width-64/depth-4
+checkpoint remains a separate training point. The inference and lifecycle rows
+retain all sampler configurations because those choices change marginal
+deployment cost.
 
 ## Model-level calculation ledger
 
@@ -90,6 +92,7 @@ epoch is unavailable.
 | OmniLearn | upstream pretraining plus JetNet fine-tuning | ≤109,536.216 PF | `600F_body + 1200F_head` | 111.726490 |
 | PC-JeDi | separate `g + t` fits: `2 × 59.592` PF | ≤119.184 PF | `200F` | 8.655360 |
 | JetFUEL | `994k optimizer steps × 250 jets × 3F` | 339.966 PF | see variants below | — |
+| JetFUEL w64/d4, 2× exposure | `497,000,448 jets × 3F_64x4` | 210.036 PF | `64F_64x4` | 9.015615 |
 
 The downstream-only OmniLearn fine-tuning estimate is 65.235 PF. The figure
 uses fully burdened pretraining; the alternative value is retained in
@@ -146,6 +149,13 @@ plus backward reports 1,369,987,598 recognized FLOPs, validating the
 approximately three-forward training multiplier. The profiler was used only to
 validate operation counts; no CPU execution time enters the plotted values.
 
+For the width-64/depth-4 H ablation, the same layerwise calculation gives
+70,434,496 MAC, or **0.140868992 GFLOP per forward pass**. Its 64-step unguided
+sampler therefore costs **9.015615488 GFLOP/jet**. With 497,000,448 processed
+examples and the same three-forward training convention, its training point is
+**210.035856400 PFLOP**. This is a separate double-exposure checkpoint, not an
+inference variant of the canonical width-96/depth-6 checkpoint.
+
 The run log contains 994,000 optimizer updates. The physical minibatch is 50
 and five minibatches are normally accumulated, giving a target effective batch
 of 250. End-of-epoch partial accumulation groups make the exact exposure count
@@ -159,6 +169,7 @@ than 0.05%.
 | 128 steps, unguided (`w=0`) | 128 | 58.371023 | 0.079720 | 0.154623 | 0.369262 |
 | 64 steps, class-optimal guidance | 64 (`g`); 128 (`q,t`) | 29.185511 (`g`); 58.371023 (`q,t`) | 0.141994 (`w=0`) | 0.213679 (`w=0.25`) | 0.201928 (`w=0.5`) |
 | 128 steps, best completed guidance | 128 (`g,q`); 256 (`t`) | 58.371023 (`g,q`); 116.742046 (`t`) | 0.079720 (`w=0`) | 0.154623 (`w=0`) | 0.174388 (`w=0.5`) |
+| w64/d4, 64 steps, unguided (`w=0`) | 64 | 9.015615 | 0.203115 | — | — |
 
 Guidance is selected independently by class, including `w=0` when every
 positive guidance weight is worse. The completed 64-step sweep gives
@@ -211,12 +222,15 @@ Below, each deployment cell is `inference PF / lifecycle PF`.
 | JetFUEL 64, optimal guidance (`q,t`) | 339.966 | 58.371023 | 58.371 / 398.337 | 583.710 / 923.676 | 5,837.102 / 6,177.068 |
 | JetFUEL 128, best completed guidance (`g,q`) | 339.966 | 58.371023 | 58.371 / 398.337 | 583.710 / 923.676 | 5,837.102 / 6,177.068 |
 | JetFUEL 128, best completed guidance (`t`) | 339.966 | 116.742046 | 116.742 / 456.708 | 1,167.420 / 1,507.386 | 11,674.205 / 12,014.170 |
+| JetFUEL w64/d4, 64-step unguided (`g` only) | 210.036 | 9.015615 | 9.016 / 219.051 | 90.156 / 300.192 | 901.562 / 1,111.597 |
 
-All JetFUEL rows share the same one-time 339.966 PF training run; their
-different entries are inference configurations, not separately trained models.
-The guidance rows use class-specific weights and therefore have class-specific
-marginal inference costs. Likewise, PC-JeDi DDIM and EM share the same training
-acquisition cost.
+The canonical JetFUEL rows share the same one-time 339.966 PF training run;
+their different entries are inference configurations, not separately trained
+models. The guidance rows use class-specific weights and therefore have
+class-specific marginal inference costs. The w64/d4 row is an independently
+trained 210.036 PF double-exposure checkpoint and is shown only for the supplied
+and verified gluon endpoint (`FPND-g = 0.203115`, 50k jets, zero invalid).
+Likewise, PC-JeDi DDIM and EM share the same training acquisition cost.
 
 ## Provenance
 
@@ -227,6 +241,9 @@ acquisition cost.
   `src/nrp/as-jet-train-gqt30-lorentznet-h-cfg-994k.yaml`.
 - JetFUEL 128-step no-CFG and `w=0.5`: completed outputs from
   `as-jet-eval-gqt994k-euler-cfg-ablations` on the shared NRP PVC.
+- JetFUEL w64/d4: `src/nrp/as-jet-train-gqt30-h-cfg-w64-d4-2x-a40.yaml`
+  and the terminal summary from NRP output
+  `2026-10-01_11-26-41--d4dcb812-a376-4541-ba2c-584ad0a75473-gqt30-h-cfg-w64-d4-b4096-497m-a40`.
 - JetFUEL architecture and training exposure: `src/models/lorentznet_flow.py`,
   the CFG training manifest, and the CFG evaluation `summary.json`, which
   embeds the source checkpoint's full training configuration.
